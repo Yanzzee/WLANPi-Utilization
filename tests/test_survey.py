@@ -31,6 +31,31 @@ Survey data from wlan0
     ]
 
 
+def test_parse_survey_dump_extracts_real_iw_channel_time_fields() -> None:
+    samples = parse_survey_dump(
+        """
+Survey data from wlan0
+        frequency:                      5955 MHz
+        channel active time:            2031631 ms
+        channel busy time:              4039 ms
+        channel receive time:           12 ms
+        channel transmit time:          3 ms
+""",
+        timestamp=456.0,
+    )
+
+    assert samples == [
+        SurveySample(
+            timestamp=456.0,
+            active_ms=2031631,
+            busy_ms=4039,
+            receive_ms=12,
+            transmit_ms=3,
+            noise_dbm=None,
+        )
+    ]
+
+
 def test_compute_local_cu_percent_uses_busy_over_active_delta() -> None:
     previous = SurveySample(1.0, 1000, 200, 100, 20, -95)
     current = SurveySample(2.0, 1500, 350, 200, 35, -94)

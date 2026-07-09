@@ -2,7 +2,7 @@
 set -euo pipefail
 
 IFACE="${1:-wlan1}"
-CHANNEL="${2:-36}"
+CHANNEL_OR_FREQ="${2:-36}"
 CAPTURE_SECONDS=15
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,6 +16,28 @@ SURVEY_BEFORE_OUT="${SAMPLES_DIR}/pi_survey_before.txt"
 SURVEY_AFTER_OUT="${SAMPLES_DIR}/pi_survey_after.txt"
 TMP_PCAP=""
 ORIGINAL_TYPE=""
+TUNE_MODE=""
+TUNE_VALUE=""
+TUNE_BAND=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/pi_smoke.sh [iface] [channel-or-frequency-mhz]
+
+Defaults:
+  iface: wlan1
+  channel-or-frequency-mhz: 36
+
+Examples:
+  ./scripts/pi_smoke.sh wlan0 6       # channel 6, normally 2.4 GHz
+  ./scripts/pi_smoke.sh wlan0 5180    # 5 GHz channel 36 by frequency
+  ./scripts/pi_smoke.sh wlan0 5955    # 6 GHz channel 1 by frequency
+
+Frequency in MHz is preferred for 5/6 GHz work because channel numbers can be
+ambiguous across bands. The capture is configured for 20 MHz width.
+EOF
+}
 
 die() {
   echo "error: $*" >&2
@@ -24,6 +46,42 @@ die() {
 
 available_wifi_interfaces() {
   iw dev | awk '/Interface/ {print $2}'
+}
+
+describe_frequency_band() {
+  local frequency_mhz="$1"
+
+  if ((frequency_mhz >= 2400 && frequency_mhz < 2500)); then
+    echo "2.4 GHz"
+  elif ((frequency_mhz >= 5000 && frequency_mhz < 5925)); then
+    echo "5 GHz"
+  elif ((frequency_mhz >= 5925 && frequency_mhz <= 7125)); then
+    echo "6 GHz"
+  else
+    echo "unknown band"
+  fi
+}
+
+configure_tune_target() {
+  local target="$1"
+
+  if [[ ! "${target}" =~ ^[0-9]+$ ]]; then
+    die "channel-or-frequency must be a positive integer, got '${target}'"
+  fi
+
+  if ((target <= 0)); then
+    die "channel-or-frequency must be greater than zero, got '${target}'"
+  fi
+
+  if ((target >= 1000)); then
+    TUNE_MODE="frequency"
+    TUNE_VALUE="${target}"
+    TUNE_BAND="$(describe_frequency_band "${target}")"
+  else
+    TUNE_MODE="channel"
+    TUNE_VALUE="${target}"
+    TUNE_BAND="band selected by driver/regulatory mapping"
+  fi
 }
 
 require_command() {
@@ -54,6 +112,13 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+configure_tune_target "${CHANNEL_OR_FREQ}"
 
 require_command uname
 require_command python3
@@ -96,17 +161,24 @@ if ! iw dev "${IFACE}" info >/dev/null 2>&1; then
   available_wifi_interfaces >&2 || true
   echo >&2
   echo "Rerun with one of those names, for example:" >&2
-  echo "  ./scripts/pi_smoke.sh wlan0 ${CHANNEL}" >&2
+  echo "  ./scripts/pi_smoke.sh wlan0 ${CHANNEL_OR_FREQ}" >&2
   exit 1
 fi
 
 ORIGINAL_TYPE="$(iw dev "${IFACE}" info | awk '/type/ {print $2; exit}')"
 
-echo "Configuring ${IFACE} for monitor capture on channel ${CHANNEL} HT20..."
+echo "Configuring ${IFACE} for monitor capture:"
+echo "  target: ${TUNE_MODE} ${TUNE_VALUE} (${TUNE_BAND})"
+echo "  width:  HT20"
 run_root ip link set "${IFACE}" down
 run_root iw dev "${IFACE}" set type monitor
 run_root ip link set "${IFACE}" up
-run_root iw dev "${IFACE}" set channel "${CHANNEL}" HT20
+if [[ "${TUNE_MODE}" == "frequency" ]]; then
+  run_root iw dev "${IFACE}" set freq "${TUNE_VALUE}" HT20
+else
+  run_root iw dev "${IFACE}" set channel "${TUNE_VALUE}" HT20
+  echo "Channel-only tuning may be ambiguous across bands; use MHz to disambiguate."
+fi
 
 echo "Saving survey snapshot before capture to ${SURVEY_BEFORE_OUT}"
 if ! run_root iw dev "${IFACE}" survey dump >"${SURVEY_BEFORE_OUT}" 2>&1; then

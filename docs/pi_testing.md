@@ -62,10 +62,11 @@ pytest
 
 ## Run the Smoke Capture
 
-The smoke script accepts an interface and channel:
+The smoke script accepts an interface plus either a channel number or a
+frequency in MHz:
 
 ```bash
-./scripts/pi_smoke.sh [iface] [channel]
+./scripts/pi_smoke.sh [iface] [channel-or-frequency-mhz]
 ```
 
 Defaults:
@@ -77,7 +78,20 @@ Defaults:
 The script assumes a 20 MHz channel width and configures the selected interface
 for monitor-mode capture on `HT20`.
 
-Example using channel 6 on `wlan1`:
+The three Wi-Fi bands should be supported when the adapter, driver, and local
+regulatory domain allow them:
+
+```bash
+./scripts/pi_smoke.sh wlan1 2412  # 2.4 GHz, channel 1
+./scripts/pi_smoke.sh wlan1 5180  # 5 GHz, channel 36
+./scripts/pi_smoke.sh wlan1 5955  # 6 GHz, channel 1
+```
+
+Frequency in MHz is preferred for 5 GHz and 6 GHz testing because channel
+numbers can be ambiguous across bands. For example, 5 GHz channel 149 is
+`5745 MHz`, while 6 GHz channel 149 is `6695 MHz`.
+
+Channel numbers still work for convenience:
 
 ```bash
 ./scripts/pi_smoke.sh wlan1 6
@@ -86,7 +100,7 @@ Example using channel 6 on `wlan1`:
 If `iw dev` only shows `wlan0`, use that interface instead:
 
 ```bash
-./scripts/pi_smoke.sh wlan0 36
+./scripts/pi_smoke.sh wlan0 5180
 ```
 
 The script writes:

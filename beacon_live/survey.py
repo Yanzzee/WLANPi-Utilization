@@ -10,10 +10,14 @@ from beacon_live.models import SurveySample
 
 _SURVEY_HEADER_RE = re.compile(r"^\s*Survey data from\b")
 _FIELD_PATTERNS = {
-    "active_ms": re.compile(r"^\s*time:\s*(\d+)\s*ms\b"),
-    "busy_ms": re.compile(r"^\s*time busy:\s*(\d+)\s*ms\b"),
-    "receive_ms": re.compile(r"^\s*time receive:\s*(\d+)\s*ms\b"),
-    "transmit_ms": re.compile(r"^\s*time transmit:\s*(\d+)\s*ms\b"),
+    "active_ms": re.compile(r"^\s*(?:channel active time|time):\s*(\d+)\s*ms\b"),
+    "busy_ms": re.compile(r"^\s*(?:channel busy time|time busy):\s*(\d+)\s*ms\b"),
+    "receive_ms": re.compile(
+        r"^\s*(?:channel receive time|time receive):\s*(\d+)\s*ms\b"
+    ),
+    "transmit_ms": re.compile(
+        r"^\s*(?:channel transmit time|time transmit):\s*(\d+)\s*ms\b"
+    ),
     "noise_dbm": re.compile(r"^\s*noise:\s*(-?\d+)\s*dBm\b"),
 }
 
