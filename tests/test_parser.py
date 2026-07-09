@@ -1,0 +1,44 @@
+import pytest
+
+from beacon_live.parser import parse_tshark_row
+
+
+def test_parse_valid_qbss_row_converts_cu_to_percent() -> None:
+    record = parse_tshark_row(
+        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\t12\t42"
+    )
+
+    assert record is not None
+    assert record.timestamp == 1700000000.125
+    assert record.ssid == "LabNet"
+    assert record.bssid == "aa:bb:cc:dd:ee:ff"
+    assert record.qbss_cu_raw == 128
+    assert record.qbss_cu_percent == pytest.approx(128 / 255 * 100)
+    assert record.qbss_station_count == 12
+    assert record.qbss_admission_capacity == 42
+
+
+def test_parse_empty_ssid_and_qbss_fields_as_none() -> None:
+    record = parse_tshark_row("1700000000.125\t\taa:bb:cc:dd:ee:ff\t\t\t")
+
+    assert record is not None
+    assert record.ssid is None
+    assert record.qbss_cu_raw is None
+    assert record.qbss_cu_percent is None
+    assert record.qbss_station_count is None
+    assert record.qbss_admission_capacity is None
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "",
+        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff",
+        "not-a-time\tLabNet\taa:bb:cc:dd:ee:ff\t128\t12\t42",
+        "1700000000.125\tLabNet\t\t128\t12\t42",
+        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t300\t12\t42",
+        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\tbad\t42",
+    ],
+)
+def test_parse_malformed_rows_return_none(row: str) -> None:
+    assert parse_tshark_row(row) is None

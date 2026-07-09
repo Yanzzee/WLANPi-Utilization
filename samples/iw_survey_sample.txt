@@ -1,0 +1,16 @@
+Survey data from wlan0
+        in use
+        channel 6 (2437 MHz), width: 20 MHz, center1: 2437 MHz
+        time: 1000 ms
+        time busy: 250 ms
+        time receive: 125 ms
+        time transmit: 50 ms
+        noise: -94 dBm
+
+Survey data from wlan0
+        channel 11 (2462 MHz), width: 20 MHz, center1: 2462 MHz
+        time: 1500 ms
+        time busy: 300 ms
+        time receive: 150 ms
+        time transmit: 60 ms
+        noise: -96 dBm
