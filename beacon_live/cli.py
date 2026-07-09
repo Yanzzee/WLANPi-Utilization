@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Optional, Sequence
 
 from beacon_live.aggregator import Aggregator
 from beacon_live.models import SecondStats
 from beacon_live.parser import parse_tshark_row
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -102,7 +102,7 @@ def _format_stats(stats: SecondStats) -> str:
     )
 
 
-def _format_optional_float(value: float | None) -> str:
+def _format_optional_float(value: Optional[float]) -> str:
     return "" if value is None else f"{value:.2f}"
 
 

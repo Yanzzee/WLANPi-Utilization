@@ -1,4 +1,5 @@
 import pytest
+from typing import Optional
 
 from beacon_live.aggregator import Aggregator, aggregate_records
 from beacon_live.models import BeaconRecord
@@ -50,10 +51,10 @@ def test_aggregate_records_returns_none_qbss_stats_when_no_cu_present() -> None:
 
 def _record(
     timestamp: float,
-    ssid: str | None,
+    ssid: Optional[str],
     bssid: str,
-    qbss_cu_percent: float | None,
-    station_count: int | None,
+    qbss_cu_percent: Optional[float],
+    station_count: Optional[int],
 ) -> BeaconRecord:
     return BeaconRecord(
         timestamp=timestamp,

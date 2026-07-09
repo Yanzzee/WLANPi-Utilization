@@ -20,10 +20,6 @@ check_command tshark
 check_command dumpcap
 check_command git
 
-if ! python3 -m pip --version >/dev/null 2>&1; then
-  missing+=("pip")
-fi
-
 if ((${#missing[@]} > 0)); then
   echo "Missing required command(s): ${missing[*]}"
   echo
@@ -35,17 +31,6 @@ if ((${#missing[@]} > 0)); then
   exit 1
 fi
 
-python3 - <<'PY'
-import sys
-
-if sys.version_info < (3, 11):
-    raise SystemExit(
-        f"Python 3.11+ is required; found {sys.version.split()[0]}"
-    )
-PY
-
-cd "${REPO_ROOT}"
-
 if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   PYTHON_BIN="${VIRTUAL_ENV}/bin/python"
   echo "Using active virtual environment: ${VIRTUAL_ENV}"
@@ -53,6 +38,26 @@ else
   PYTHON_BIN="python3"
   echo "No active virtual environment detected; using python3."
 fi
+
+if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+  echo "Missing pip for ${PYTHON_BIN}."
+  echo
+  echo "On Raspberry Pi OS or Debian, install pip manually, for example:"
+  echo "  sudo apt update"
+  echo "  sudo apt install python3-pip python3-venv"
+  exit 1
+fi
+
+"${PYTHON_BIN}" - <<'PY'
+import sys
+
+if sys.version_info < (3, 9):
+    raise SystemExit(
+        f"Python 3.9+ is required; found {sys.version.split()[0]}"
+    )
+PY
+
+cd "${REPO_ROOT}"
 
 echo "Installing local package in editable mode with dev dependencies..."
 "${PYTHON_BIN}" -m pip install -e ".[dev]"

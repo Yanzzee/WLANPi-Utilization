@@ -7,7 +7,7 @@ name = "wlanpi-beacon-live"
 version = "0.1.0"
 description = "CLI tools for replaying WLAN beacon QBSS channel utilization samples."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 authors = [
   { name = "WLANPi Beacon Live contributors" }
 ]
@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8"
+  "pytest>=7.4,<9"
 ]
 
 [project.scripts]

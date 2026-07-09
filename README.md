@@ -2,6 +2,8 @@
 
 Python CLI scaffolding for replaying WLAN beacon QBSS channel utilization data.
 
+Requires Python 3.9 or newer.
+
 This first step is intentionally hardware-free: it parses saved TShark TSV rows
 and saved `iw dev <iface> survey dump` text, then aggregates beacon records into
 per-second stats. Live capture, sudo use, TShark subprocesses, and `iw`

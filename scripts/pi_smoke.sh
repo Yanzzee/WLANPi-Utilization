@@ -22,6 +22,10 @@ die() {
   exit 1
 }
 
+available_wifi_interfaces() {
+  iw dev | awk '/Interface/ {print $2}'
+}
+
 require_command() {
   local command_name="$1"
 
@@ -81,13 +85,19 @@ echo "==============="
 iw dev
 echo
 
-if ! iw dev "${IFACE}" info >/dev/null 2>&1; then
-  die "interface ${IFACE} was not found by iw dev"
-fi
-
 echo "Saving adapter capabilities to ${PHY_OUT}"
 if ! iw phy >"${PHY_OUT}" 2>&1; then
   echo "warning: iw phy failed; see ${PHY_OUT}" >&2
+fi
+
+if ! iw dev "${IFACE}" info >/dev/null 2>&1; then
+  echo "error: interface ${IFACE} was not found by iw dev" >&2
+  echo "Available Wi-Fi interface(s):" >&2
+  available_wifi_interfaces >&2 || true
+  echo >&2
+  echo "Rerun with one of those names, for example:" >&2
+  echo "  ./scripts/pi_smoke.sh wlan0 ${CHANNEL}" >&2
+  exit 1
 fi
 
 ORIGINAL_TYPE="$(iw dev "${IFACE}" info | awk '/type/ {print $2; exit}')"

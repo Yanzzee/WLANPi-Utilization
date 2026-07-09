@@ -1,7 +1,7 @@
 """Per-second aggregation for parsed beacon records."""
 
-from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Iterable, Optional, Tuple
 
 from beacon_live.models import BeaconRecord, SecondStats
 
@@ -11,10 +11,10 @@ class Aggregator:
 
     def __init__(self) -> None:
         self._buckets: dict[int, _SecondBucket] = {}
-        self._latest_second: int | None = None
-        self._local_cu_by_second: dict[int, float | None] = {}
+        self._latest_second: Optional[int] = None
+        self._local_cu_by_second: dict[int, Optional[float]] = {}
 
-    def set_local_cu_percent(self, second: int, percent: float | None) -> None:
+    def set_local_cu_percent(self, second: int, percent: Optional[float]) -> None:
         self._local_cu_by_second[second] = percent
 
     def add(self, record: BeaconRecord) -> list[SecondStats]:
@@ -64,7 +64,7 @@ class Aggregator:
 def aggregate_records(
     records: Iterable[BeaconRecord],
     *,
-    local_cu_by_second: dict[int, float | None] | None = None,
+    local_cu_by_second: Optional[dict[int, Optional[float]]] = None,
 ) -> list[SecondStats]:
     """Aggregate a finite iterable of records into sorted per-second stats."""
     aggregator = Aggregator()
@@ -78,10 +78,10 @@ def aggregate_records(
     return stats
 
 
-@dataclass(slots=True)
+@dataclass
 class _SecondBucket:
     records: list[BeaconRecord] = field(default_factory=list)
-    latest_station_by_bssid: dict[str, tuple[float, int | None]] = field(
+    latest_station_by_bssid: dict[str, Tuple[float, Optional[int]]] = field(
         default_factory=dict
     )
 
@@ -98,7 +98,7 @@ class _SecondBucket:
 def _build_stats(
     second: int,
     bucket: _SecondBucket,
-    local_cu_percent: float | None,
+    local_cu_percent: Optional[float],
 ) -> SecondStats:
     bssids = {record.bssid for record in bucket.records}
     station_count_sum = sum(

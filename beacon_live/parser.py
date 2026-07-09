@@ -1,6 +1,6 @@
 """Parsing helpers for saved TShark beacon output."""
 
-from collections.abc import Iterable, Iterator
+from typing import Iterable, Iterator, Optional, Union
 
 from beacon_live.models import BeaconRecord
 
@@ -16,7 +16,7 @@ TSHARK_FIELD_NAMES = (
 EXPECTED_TSHARK_FIELD_COUNT = len(TSHARK_FIELD_NAMES)
 
 
-def parse_tshark_row(row: str) -> BeaconRecord | None:
+def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
     """Parse one tab-separated TShark beacon row.
 
     Returns None when the row is malformed. Empty SSID and QBSS fields are
@@ -86,9 +86,9 @@ _MALFORMED = _Malformed()
 def _parse_optional_int(
     value: str,
     *,
-    minimum: int | None = None,
-    maximum: int | None = None,
-) -> int | None | _Malformed:
+    minimum: Optional[int] = None,
+    maximum: Optional[int] = None,
+) -> Union[int, None, _Malformed]:
     text = value.strip()
     if text == "":
         return None

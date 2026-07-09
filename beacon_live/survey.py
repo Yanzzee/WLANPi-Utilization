@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Iterable
+from typing import Optional
 
 from beacon_live.models import SurveySample
 
@@ -18,11 +18,15 @@ _FIELD_PATTERNS = {
 }
 
 
-def parse_survey_dump(text: str, *, timestamp: float | None = None) -> list[SurveySample]:
+def parse_survey_dump(
+    text: str,
+    *,
+    timestamp: Optional[float] = None,
+) -> list[SurveySample]:
     """Parse saved survey dump text into one or more survey samples."""
     sample_timestamp = time.time() if timestamp is None else timestamp
     samples: list[SurveySample] = []
-    current: dict[str, int | None] | None = None
+    current: Optional[dict[str, Optional[int]]] = None
 
     for line in text.splitlines():
         if _SURVEY_HEADER_RE.match(line):
@@ -46,7 +50,11 @@ def parse_survey_dump(text: str, *, timestamp: float | None = None) -> list[Surv
     return samples
 
 
-def parse_survey_text(text: str, *, timestamp: float | None = None) -> list[SurveySample]:
+def parse_survey_text(
+    text: str,
+    *,
+    timestamp: Optional[float] = None,
+) -> list[SurveySample]:
     """Alias for callers that prefer a generic text-oriented name."""
     return parse_survey_dump(text, timestamp=timestamp)
 
@@ -54,7 +62,7 @@ def parse_survey_text(text: str, *, timestamp: float | None = None) -> list[Surv
 def compute_local_cu_percent(
     previous: SurveySample,
     current: SurveySample,
-) -> float | None:
+) -> Optional[float]:
     """Compute local channel utilization from two survey counter samples."""
     if (
         previous.active_ms is None
@@ -73,7 +81,7 @@ def compute_local_cu_percent(
     return busy_delta / active_delta * 100
 
 
-def _empty_fields() -> dict[str, int | None]:
+def _empty_fields() -> dict[str, Optional[int]]:
     return {
         "active_ms": None,
         "busy_ms": None,
@@ -86,7 +94,7 @@ def _empty_fields() -> dict[str, int | None]:
 def _append_sample(
     samples: list[SurveySample],
     timestamp: float,
-    fields: dict[str, int | None],
+    fields: dict[str, Optional[int]],
 ) -> None:
     if any(value is not None for value in fields.values()):
         samples.append(

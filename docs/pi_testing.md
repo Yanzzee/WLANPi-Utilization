@@ -34,6 +34,8 @@ If you already have a virtual environment for this repo, activate that one
 before running setup. `scripts/pi_setup.sh` uses the active virtual environment
 when `VIRTUAL_ENV` is set; otherwise it falls back to `python3 -m pip`.
 
+The project supports Python 3.9 or newer.
+
 ## Run Setup Checks
 
 ```bash
@@ -79,6 +81,12 @@ Example using channel 6 on `wlan1`:
 
 ```bash
 ./scripts/pi_smoke.sh wlan1 6
+```
+
+If `iw dev` only shows `wlan0`, use that interface instead:
+
+```bash
+./scripts/pi_smoke.sh wlan0 36
 ```
 
 The script writes:
