@@ -75,3 +75,5 @@ echo "  ${PYTHON_BIN} -m beacon_live.cli replay --input samples/tshark_qbss_samp
 echo
 echo "For live mode with sudo, use:"
 echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --channel 36"
+echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975"
+echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --band 6 --channel 5"

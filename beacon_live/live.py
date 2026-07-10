@@ -28,6 +28,8 @@ TSHARK_BEACON_FIELDS = [
     "wlan.qbss.adc",
 ]
 
+SUPPORTED_BANDS = {"2.4", "5", "6"}
+
 
 @dataclass(frozen=True)
 class LiveCommandError(Exception):
@@ -40,12 +42,88 @@ class LiveCommandError(Exception):
         return " ".join(self.command)
 
 
-def build_monitor_setup_commands(iface: str, channel: str) -> list[list[str]]:
+def channel_to_frequency_mhz(channel: str, band: str) -> int:
+    try:
+        channel_number = int(channel)
+    except ValueError as exc:
+        raise ValueError(f"channel must be an integer, got {channel!r}") from exc
+
+    if channel_number <= 0:
+        raise ValueError(f"channel must be greater than zero, got {channel!r}")
+
+    if band == "2.4":
+        if channel_number == 14:
+            return 2484
+        if 1 <= channel_number <= 13:
+            return 2407 + (channel_number * 5)
+        raise ValueError("2.4 GHz channel must be in the range 1-14")
+
+    if band == "5":
+        frequency_mhz = 5000 + (channel_number * 5)
+        if 5000 < frequency_mhz < 5925:
+            return frequency_mhz
+        raise ValueError(
+            f"5 GHz channel {channel_number} maps outside the 5 GHz band"
+        )
+
+    if band == "6":
+        frequency_mhz = 5950 + (channel_number * 5)
+        if 5925 <= frequency_mhz <= 7125:
+            return frequency_mhz
+        raise ValueError(
+            f"6 GHz channel {channel_number} maps outside the 6 GHz band"
+        )
+
+    raise ValueError(
+        f"band must be one of {', '.join(sorted(SUPPORTED_BANDS))}, got {band!r}"
+    )
+
+
+def build_tune_command(
+    iface: str,
+    channel: str,
+    *,
+    frequency_mhz: Optional[int] = None,
+    band: Optional[str] = None,
+) -> list[str]:
+    if frequency_mhz is not None:
+        if frequency_mhz <= 0:
+            raise ValueError(
+                f"frequency_mhz must be greater than zero, got {frequency_mhz}"
+            )
+        return ["iw", "dev", iface, "set", "freq", str(frequency_mhz), "HT20"]
+
+    if band is not None:
+        return [
+            "iw",
+            "dev",
+            iface,
+            "set",
+            "freq",
+            str(channel_to_frequency_mhz(channel, band)),
+            "HT20",
+        ]
+
+    return ["iw", "dev", iface, "set", "channel", channel, "HT20"]
+
+
+def build_monitor_setup_commands(
+    iface: str,
+    channel: str,
+    *,
+    frequency_mhz: Optional[int] = None,
+    band: Optional[str] = None,
+) -> list[list[str]]:
     return [
         ["ip", "link", "set", iface, "down"],
         ["iw", "dev", iface, "set", "type", "monitor"],
         ["ip", "link", "set", iface, "up"],
-        ["iw", "dev", iface, "set", "channel", channel, "HT20"],
+        build_tune_command(
+            iface,
+            channel,
+            frequency_mhz=frequency_mhz,
+            band=band,
+        ),
     ]
 
 
@@ -92,9 +170,16 @@ def configure_monitor_interface(
     iface: str,
     channel: str,
     *,
+    frequency_mhz: Optional[int] = None,
+    band: Optional[str] = None,
     command_runner: Callable[[list[str]], None] = run_checked_command,
 ) -> None:
-    for command in build_monitor_setup_commands(iface, channel):
+    for command in build_monitor_setup_commands(
+        iface,
+        channel,
+        frequency_mhz=frequency_mhz,
+        band=band,
+    ):
         command_runner(command)
 
 
@@ -153,9 +238,16 @@ def run_live(
     *,
     iface: str = "wlan0",
     channel: str = "36",
+    frequency_mhz: Optional[int] = None,
+    band: Optional[str] = None,
     interval_seconds: float = 1.0,
 ) -> int:
-    configure_monitor_interface(iface, channel)
+    configure_monitor_interface(
+        iface,
+        channel,
+        frequency_mhz=frequency_mhz,
+        band=band,
+    )
     process = start_tshark_process(iface)
     selector = selectors.DefaultSelector()
     aggregator = Aggregator()

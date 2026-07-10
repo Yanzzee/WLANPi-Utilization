@@ -27,6 +27,8 @@ pytest
 beacon-live --help
 beacon-live replay --input samples/tshark_qbss_sample.tsv
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
 ```
 
 The replay command prints tab-separated per-second stats from a saved TShark
@@ -42,7 +44,9 @@ QBSS channel utilization is converted from raw `0-255` values to percent with:
 raw / 255 * 100
 ```
 
-The live command configures the selected interface for monitor mode, tunes the
-channel as HT20, starts TShark, polls `iw dev <iface> survey dump` once per
-second, and prints terminal stats. AP-reported QBSS CU and local survey CU are
-kept as separate metrics.
+The live command configures the selected interface for monitor mode, tunes with
+20 MHz width, starts TShark, polls `iw dev <iface> survey dump` once per second,
+and prints terminal stats. Use `--channel` for channel numbers and
+`--frequency-mhz` for explicit center frequency. For 6 GHz PSC channel 5, use
+either `--frequency-mhz 5975` or `--band 6 --channel 5`. AP-reported QBSS CU and
+local survey CU are kept as separate metrics.

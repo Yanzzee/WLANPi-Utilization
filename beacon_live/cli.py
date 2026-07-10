@@ -18,6 +18,7 @@ from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
 from beacon_live.parser import parse_tshark_row
 from beacon_live.live import LiveCommandError
+from beacon_live.live import SUPPORTED_BANDS
 from beacon_live.live import run_live
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
@@ -48,12 +49,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "live":
         if args.interval_seconds <= 0:
             parser.error("live --interval-seconds must be greater than zero")
+        if args.frequency_mhz is not None and args.band is not None:
+            parser.error("live accepts --frequency-mhz or --band/--channel, not both")
         try:
             return run_live(
                 iface=args.iface,
                 channel=args.channel,
+                frequency_mhz=args.frequency_mhz,
+                band=args.band,
                 interval_seconds=args.interval_seconds,
             )
+        except ValueError as exc:
+            parser.error(f"live {exc}")
         except LiveCommandError as exc:
             print(f"Command failed: {exc.command_text}", file=sys.stderr)
             if exc.returncode is not None:
@@ -130,7 +137,22 @@ def _build_parser() -> argparse.ArgumentParser:
     live.add_argument(
         "--channel",
         default="36",
-        help="Channel to tune with HT20. Default: 36.",
+        help="Channel number to tune with HT20. Default: 36.",
+    )
+    live.add_argument(
+        "--frequency-mhz",
+        required=False,
+        type=int,
+        help="Explicit center frequency in MHz, for example 5975 for 6 GHz PSC channel 5.",
+    )
+    live.add_argument(
+        "--band",
+        required=False,
+        choices=sorted(SUPPORTED_BANDS),
+        help=(
+            "Band used to map --channel to frequency. Use 6 with --channel 5 "
+            "for 5975 MHz."
+        ),
     )
     live.add_argument(
         "--interval-seconds",

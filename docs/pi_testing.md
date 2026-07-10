@@ -173,7 +173,7 @@ beacon-live replay \
   --stats-csv logs/stats.csv \
   --beacons-jsonl logs/beacons.jsonl \
   --interface wlan0 \
-  --channel 5975
+  --channel 5
 ```
 
 The log directory is created automatically. Stats CSV rows are flushed after
@@ -183,7 +183,7 @@ include interface, channel, 20 MHz width, and replay start-time metadata.
 ## Run Minimal Live Mode
 
 Live mode is terminal-only for now. It configures the selected interface for
-monitor mode, tunes the channel with `HT20`, starts line-buffered TShark, polls
+monitor mode, tunes with 20 MHz width, starts line-buffered TShark, polls
 `iw dev <iface> survey dump` once per second, and prints one readable stats line
 per second.
 
@@ -194,6 +194,23 @@ problem caused by `sudo` using a different `PATH`.
 ```bash
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 ```
+
+Use `--channel` for channel numbers. Use `--frequency-mhz` when you want to
+tune by explicit center frequency:
+
+```bash
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
+```
+
+For 6 GHz channel notation, pass the band so the channel can be mapped to the
+right frequency. 6 GHz channel 5 is a PSC and maps to `5975 MHz`:
+
+```bash
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
+```
+
+Do not pass a frequency to `--channel`; `--channel 5975` asks `iw` for channel
+number 5975 and the kernel will reject it as an unknown channel.
 
 Defaults are:
 

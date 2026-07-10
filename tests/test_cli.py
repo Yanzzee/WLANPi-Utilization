@@ -1,6 +1,7 @@
 import csv
 import json
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -183,11 +184,20 @@ def test_replay_writes_stats_csv_and_beacon_jsonl_logs(
 def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
-    def fake_run_live(*, iface: str, channel: str, interval_seconds: float) -> int:
+    def fake_run_live(
+        *,
+        iface: str,
+        channel: str,
+        frequency_mhz: Optional[int],
+        band: Optional[str],
+        interval_seconds: float,
+    ) -> int:
         calls.append(
             {
                 "iface": iface,
                 "channel": channel,
+                "frequency_mhz": frequency_mhz,
+                "band": band,
                 "interval_seconds": interval_seconds,
             }
         )
@@ -200,9 +210,95 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         {
             "iface": "wlan0",
             "channel": "36",
+            "frequency_mhz": None,
+            "band": None,
             "interval_seconds": 1.0,
         }
     ]
+
+
+def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(
+        *,
+        iface: str,
+        channel: str,
+        frequency_mhz: Optional[int],
+        band: Optional[str],
+        interval_seconds: float,
+    ) -> int:
+        calls.append(
+            {
+                "iface": iface,
+                "channel": channel,
+                "frequency_mhz": frequency_mhz,
+                "band": band,
+                "interval_seconds": interval_seconds,
+            }
+        )
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live", "--iface", "wlan0", "--frequency-mhz", "5975"]) == 0
+    assert calls == [
+        {
+            "iface": "wlan0",
+            "channel": "36",
+            "frequency_mhz": 5975,
+            "band": None,
+            "interval_seconds": 1.0,
+        }
+    ]
+
+
+def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(
+        *,
+        iface: str,
+        channel: str,
+        frequency_mhz: Optional[int],
+        band: Optional[str],
+        interval_seconds: float,
+    ) -> int:
+        calls.append(
+            {
+                "iface": iface,
+                "channel": channel,
+                "frequency_mhz": frequency_mhz,
+                "band": band,
+                "interval_seconds": interval_seconds,
+            }
+        )
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live", "--iface", "wlan0", "--band", "6", "--channel", "5"]) == 0
+    assert calls == [
+        {
+            "iface": "wlan0",
+            "channel": "5",
+            "frequency_mhz": None,
+            "band": "6",
+            "interval_seconds": 1.0,
+        }
+    ]
+
+
+def test_live_rejects_frequency_and_band_together(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["live", "--frequency-mhz", "5975", "--band", "6"])
+
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "live accepts --frequency-mhz or --band/--channel" in captured.err
 
 
 def test_live_reports_setup_failure(
@@ -211,7 +307,14 @@ def test_live_reports_setup_failure(
 ) -> None:
     failed_command = ["iw", "dev", "wlan0", "set", "channel", "36", "HT20"]
 
-    def fake_run_live(*, iface: str, channel: str, interval_seconds: float) -> int:
+    def fake_run_live(
+        *,
+        iface: str,
+        channel: str,
+        frequency_mhz: Optional[int],
+        band: Optional[str],
+        interval_seconds: float,
+    ) -> int:
         raise LiveCommandError(
             failed_command,
             returncode=1,

@@ -4,6 +4,7 @@ from beacon_live.live import LiveCommandError
 from beacon_live.live import build_monitor_setup_commands
 from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
+from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 
 
@@ -14,6 +15,34 @@ def test_build_monitor_setup_commands_uses_ht20_channel() -> None:
         ["ip", "link", "set", "wlan0", "up"],
         ["iw", "dev", "wlan0", "set", "channel", "36", "HT20"],
     ]
+
+
+def test_build_monitor_setup_commands_can_use_explicit_frequency() -> None:
+    assert build_monitor_setup_commands("wlan0", "36", frequency_mhz=5975) == [
+        ["ip", "link", "set", "wlan0", "down"],
+        ["iw", "dev", "wlan0", "set", "type", "monitor"],
+        ["ip", "link", "set", "wlan0", "up"],
+        ["iw", "dev", "wlan0", "set", "freq", "5975", "HT20"],
+    ]
+
+
+def test_build_monitor_setup_commands_maps_6ghz_channel_to_frequency() -> None:
+    assert build_monitor_setup_commands("wlan0", "5", band="6") == [
+        ["ip", "link", "set", "wlan0", "down"],
+        ["iw", "dev", "wlan0", "set", "type", "monitor"],
+        ["ip", "link", "set", "wlan0", "up"],
+        ["iw", "dev", "wlan0", "set", "freq", "5975", "HT20"],
+    ]
+
+
+def test_channel_to_frequency_mhz_disambiguates_5_and_6_ghz_channels() -> None:
+    assert channel_to_frequency_mhz("149", "5") == 5745
+    assert channel_to_frequency_mhz("149", "6") == 6695
+
+
+def test_channel_to_frequency_mhz_supports_24_ghz_channels() -> None:
+    assert channel_to_frequency_mhz("1", "2.4") == 2412
+    assert channel_to_frequency_mhz("14", "2.4") == 2484
 
 
 def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:
