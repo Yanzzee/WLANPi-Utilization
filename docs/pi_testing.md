@@ -163,11 +163,29 @@ The older replay option still works for simple beacon TSV files:
 beacon-live replay --input samples/tshark_qbss_sample.tsv
 ```
 
+To save replay output for later review, add stats CSV and raw beacon JSONL logs:
+
+```bash
+beacon-live replay \
+  --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
+  --survey-before samples/pi_survey_before.txt \
+  --survey-after samples/pi_survey_after.txt \
+  --stats-csv logs/stats.csv \
+  --beacons-jsonl logs/beacons.jsonl \
+  --interface wlan0 \
+  --channel 5975
+```
+
+The log directory is created automatically. Stats CSV rows are flushed after
+each per-second record, and beacon JSONL is flushed line by line. Log rows
+include interface, channel, 20 MHz width, and replay start-time metadata.
+
 ## What to Commit
 
 Do not commit generated `samples/pi_*` files or `debug/pi_debug_*.tar.gz`
-bundles by default. They can include real SSIDs, BSSIDs, client MAC addresses,
-interface addresses, kernel logs, and local environment details.
+bundles by default. Do not commit generated `logs/` output by default either.
+They can include real SSIDs, BSSIDs, client MAC addresses, interface addresses,
+kernel logs, and local environment details.
 
 The repo ignores those generated files. If a hardware capture is useful as a
 regression fixture, create a small sanitized sample with a descriptive name that

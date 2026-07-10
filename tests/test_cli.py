@@ -1,3 +1,5 @@
+import csv
+import json
 from pathlib import Path
 
 import pytest
@@ -107,3 +109,71 @@ def test_replay_keeps_legacy_input_option(
     assert "valid_beacon_rows: 1" in captured.out
     assert "local_survey_cu_percent: " in captured.out
     assert captured.err == ""
+
+
+def test_replay_writes_stats_csv_and_beacon_jsonl_logs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    beacons_tsv = tmp_path / "beacons.tsv"
+    stats_csv = tmp_path / "logs" / "nested" / "stats.csv"
+    beacons_jsonl = tmp_path / "logs" / "nested" / "beacons.jsonl"
+
+    beacons_tsv.write_text(
+        "\n".join(
+            [
+                "1000.100\tAlpha\taa:aa:aa:aa:aa:aa\t128\t2\t0",
+                "1000.900\tBravo\tbb:bb:bb:bb:bb:bb\t64\t3\t0",
+                "malformed",
+                "1001.100\tAlpha\taa:aa:aa:aa:aa:aa\t32\t4\t0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "replay",
+            "--beacons-tsv",
+            str(beacons_tsv),
+            "--stats-csv",
+            str(stats_csv),
+            "--beacons-jsonl",
+            str(beacons_jsonl),
+            "--interface",
+            "wlan9",
+            "--channel",
+            "5975",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Warning: skipped malformed beacon rows: 1" in captured.err
+    assert stats_csv.exists()
+    assert beacons_jsonl.exists()
+
+    with stats_csv.open("r", encoding="utf-8", newline="") as stats_file:
+        stats_rows = list(csv.DictReader(stats_file))
+
+    assert len(stats_rows) == 2
+    assert stats_rows[0]["interface"] == "wlan9"
+    assert stats_rows[0]["channel"] == "5975"
+    assert stats_rows[0]["channel_width_mhz"] == "20"
+    assert stats_rows[0]["second"] == "1000"
+    assert stats_rows[0]["unique_bssid_count"] == "2"
+    assert stats_rows[0]["top_qbss_cu_ssid"] == "Alpha"
+    assert stats_rows[1]["second"] == "1001"
+
+    beacon_lines = beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    beacon_records = [json.loads(line) for line in beacon_lines]
+
+    assert len(beacon_records) == 3
+    assert {record["record_type"] for record in beacon_records} == {"beacon"}
+    assert {record["interface"] for record in beacon_records} == {"wlan9"}
+    assert {record["channel"] for record in beacon_records} == {"5975"}
+    assert {record["channel_width_mhz"] for record in beacon_records} == {20}
+    assert beacon_records[0]["ssid"] == "Alpha"
+    assert beacon_records[0]["qbss_cu_raw"] == 128

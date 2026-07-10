@@ -221,5 +221,8 @@ __marimo__/
 samples/pi_*.tsv
 samples/pi_*.txt
 
+# Local replay/live logs
+logs/
+
 # Local Pi smoke-test debug bundles
 debug/

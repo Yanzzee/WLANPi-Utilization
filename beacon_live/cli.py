@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import sys
+from dataclasses import asdict
 from dataclasses import dataclass
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -28,7 +33,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         beacons_tsv = args.beacons_tsv or args.input
         if beacons_tsv is None:
             parser.error("replay requires --beacons-tsv or --input")
-        return _run_replay(beacons_tsv, args.survey_before, args.survey_after)
+        return _run_replay(
+            beacons_tsv,
+            args.survey_before,
+            args.survey_after,
+            stats_csv=args.stats_csv,
+            beacons_jsonl=args.beacons_jsonl,
+            interface=args.interface,
+            channel=args.channel,
+        )
 
     parser.print_help()
     return 0
@@ -66,6 +79,28 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Path to iw survey dump captured after replay input.",
     )
+    replay.add_argument(
+        "--stats-csv",
+        required=False,
+        type=Path,
+        help="Write per-second stats CSV to this path, for example logs/stats.csv.",
+    )
+    replay.add_argument(
+        "--beacons-jsonl",
+        required=False,
+        type=Path,
+        help="Write valid raw beacon records as JSONL, for example logs/beacons.jsonl.",
+    )
+    replay.add_argument(
+        "--interface",
+        default="wlan0",
+        help="Interface metadata for logs. Default: wlan0.",
+    )
+    replay.add_argument(
+        "--channel",
+        default="36",
+        help="Channel or frequency metadata for logs. Default: 36.",
+    )
 
     return parser
 
@@ -74,7 +109,18 @@ def _run_replay(
     beacons_tsv: Path,
     survey_before: Optional[Path] = None,
     survey_after: Optional[Path] = None,
+    *,
+    stats_csv: Optional[Path] = None,
+    beacons_jsonl: Optional[Path] = None,
+    interface: str = "wlan0",
+    channel: str = "36",
 ) -> int:
+    log_metadata = _LogMetadata(
+        start_time=_utc_now_iso(),
+        interface=interface,
+        channel=channel,
+        channel_width_mhz=20,
+    )
     local_cu_percent = _load_local_survey_cu_percent(survey_before, survey_after)
     replay_data = _read_beacon_replay(beacons_tsv)
     local_cu_by_second = {
@@ -86,6 +132,10 @@ def _run_replay(
         replay_data.records,
         local_cu_by_second=local_cu_by_second,
     )
+    if beacons_jsonl is not None:
+        _write_beacons_jsonl(beacons_jsonl, replay_data.records, log_metadata)
+    if stats_csv is not None:
+        _write_stats_csv(stats, stats_csv, log_metadata)
 
     print(_format_header())
     for second_stats in stats:
@@ -146,6 +196,14 @@ class _BeaconReplayData:
         return last_timestamp - first_timestamp
 
 
+@dataclass(frozen=True)
+class _LogMetadata:
+    start_time: str
+    interface: str
+    channel: str
+    channel_width_mhz: int
+
+
 def _read_beacon_replay(beacons_tsv: Path) -> _BeaconReplayData:
     records: list[BeaconRecord] = []
     total_rows = 0
@@ -181,6 +239,83 @@ def _load_local_survey_cu_percent(
     previous_samples = parse_survey_dump(survey_before.read_text(encoding="utf-8"))
     current_samples = parse_survey_dump(survey_after.read_text(encoding="utf-8"))
     return compute_local_cu_percent_from_samples(previous_samples, current_samples)
+
+
+def _write_stats_csv(
+    stats: list[SecondStats],
+    output_path: Path,
+    metadata: _LogMetadata,
+) -> None:
+    _ensure_parent_dir(output_path)
+    fieldnames = [
+        "start_time",
+        "interface",
+        "channel",
+        "channel_width_mhz",
+        "second",
+        "unique_bssid_count",
+        "qbss_station_count_sum",
+        "qbss_cu_min_percent",
+        "qbss_cu_mean_percent",
+        "qbss_cu_max_percent",
+        "top_qbss_cu_ssid",
+        "top_qbss_cu_bssid",
+        "top_qbss_cu_percent",
+        "local_cu_percent",
+    ]
+
+    with output_path.open("w", encoding="utf-8", newline="") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for second_stats in stats:
+            writer.writerow(_stats_csv_row(second_stats, metadata))
+            output_file.flush()
+
+
+def _write_beacons_jsonl(
+    output_path: Path,
+    records: list[BeaconRecord],
+    metadata: _LogMetadata,
+) -> None:
+    _ensure_parent_dir(output_path)
+    metadata_fields = asdict(metadata)
+
+    with output_path.open("w", encoding="utf-8") as output_file:
+        for record in records:
+            payload = {
+                "record_type": "beacon",
+                **metadata_fields,
+                **asdict(record),
+            }
+            output_file.write(json.dumps(payload, sort_keys=True) + "\n")
+            output_file.flush()
+
+
+def _stats_csv_row(stats: SecondStats, metadata: _LogMetadata) -> dict[str, object]:
+    return {
+        "start_time": metadata.start_time,
+        "interface": metadata.interface,
+        "channel": metadata.channel,
+        "channel_width_mhz": metadata.channel_width_mhz,
+        "second": stats.second,
+        "unique_bssid_count": stats.unique_bssid_count,
+        "qbss_station_count_sum": stats.qbss_station_count_sum,
+        "qbss_cu_min_percent": _format_optional_float(stats.qbss_cu_min_percent),
+        "qbss_cu_mean_percent": _format_optional_float(stats.qbss_cu_mean_percent),
+        "qbss_cu_max_percent": _format_optional_float(stats.qbss_cu_max_percent),
+        "top_qbss_cu_ssid": stats.top_qbss_cu_ssid or "",
+        "top_qbss_cu_bssid": stats.top_qbss_cu_bssid or "",
+        "top_qbss_cu_percent": _format_optional_float(stats.top_qbss_cu_percent),
+        "local_cu_percent": _format_optional_float(stats.local_cu_percent),
+    }
+
+
+def _ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _format_header() -> str:
