@@ -183,9 +183,8 @@ include interface, channel, 20 MHz width, and replay start-time metadata.
 ## Run Minimal Live Mode
 
 Live mode is terminal-only for now. It configures the selected interface for
-monitor mode, tunes with 20 MHz width, starts line-buffered TShark, polls
-`iw dev <iface> survey dump` once per second, and prints one readable stats line
-per second.
+monitor mode, tunes with 20 MHz width, starts line-buffered TShark, and prints
+one readable AP/QBSS stats line per second.
 
 When using the project virtual environment, call the venv Python explicitly
 under `sudo`. This avoids the common `sudo: beacon-live: command not found`
@@ -218,8 +217,29 @@ Defaults are:
 sudo .venv/bin/python -m beacon_live.cli live
 ```
 
-Use Ctrl-C to stop. The TShark process is terminated on exit. If local survey
-counters are unavailable, live mode continues and shows local CU as unavailable.
+Use Ctrl-C to stop. The TShark process is terminated on exit.
+
+Local survey CU is driver-dependent and opt-in. To poll
+`iw dev <iface> survey dump` once per second and include local CU, add
+`--local-cu`:
+
+```bash
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --local-cu
+```
+
+If local CU always shows `0.00%` or `--`, run live mode with survey diagnostics.
+`--survey-debug` also enables local CU:
+
+```bash
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug
+```
+
+The diagnostic lines are printed to stderr and show the selected survey
+frequency, active-time delta, busy-time delta, computed local CU, and reason.
+If `busy_delta_ms=0` while `active_delta_ms` increases, the adapter/driver is
+reporting an idle local busy counter. If the reason says the target frequency
+counters are unavailable, the local survey data cannot be trusted for that tuned
+channel.
 
 If you installed the package system-wide, `sudo beacon-live live --iface wlan0
 --channel 36` can also work, but the project-local venv form above is preferred

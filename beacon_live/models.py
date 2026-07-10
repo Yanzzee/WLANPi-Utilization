@@ -23,6 +23,8 @@ class SurveySample:
     receive_ms: Optional[int]
     transmit_ms: Optional[int]
     noise_dbm: Optional[int]
+    frequency_mhz: Optional[int] = None
+    in_use: bool = False
 
 
 @dataclass(frozen=True)

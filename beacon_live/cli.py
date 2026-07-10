@@ -58,6 +58,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 frequency_mhz=args.frequency_mhz,
                 band=args.band,
                 interval_seconds=args.interval_seconds,
+                local_cu=args.local_cu or args.survey_debug,
+                survey_debug=args.survey_debug,
             )
         except ValueError as exc:
             parser.error(f"live {exc}")
@@ -158,7 +160,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--interval-seconds",
         default=1.0,
         type=float,
-        help="Survey polling and terminal update interval. Default: 1.",
+        help="Terminal update interval and optional survey polling interval. Default: 1.",
+    )
+    live.add_argument(
+        "--survey-debug",
+        action="store_true",
+        help="Print local survey counter selection and deltas to stderr.",
+    )
+    live.add_argument(
+        "--local-cu",
+        action="store_true",
+        help="Poll iw survey counters and include local CU in live output.",
     )
 
     return parser

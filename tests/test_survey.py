@@ -4,6 +4,7 @@ from beacon_live.models import SurveySample
 from beacon_live.survey import (
     compute_local_cu_percent,
     compute_local_cu_percent_from_samples,
+    compute_local_cu_result_from_samples,
     parse_survey_dump,
 )
 
@@ -31,6 +32,8 @@ Survey data from wlan0
             receive_ms=125,
             transmit_ms=50,
             noise_dbm=-94,
+            frequency_mhz=2437,
+            in_use=True,
         )
     ]
 
@@ -56,6 +59,7 @@ Survey data from wlan0
             receive_ms=12,
             transmit_ms=3,
             noise_dbm=None,
+            frequency_mhz=5955,
         )
     ]
 
@@ -81,6 +85,63 @@ def test_compute_local_cu_percent_from_samples_uses_largest_active_delta() -> No
         previous_samples,
         current_samples,
     ) == pytest.approx(20.0)
+
+
+def test_compute_local_cu_percent_from_samples_prefers_in_use_entry() -> None:
+    previous_samples = [
+        SurveySample(1.0, 1000, 100, 0, 0, None, 5180, True),
+        SurveySample(1.0, 5000, 1000, 0, 0, None, 5200, False),
+    ]
+    current_samples = [
+        SurveySample(2.0, 2000, 300, 0, 0, None, 5180, True),
+        SurveySample(2.0, 7000, 1100, 0, 0, None, 5200, False),
+    ]
+
+    assert compute_local_cu_percent_from_samples(
+        previous_samples,
+        current_samples,
+    ) == pytest.approx(20.0)
+
+
+def test_compute_local_cu_percent_from_samples_uses_target_frequency() -> None:
+    previous_samples = [
+        SurveySample(1.0, 1000, 100, 0, 0, None, 5180),
+        SurveySample(1.0, 5000, 1000, 0, 0, None, 5955),
+    ]
+    current_samples = [
+        SurveySample(2.0, 1000, 100, 0, 0, None, 5180),
+        SurveySample(2.0, 6000, 1200, 0, 0, None, 5955),
+    ]
+
+    result = compute_local_cu_result_from_samples(
+        previous_samples,
+        current_samples,
+        target_frequency_mhz=5180,
+    )
+
+    assert result.local_cu_percent is None
+    assert result.reason == "target frequency 5180 MHz counters unavailable"
+
+
+def test_compute_local_cu_result_includes_selected_survey_deltas() -> None:
+    previous_samples = [
+        SurveySample(1.0, 1000, 100, 0, 0, None, 5180),
+    ]
+    current_samples = [
+        SurveySample(2.0, 2000, 125, 0, 0, None, 5180),
+    ]
+
+    result = compute_local_cu_result_from_samples(
+        previous_samples,
+        current_samples,
+        target_frequency_mhz=5180,
+    )
+
+    assert result.local_cu_percent == pytest.approx(2.5)
+    assert result.frequency_mhz == 5180
+    assert result.active_delta_ms == 1000
+    assert result.busy_delta_ms == 25
+    assert result.reason == "ok"
 
 
 @pytest.mark.parametrize(

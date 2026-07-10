@@ -6,6 +6,7 @@ from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
+from beacon_live.live import resolve_survey_target_frequency_mhz
 
 
 def test_build_monitor_setup_commands_uses_ht20_channel() -> None:
@@ -43,6 +44,13 @@ def test_channel_to_frequency_mhz_disambiguates_5_and_6_ghz_channels() -> None:
 def test_channel_to_frequency_mhz_supports_24_ghz_channels() -> None:
     assert channel_to_frequency_mhz("1", "2.4") == 2412
     assert channel_to_frequency_mhz("14", "2.4") == 2484
+
+
+def test_resolve_survey_target_frequency_mhz_matches_live_tuning() -> None:
+    assert resolve_survey_target_frequency_mhz("36") == 5180
+    assert resolve_survey_target_frequency_mhz("6") == 2437
+    assert resolve_survey_target_frequency_mhz("5", band="6") == 5975
+    assert resolve_survey_target_frequency_mhz("36", frequency_mhz=5975) == 5975
 
 
 def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:

@@ -16,7 +16,8 @@ from beacon_live.aggregator import Aggregator
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.parser import parse_tshark_row
-from beacon_live.survey import compute_local_cu_percent_from_samples
+from beacon_live.survey import SurveyCuResult
+from beacon_live.survey import compute_local_cu_result_from_samples
 from beacon_live.survey import parse_survey_dump
 
 TSHARK_BEACON_FIELDS = [
@@ -105,6 +106,32 @@ def build_tune_command(
         ]
 
     return ["iw", "dev", iface, "set", "channel", channel, "HT20"]
+
+
+def resolve_survey_target_frequency_mhz(
+    channel: str,
+    *,
+    frequency_mhz: Optional[int] = None,
+    band: Optional[str] = None,
+) -> Optional[int]:
+    if frequency_mhz is not None:
+        return frequency_mhz
+    if band is not None:
+        return channel_to_frequency_mhz(channel, band)
+
+    try:
+        channel_number = int(channel)
+    except ValueError:
+        return None
+
+    if 1 <= channel_number <= 14:
+        return channel_to_frequency_mhz(channel, "2.4")
+
+    frequency = 5000 + (channel_number * 5)
+    if 5000 < frequency < 5925:
+        return frequency
+
+    return None
 
 
 def build_monitor_setup_commands(
@@ -241,7 +268,15 @@ def run_live(
     frequency_mhz: Optional[int] = None,
     band: Optional[str] = None,
     interval_seconds: float = 1.0,
+    local_cu: bool = False,
+    survey_debug: bool = False,
 ) -> int:
+    local_cu = local_cu or survey_debug
+    target_frequency_mhz = resolve_survey_target_frequency_mhz(
+        channel,
+        frequency_mhz=frequency_mhz,
+        band=band,
+    )
     configure_monitor_interface(
         iface,
         channel,
@@ -252,12 +287,12 @@ def run_live(
     selector = selectors.DefaultSelector()
     aggregator = Aggregator()
     printed_seconds: set[int] = set()
-    previous_survey_samples = _read_survey_samples_safely(iface)
+    previous_survey_samples = _read_survey_samples_safely(iface) if local_cu else None
     latest_local_cu_percent: Optional[float] = None
     next_survey_poll = time.monotonic() + interval_seconds
     survey_warning_printed = False
 
-    print(_format_live_header(), flush=True)
+    print(_format_live_header(include_local_cu=local_cu), flush=True)
 
     try:
         if process.stdout is None:
@@ -276,23 +311,34 @@ def run_live(
                     aggregator.add_pending(record)
 
             if time.monotonic() >= next_survey_poll:
-                current_survey_samples = _read_survey_samples_safely(iface)
-                if current_survey_samples is None:
-                    if not survey_warning_printed:
-                        print(
-                            "Warning: survey counters unavailable; local CU hidden",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                        survey_warning_printed = True
-                    latest_local_cu_percent = None
-                else:
-                    if previous_survey_samples is not None:
-                        latest_local_cu_percent = compute_local_cu_percent_from_samples(
-                            previous_survey_samples,
-                            current_survey_samples,
-                        )
-                    previous_survey_samples = current_survey_samples
+                if local_cu:
+                    current_survey_samples = _read_survey_samples_safely(iface)
+                    if current_survey_samples is None:
+                        if not survey_warning_printed:
+                            print(
+                                "Warning: survey counters unavailable; local CU hidden",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            survey_warning_printed = True
+                        latest_local_cu_percent = None
+                    else:
+                        if previous_survey_samples is not None:
+                            survey_cu_result = compute_local_cu_result_from_samples(
+                                previous_survey_samples,
+                                current_survey_samples,
+                                target_frequency_mhz=target_frequency_mhz,
+                            )
+                            latest_local_cu_percent = (
+                                survey_cu_result.local_cu_percent
+                            )
+                            if survey_debug:
+                                print(
+                                    _format_survey_debug_line(survey_cu_result),
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
+                        previous_survey_samples = current_survey_samples
 
                 wall_second = int(time.time())
                 _print_completed_live_stats(
@@ -300,6 +346,7 @@ def run_live(
                     wall_second,
                     latest_local_cu_percent,
                     printed_seconds,
+                    include_local_cu=local_cu,
                 )
                 next_survey_poll = _next_interval_deadline(
                     next_survey_poll,
@@ -310,7 +357,10 @@ def run_live(
         for stats in aggregator.flush():
             if stats.second not in printed_seconds:
                 stats = replace(stats, local_cu_percent=latest_local_cu_percent)
-                print(_format_live_stats_line(stats), flush=True)
+                print(
+                    _format_live_stats_line(stats, include_local_cu=local_cu),
+                    flush=True,
+                )
                 printed_seconds.add(stats.second)
         return 0
     finally:
@@ -352,6 +402,8 @@ def _print_completed_live_stats(
     wall_second: int,
     local_cu_percent: Optional[float],
     printed_seconds: set[int],
+    *,
+    include_local_cu: bool,
 ) -> None:
     target_second = wall_second - 1
     completed_stats = aggregator.pop_completed_before(wall_second)
@@ -362,13 +414,14 @@ def _print_completed_live_stats(
             continue
         completed_seconds.add(stats.second)
         stats = replace(stats, local_cu_percent=local_cu_percent)
-        print(_format_live_stats_line(stats), flush=True)
+        print(_format_live_stats_line(stats, include_local_cu=include_local_cu), flush=True)
         printed_seconds.add(stats.second)
 
     if target_second not in printed_seconds and target_second not in completed_seconds:
         print(
             _format_live_stats_line(
-                _empty_second_stats(target_second, local_cu_percent)
+                _empty_second_stats(target_second, local_cu_percent),
+                include_local_cu=include_local_cu,
             ),
             flush=True,
         )
@@ -383,26 +436,32 @@ def _next_interval_deadline(previous_deadline: float, interval_seconds: float) -
     return next_deadline
 
 
-def _format_live_header() -> str:
-    return (
-        "time second unique_bssids qbss_station_sum max_qbss_cu "
-        "top_qbss_cu local_cu"
-    )
+def _format_live_header(*, include_local_cu: bool = True) -> str:
+    header = "time second unique_bssids qbss_station_sum max_qbss_cu top_qbss_cu"
+    if include_local_cu:
+        return f"{header} local_cu"
+    return header
 
 
-def _format_live_stats_line(stats: SecondStats) -> str:
+def _format_live_stats_line(
+    stats: SecondStats,
+    *,
+    include_local_cu: bool = True,
+) -> str:
     top_ssid = stats.top_qbss_cu_ssid or ""
     top_bssid = stats.top_qbss_cu_bssid or ""
     top_label = f"{top_ssid}/{top_bssid}".strip("/")
-    return (
+    line = (
         f"time={_format_second_time(stats.second)} "
         f"second={stats.second} "
         f"unique_bssids={stats.unique_bssid_count} "
         f"qbss_station_sum={stats.qbss_station_count_sum} "
         f"max_qbss_cu={_format_optional_percent(stats.qbss_cu_max_percent)} "
-        f"top_qbss_cu={top_label or '--'} "
-        f"local_cu={_format_optional_percent(stats.local_cu_percent)}"
+        f"top_qbss_cu={top_label or '--'}"
     )
+    if include_local_cu:
+        return f"{line} local_cu={_format_optional_percent(stats.local_cu_percent)}"
+    return line
 
 
 def _empty_second_stats(
@@ -432,3 +491,21 @@ def _format_second_time(second: int) -> str:
 
 def _format_optional_percent(value: Optional[float]) -> str:
     return "--" if value is None else f"{value:.2f}%"
+
+
+def _format_optional_int(value: Optional[int]) -> str:
+    return "--" if value is None else str(value)
+
+
+def _format_survey_debug_line(result: SurveyCuResult) -> str:
+    frequency = (
+        "--" if result.frequency_mhz is None else f"{result.frequency_mhz}MHz"
+    )
+    return (
+        "survey_debug "
+        f"freq={frequency} "
+        f"active_delta_ms={_format_optional_int(result.active_delta_ms)} "
+        f"busy_delta_ms={_format_optional_int(result.busy_delta_ms)} "
+        f"local_cu={_format_optional_percent(result.local_cu_percent)} "
+        f"reason={result.reason}"
+    )

@@ -29,6 +29,7 @@ beacon-live replay --input samples/tshark_qbss_sample.tsv
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --local-cu --survey-debug
 ```
 
 The replay command prints tab-separated per-second stats from a saved TShark
@@ -45,8 +46,12 @@ raw / 255 * 100
 ```
 
 The live command configures the selected interface for monitor mode, tunes with
-20 MHz width, starts TShark, polls `iw dev <iface> survey dump` once per second,
-and prints terminal stats. Use `--channel` for channel numbers and
-`--frequency-mhz` for explicit center frequency. For 6 GHz PSC channel 5, use
-either `--frequency-mhz 5975` or `--band 6 --channel 5`. AP-reported QBSS CU and
-local survey CU are kept as separate metrics.
+20 MHz width, starts TShark, and prints AP-reported QBSS terminal stats. Use
+`--channel` for channel numbers and `--frequency-mhz` for explicit center
+frequency. For 6 GHz PSC channel 5, use either `--frequency-mhz 5975` or
+`--band 6 --channel 5`.
+
+Local survey CU is driver-dependent and opt-in. Add `--local-cu` to poll
+`iw dev <iface> survey dump` once per second and include local CU. Add
+`--survey-debug` to print the selected survey frequency plus active/busy counter
+deltas to stderr.

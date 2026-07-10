@@ -191,6 +191,8 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         frequency_mhz: Optional[int],
         band: Optional[str],
         interval_seconds: float,
+        local_cu: bool,
+        survey_debug: bool,
     ) -> int:
         calls.append(
             {
@@ -199,6 +201,8 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
                 "frequency_mhz": frequency_mhz,
                 "band": band,
                 "interval_seconds": interval_seconds,
+                "local_cu": local_cu,
+                "survey_debug": survey_debug,
             }
         )
         return 0
@@ -213,6 +217,8 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
             "frequency_mhz": None,
             "band": None,
             "interval_seconds": 1.0,
+            "local_cu": False,
+            "survey_debug": False,
         }
     ]
 
@@ -227,6 +233,8 @@ def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) ->
         frequency_mhz: Optional[int],
         band: Optional[str],
         interval_seconds: float,
+        local_cu: bool,
+        survey_debug: bool,
     ) -> int:
         calls.append(
             {
@@ -235,6 +243,8 @@ def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) ->
                 "frequency_mhz": frequency_mhz,
                 "band": band,
                 "interval_seconds": interval_seconds,
+                "local_cu": local_cu,
+                "survey_debug": survey_debug,
             }
         )
         return 0
@@ -249,6 +259,8 @@ def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) ->
             "frequency_mhz": 5975,
             "band": None,
             "interval_seconds": 1.0,
+            "local_cu": False,
+            "survey_debug": False,
         }
     ]
 
@@ -263,6 +275,8 @@ def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) ->
         frequency_mhz: Optional[int],
         band: Optional[str],
         interval_seconds: float,
+        local_cu: bool,
+        survey_debug: bool,
     ) -> int:
         calls.append(
             {
@@ -271,6 +285,8 @@ def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) ->
                 "frequency_mhz": frequency_mhz,
                 "band": band,
                 "interval_seconds": interval_seconds,
+                "local_cu": local_cu,
+                "survey_debug": survey_debug,
             }
         )
         return 0
@@ -285,6 +301,92 @@ def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) ->
             "frequency_mhz": None,
             "band": "6",
             "interval_seconds": 1.0,
+            "local_cu": False,
+            "survey_debug": False,
+        }
+    ]
+
+
+def test_live_accepts_local_cu(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(
+        *,
+        iface: str,
+        channel: str,
+        frequency_mhz: Optional[int],
+        band: Optional[str],
+        interval_seconds: float,
+        local_cu: bool,
+        survey_debug: bool,
+    ) -> int:
+        calls.append(
+            {
+                "iface": iface,
+                "channel": channel,
+                "frequency_mhz": frequency_mhz,
+                "band": band,
+                "interval_seconds": interval_seconds,
+                "local_cu": local_cu,
+                "survey_debug": survey_debug,
+            }
+        )
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live", "--local-cu"]) == 0
+    assert calls == [
+        {
+            "iface": "wlan0",
+            "channel": "36",
+            "frequency_mhz": None,
+            "band": None,
+            "interval_seconds": 1.0,
+            "local_cu": True,
+            "survey_debug": False,
+        }
+    ]
+
+
+def test_live_accepts_survey_debug(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(
+        *,
+        iface: str,
+        channel: str,
+        frequency_mhz: Optional[int],
+        band: Optional[str],
+        interval_seconds: float,
+        local_cu: bool,
+        survey_debug: bool,
+    ) -> int:
+        calls.append(
+            {
+                "iface": iface,
+                "channel": channel,
+                "frequency_mhz": frequency_mhz,
+                "band": band,
+                "interval_seconds": interval_seconds,
+                "local_cu": local_cu,
+                "survey_debug": survey_debug,
+            }
+        )
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live", "--survey-debug"]) == 0
+    assert calls == [
+        {
+            "iface": "wlan0",
+            "channel": "36",
+            "frequency_mhz": None,
+            "band": None,
+            "interval_seconds": 1.0,
+            "local_cu": True,
+            "survey_debug": True,
         }
     ]
 
@@ -314,6 +416,8 @@ def test_live_reports_setup_failure(
         frequency_mhz: Optional[int],
         band: Optional[str],
         interval_seconds: float,
+        local_cu: bool,
+        survey_debug: bool,
     ) -> int:
         raise LiveCommandError(
             failed_command,
