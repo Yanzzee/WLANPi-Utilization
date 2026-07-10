@@ -78,6 +78,8 @@ cd "${REPO_ROOT}"
 
 if [[ -n "${VIRTUAL_ENV:-}" ]]; then
   echo "Updating virtual environment packaging tools..."
+  echo "Current pip:"
+  "${PYTHON_BIN}" -m pip --version
   if ! "${PYTHON_BIN}" -m pip install --upgrade "pip>=23.1" "setuptools>=64" wheel; then
     echo "Unable to update packaging tools in the active virtual environment."
     echo
@@ -85,12 +87,21 @@ if [[ -n "${VIRTUAL_ENV:-}" ]]; then
     echo "  ${PYTHON_BIN} -m pip install --upgrade 'pip>=23.1' 'setuptools>=64' wheel"
     exit 1
   fi
+  echo "Updated pip:"
+  "${PYTHON_BIN}" -m pip --version
 else
   echo "No active virtual environment; leaving system packaging tools unchanged."
 fi
 
 echo "Installing local package in editable mode with dev dependencies..."
-"${PYTHON_BIN}" -m pip install -e ".[dev]"
+if ! "${PYTHON_BIN}" -m pip install -e ".[dev]"; then
+  echo
+  echo "Editable install failed."
+  echo "This usually means the Pi is using an older pip/setuptools editable-install path."
+  echo "Falling back to a standard local install so CLI and tests can still run."
+  echo "Code changes on the Pi will require rerunning this setup script after fallback."
+  "${PYTHON_BIN}" -m pip install ".[dev]"
+fi
 
 echo "Checking CLI import..."
 "${PYTHON_BIN}" -m beacon_live.cli --help >/dev/null
