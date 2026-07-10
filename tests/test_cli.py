@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from beacon_live.cli import main
+from beacon_live.live import LiveCommandError
 
 
 def test_replay_accepts_pi_smoke_files_and_prints_summary(
@@ -177,3 +178,51 @@ def test_replay_writes_stats_csv_and_beacon_jsonl_logs(
     assert {record["channel_width_mhz"] for record in beacon_records} == {20}
     assert beacon_records[0]["ssid"] == "Alpha"
     assert beacon_records[0]["qbss_cu_raw"] == 128
+
+
+def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(*, iface: str, channel: str, interval_seconds: float) -> int:
+        calls.append(
+            {
+                "iface": iface,
+                "channel": channel,
+                "interval_seconds": interval_seconds,
+            }
+        )
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live"]) == 0
+    assert calls == [
+        {
+            "iface": "wlan0",
+            "channel": "36",
+            "interval_seconds": 1.0,
+        }
+    ]
+
+
+def test_live_reports_setup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    failed_command = ["iw", "dev", "wlan0", "set", "channel", "36", "HT20"]
+
+    def fake_run_live(*, iface: str, channel: str, interval_seconds: float) -> int:
+        raise LiveCommandError(
+            failed_command,
+            returncode=1,
+            stderr="channel set failed",
+        )
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live", "--iface", "wlan0", "--channel", "36"]) == 1
+    captured = capsys.readouterr()
+
+    assert "Command failed: iw dev wlan0 set channel 36 HT20" in captured.err
+    assert "Exit status: 1" in captured.err
+    assert "channel set failed" in captured.err

@@ -180,6 +180,26 @@ The log directory is created automatically. Stats CSV rows are flushed after
 each per-second record, and beacon JSONL is flushed line by line. Log rows
 include interface, channel, 20 MHz width, and replay start-time metadata.
 
+## Run Minimal Live Mode
+
+Live mode is terminal-only for now. It configures the selected interface for
+monitor mode, tunes the channel with `HT20`, starts line-buffered TShark, polls
+`iw dev <iface> survey dump` once per second, and prints one readable stats line
+per second.
+
+```bash
+sudo beacon-live live --iface wlan0 --channel 36
+```
+
+Defaults are:
+
+```bash
+sudo beacon-live live
+```
+
+Use Ctrl-C to stop. The TShark process is terminated on exit. If local survey
+counters are unavailable, live mode continues and shows local CU as unavailable.
+
 ## What to Commit
 
 Do not commit generated `samples/pi_*` files or `debug/pi_debug_*.tar.gz`

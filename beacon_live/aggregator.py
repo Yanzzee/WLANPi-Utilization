@@ -17,8 +17,8 @@ class Aggregator:
     def set_local_cu_percent(self, second: int, percent: Optional[float]) -> None:
         self._local_cu_by_second[second] = percent
 
-    def add(self, record: BeaconRecord) -> list[SecondStats]:
-        """Add one record and return stats for any newly completed seconds."""
+    def add_pending(self, record: BeaconRecord) -> None:
+        """Add one record without emitting completed seconds."""
         second = int(record.timestamp)
         if self._latest_second is None or second > self._latest_second:
             self._latest_second = second
@@ -26,7 +26,27 @@ class Aggregator:
         bucket = self._buckets.setdefault(second, _SecondBucket())
         bucket.add(record)
 
+    def add(self, record: BeaconRecord) -> list[SecondStats]:
+        """Add one record and return stats for any newly completed seconds."""
+        self.add_pending(record)
         return self._pop_completed()
+
+    def pop_completed_before(self, second: int) -> list[SecondStats]:
+        """Return stats for buffered seconds before ``second``."""
+        completed_seconds = sorted(
+            bucket_second for bucket_second in self._buckets if bucket_second < second
+        )
+        completed: list[SecondStats] = []
+        for completed_second in completed_seconds:
+            bucket = self._buckets.pop(completed_second)
+            completed.append(
+                _build_stats(
+                    completed_second,
+                    bucket,
+                    self._local_cu_by_second.get(completed_second),
+                )
+            )
+        return completed
 
     def flush(self) -> list[SecondStats]:
         """Return stats for all buffered seconds."""
@@ -45,20 +65,7 @@ class Aggregator:
         if self._latest_second is None:
             return []
 
-        completed_seconds = sorted(
-            second for second in self._buckets if second < self._latest_second
-        )
-        completed: list[SecondStats] = []
-        for second in completed_seconds:
-            bucket = self._buckets.pop(second)
-            completed.append(
-                _build_stats(
-                    second,
-                    bucket,
-                    self._local_cu_by_second.get(second),
-                )
-            )
-        return completed
+        return self.pop_completed_before(self._latest_second)
 
 
 def aggregate_records(

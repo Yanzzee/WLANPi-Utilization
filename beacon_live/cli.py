@@ -17,6 +17,8 @@ from beacon_live.aggregator import aggregate_records
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
 from beacon_live.parser import parse_tshark_row
+from beacon_live.live import LiveCommandError
+from beacon_live.live import run_live
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
     parse_survey_dump,
@@ -42,6 +44,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             interface=args.interface,
             channel=args.channel,
         )
+
+    if args.command == "live":
+        if args.interval_seconds <= 0:
+            parser.error("live --interval-seconds must be greater than zero")
+        try:
+            return run_live(
+                iface=args.iface,
+                channel=args.channel,
+                interval_seconds=args.interval_seconds,
+            )
+        except LiveCommandError as exc:
+            print(f"Command failed: {exc.command_text}", file=sys.stderr)
+            if exc.returncode is not None:
+                print(f"Exit status: {exc.returncode}", file=sys.stderr)
+            if exc.stderr:
+                print(exc.stderr, file=sys.stderr)
+            return 1
 
     parser.print_help()
     return 0
@@ -100,6 +119,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "--channel",
         default="36",
         help="Channel or frequency metadata for logs. Default: 36.",
+    )
+
+    live = subparsers.add_parser("live", help="Run a minimal live WLAN capture.")
+    live.add_argument(
+        "--iface",
+        default="wlan0",
+        help="Wireless interface to use. Default: wlan0.",
+    )
+    live.add_argument(
+        "--channel",
+        default="36",
+        help="Channel to tune with HT20. Default: 36.",
+    )
+    live.add_argument(
+        "--interval-seconds",
+        default=1.0,
+        type=float,
+        help="Survey polling and terminal update interval. Default: 1.",
     )
 
     return parser

@@ -4,10 +4,10 @@ Python CLI scaffolding for replaying WLAN beacon QBSS channel utilization data.
 
 Requires Python 3.9 or newer.
 
-This first step is intentionally hardware-free: it parses saved TShark TSV rows
-and saved `iw dev <iface> survey dump` text, then aggregates beacon records into
-per-second stats. Live capture, sudo use, TShark subprocesses, and `iw`
-subprocesses are not implemented yet.
+Replay mode is hardware-free: it parses saved TShark TSV rows and saved
+`iw dev <iface> survey dump` text, then aggregates beacon records into
+per-second stats. A minimal WLAN Pi live mode is also available for terminal
+testing.
 
 ## Install
 
@@ -26,6 +26,7 @@ pytest
 ```bash
 beacon-live --help
 beacon-live replay --input samples/tshark_qbss_sample.tsv
+sudo beacon-live live --iface wlan0 --channel 36
 ```
 
 The replay command prints tab-separated per-second stats from a saved TShark
@@ -40,3 +41,8 @@ QBSS channel utilization is converted from raw `0-255` values to percent with:
 ```text
 raw / 255 * 100
 ```
+
+The live command configures the selected interface for monitor mode, tunes the
+channel as HT20, starts TShark, polls `iw dev <iface> survey dump` once per
+second, and prints terminal stats. AP-reported QBSS CU and local survey CU are
+kept as separate metrics.
