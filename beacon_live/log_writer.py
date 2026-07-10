@@ -1,0 +1,152 @@
+"""Optional CSV and JSONL capture logging."""
+
+from __future__ import annotations
+
+import csv
+import json
+from dataclasses import asdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import IO, Optional
+
+from beacon_live.models import BeaconRecord
+from beacon_live.models import SecondStats
+
+STATS_CSV_FIELDS = [
+    "start_time",
+    "interface",
+    "channel",
+    "frequency_mhz",
+    "band",
+    "channel_width_mhz",
+    "second",
+    "unique_bssid_count",
+    "qbss_station_count_sum",
+    "qbss_cu_min_percent",
+    "qbss_cu_mean_percent",
+    "qbss_cu_max_percent",
+    "top_qbss_cu_ssid",
+    "top_qbss_cu_bssid",
+    "top_qbss_cu_percent",
+    "local_cu_percent",
+]
+
+
+@dataclass(frozen=True)
+class LogMetadata:
+    start_time: str
+    interface: str
+    channel: str
+    channel_width_mhz: int = 20
+    frequency_mhz: Optional[int] = None
+    band: Optional[str] = None
+
+
+class CaptureLogWriter:
+    """Write optional live or replay logs and flush every emitted record."""
+
+    def __init__(
+        self,
+        *,
+        metadata: LogMetadata,
+        stats_csv: Optional[Path] = None,
+        beacons_jsonl: Optional[Path] = None,
+    ) -> None:
+        self._metadata = metadata
+        self._stats_csv_path = stats_csv
+        self._beacons_jsonl_path = beacons_jsonl
+        self._stats_file: Optional[IO[str]] = None
+        self._stats_writer: Optional[csv.DictWriter] = None
+        self._beacons_file: Optional[IO[str]] = None
+
+    def __enter__(self) -> "CaptureLogWriter":
+        self.open()
+        return self
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        self.close()
+
+    def open(self) -> None:
+        try:
+            if self._stats_csv_path is not None:
+                _ensure_parent_dir(self._stats_csv_path)
+                self._stats_file = self._stats_csv_path.open(
+                    "w",
+                    encoding="utf-8",
+                    newline="",
+                )
+                self._stats_writer = csv.DictWriter(
+                    self._stats_file,
+                    fieldnames=STATS_CSV_FIELDS,
+                )
+                self._stats_writer.writeheader()
+                self._stats_file.flush()
+
+            if self._beacons_jsonl_path is not None:
+                _ensure_parent_dir(self._beacons_jsonl_path)
+                self._beacons_file = self._beacons_jsonl_path.open(
+                    "w",
+                    encoding="utf-8",
+                )
+        except Exception:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        if self._stats_file is not None:
+            self._stats_file.close()
+            self._stats_file = None
+            self._stats_writer = None
+        if self._beacons_file is not None:
+            self._beacons_file.close()
+            self._beacons_file = None
+
+    def write_stats(self, stats: SecondStats) -> None:
+        if self._stats_writer is None or self._stats_file is None:
+            return
+        self._stats_writer.writerow(_stats_csv_row(stats, self._metadata))
+        self._stats_file.flush()
+
+    def write_beacon(self, record: BeaconRecord) -> None:
+        if self._beacons_file is None:
+            return
+        payload = {
+            "record_type": "beacon",
+            **asdict(self._metadata),
+            **asdict(record),
+        }
+        self._beacons_file.write(json.dumps(payload, sort_keys=True) + "\n")
+        self._beacons_file.flush()
+
+
+def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, object]:
+    return {
+        "start_time": metadata.start_time,
+        "interface": metadata.interface,
+        "channel": metadata.channel,
+        "frequency_mhz": _optional_value(metadata.frequency_mhz),
+        "band": metadata.band or "",
+        "channel_width_mhz": metadata.channel_width_mhz,
+        "second": stats.second,
+        "unique_bssid_count": stats.unique_bssid_count,
+        "qbss_station_count_sum": stats.qbss_station_count_sum,
+        "qbss_cu_min_percent": _format_optional_float(stats.qbss_cu_min_percent),
+        "qbss_cu_mean_percent": _format_optional_float(stats.qbss_cu_mean_percent),
+        "qbss_cu_max_percent": _format_optional_float(stats.qbss_cu_max_percent),
+        "top_qbss_cu_ssid": stats.top_qbss_cu_ssid or "",
+        "top_qbss_cu_bssid": stats.top_qbss_cu_bssid or "",
+        "top_qbss_cu_percent": _format_optional_float(stats.top_qbss_cu_percent),
+        "local_cu_percent": _format_optional_float(stats.local_cu_percent),
+    }
+
+
+def _ensure_parent_dir(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _format_optional_float(value: Optional[float]) -> str:
+    return "" if value is None else f"{value:.2f}"
+
+
+def _optional_value(value: Optional[int]) -> object:
+    return "" if value is None else value

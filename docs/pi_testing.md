@@ -219,6 +219,23 @@ sudo .venv/bin/python -m beacon_live.cli live
 
 Use Ctrl-C to stop. The TShark process is terminated on exit.
 
+To keep per-second stats and valid raw beacon records from a live run, add one
+or both optional logging paths:
+
+```bash
+sudo .venv/bin/python -m beacon_live.cli live \
+  --iface wlan0 \
+  --channel 36 \
+  --stats-csv logs/stats.csv \
+  --beacons-jsonl logs/beacons.jsonl
+```
+
+Parent directories are created automatically. The stats CSV is flushed for
+each emitted second, and raw beacon JSONL is flushed line by line. Rows include
+the capture start time, interface, channel, 20 MHz width, and explicit
+frequency/band metadata when supplied. Logging is disabled when neither option
+is present.
+
 Local survey CU is driver-dependent and opt-in. To poll
 `iw dev <iface> survey dump` once per second and include local CU, add
 `--local-cu`:

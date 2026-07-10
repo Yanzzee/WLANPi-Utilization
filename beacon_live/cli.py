@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import sys
-from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone
@@ -20,6 +17,8 @@ from beacon_live.parser import parse_tshark_row
 from beacon_live.live import LiveCommandError
 from beacon_live.live import SUPPORTED_BANDS
 from beacon_live.live import run_live
+from beacon_live.log_writer import CaptureLogWriter
+from beacon_live.log_writer import LogMetadata
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
     parse_survey_dump,
@@ -60,6 +59,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 interval_seconds=args.interval_seconds,
                 local_cu=args.local_cu or args.survey_debug,
                 survey_debug=args.survey_debug,
+                stats_csv=args.stats_csv,
+                beacons_jsonl=args.beacons_jsonl,
             )
         except ValueError as exc:
             parser.error(f"live {exc}")
@@ -178,6 +179,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "local survey CU in live output."
         ),
     )
+    live.add_argument(
+        "--stats-csv",
+        required=False,
+        type=Path,
+        help="Write each emitted per-second stats row to this CSV path.",
+    )
+    live.add_argument(
+        "--beacons-jsonl",
+        required=False,
+        type=Path,
+        help="Write each valid raw beacon record to this JSONL path.",
+    )
 
     return parser
 
@@ -192,7 +205,7 @@ def _run_replay(
     interface: str = "wlan0",
     channel: str = "36",
 ) -> int:
-    log_metadata = _LogMetadata(
+    log_metadata = LogMetadata(
         start_time=_utc_now_iso(),
         interface=interface,
         channel=channel,
@@ -209,10 +222,15 @@ def _run_replay(
         replay_data.records,
         local_cu_by_second=local_cu_by_second,
     )
-    if beacons_jsonl is not None:
-        _write_beacons_jsonl(beacons_jsonl, replay_data.records, log_metadata)
-    if stats_csv is not None:
-        _write_stats_csv(stats, stats_csv, log_metadata)
+    with CaptureLogWriter(
+        metadata=log_metadata,
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+    ) as log_writer:
+        for record in replay_data.records:
+            log_writer.write_beacon(record)
+        for second_stats in stats:
+            log_writer.write_stats(second_stats)
 
     print(_format_header())
     for second_stats in stats:
@@ -273,14 +291,6 @@ class _BeaconReplayData:
         return last_timestamp - first_timestamp
 
 
-@dataclass(frozen=True)
-class _LogMetadata:
-    start_time: str
-    interface: str
-    channel: str
-    channel_width_mhz: int
-
-
 def _read_beacon_replay(beacons_tsv: Path) -> _BeaconReplayData:
     records: list[BeaconRecord] = []
     total_rows = 0
@@ -316,79 +326,6 @@ def _load_local_survey_cu_percent(
     previous_samples = parse_survey_dump(survey_before.read_text(encoding="utf-8"))
     current_samples = parse_survey_dump(survey_after.read_text(encoding="utf-8"))
     return compute_local_cu_percent_from_samples(previous_samples, current_samples)
-
-
-def _write_stats_csv(
-    stats: list[SecondStats],
-    output_path: Path,
-    metadata: _LogMetadata,
-) -> None:
-    _ensure_parent_dir(output_path)
-    fieldnames = [
-        "start_time",
-        "interface",
-        "channel",
-        "channel_width_mhz",
-        "second",
-        "unique_bssid_count",
-        "qbss_station_count_sum",
-        "qbss_cu_min_percent",
-        "qbss_cu_mean_percent",
-        "qbss_cu_max_percent",
-        "top_qbss_cu_ssid",
-        "top_qbss_cu_bssid",
-        "top_qbss_cu_percent",
-        "local_cu_percent",
-    ]
-
-    with output_path.open("w", encoding="utf-8", newline="") as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
-        writer.writeheader()
-        for second_stats in stats:
-            writer.writerow(_stats_csv_row(second_stats, metadata))
-            output_file.flush()
-
-
-def _write_beacons_jsonl(
-    output_path: Path,
-    records: list[BeaconRecord],
-    metadata: _LogMetadata,
-) -> None:
-    _ensure_parent_dir(output_path)
-    metadata_fields = asdict(metadata)
-
-    with output_path.open("w", encoding="utf-8") as output_file:
-        for record in records:
-            payload = {
-                "record_type": "beacon",
-                **metadata_fields,
-                **asdict(record),
-            }
-            output_file.write(json.dumps(payload, sort_keys=True) + "\n")
-            output_file.flush()
-
-
-def _stats_csv_row(stats: SecondStats, metadata: _LogMetadata) -> dict[str, object]:
-    return {
-        "start_time": metadata.start_time,
-        "interface": metadata.interface,
-        "channel": metadata.channel,
-        "channel_width_mhz": metadata.channel_width_mhz,
-        "second": stats.second,
-        "unique_bssid_count": stats.unique_bssid_count,
-        "qbss_station_count_sum": stats.qbss_station_count_sum,
-        "qbss_cu_min_percent": _format_optional_float(stats.qbss_cu_min_percent),
-        "qbss_cu_mean_percent": _format_optional_float(stats.qbss_cu_mean_percent),
-        "qbss_cu_max_percent": _format_optional_float(stats.qbss_cu_max_percent),
-        "top_qbss_cu_ssid": stats.top_qbss_cu_ssid or "",
-        "top_qbss_cu_bssid": stats.top_qbss_cu_bssid or "",
-        "top_qbss_cu_percent": _format_optional_float(stats.top_qbss_cu_percent),
-        "local_cu_percent": _format_optional_float(stats.local_cu_percent),
-    }
-
-
-def _ensure_parent_dir(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _utc_now_iso() -> str:

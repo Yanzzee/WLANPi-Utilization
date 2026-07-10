@@ -193,6 +193,8 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         interval_seconds: float,
         local_cu: bool,
         survey_debug: bool,
+        stats_csv: Optional[Path],
+        beacons_jsonl: Optional[Path],
     ) -> int:
         calls.append(
             {
@@ -223,6 +225,40 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
+def test_live_accepts_log_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    stats_csv = tmp_path / "logs" / "stats.csv"
+    beacons_jsonl = tmp_path / "logs" / "beacons.jsonl"
+
+    def fake_run_live(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(
+        [
+            "live",
+            "--iface",
+            "wlan9",
+            "--channel",
+            "44",
+            "--stats-csv",
+            str(stats_csv),
+            "--beacons-jsonl",
+            str(beacons_jsonl),
+        ]
+    ) == 0
+
+    assert calls[0]["stats_csv"] == stats_csv
+    assert calls[0]["beacons_jsonl"] == beacons_jsonl
+    assert calls[0]["iface"] == "wlan9"
+    assert calls[0]["channel"] == "44"
+
+
 def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
@@ -235,6 +271,8 @@ def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) ->
         interval_seconds: float,
         local_cu: bool,
         survey_debug: bool,
+        stats_csv: Optional[Path],
+        beacons_jsonl: Optional[Path],
     ) -> int:
         calls.append(
             {
@@ -277,6 +315,8 @@ def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) ->
         interval_seconds: float,
         local_cu: bool,
         survey_debug: bool,
+        stats_csv: Optional[Path],
+        beacons_jsonl: Optional[Path],
     ) -> int:
         calls.append(
             {
@@ -319,6 +359,8 @@ def test_live_accepts_local_cu(monkeypatch: pytest.MonkeyPatch) -> None:
         interval_seconds: float,
         local_cu: bool,
         survey_debug: bool,
+        stats_csv: Optional[Path],
+        beacons_jsonl: Optional[Path],
     ) -> int:
         calls.append(
             {
@@ -361,6 +403,8 @@ def test_live_accepts_survey_debug(monkeypatch: pytest.MonkeyPatch) -> None:
         interval_seconds: float,
         local_cu: bool,
         survey_debug: bool,
+        stats_csv: Optional[Path],
+        beacons_jsonl: Optional[Path],
     ) -> int:
         calls.append(
             {
@@ -418,6 +462,8 @@ def test_live_reports_setup_failure(
         interval_seconds: float,
         local_cu: bool,
         survey_debug: bool,
+        stats_csv: Optional[Path],
+        beacons_jsonl: Optional[Path],
     ) -> int:
         raise LiveCommandError(
             failed_command,

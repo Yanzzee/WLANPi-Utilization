@@ -30,6 +30,7 @@ sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --stats-csv logs/stats.csv --beacons-jsonl logs/beacons.jsonl
 ```
 
 The replay command prints tab-separated per-second stats from a saved TShark
@@ -57,3 +58,9 @@ the terminal output. Add `--survey-debug` to print the selected survey frequency
 plus active/busy counter deltas to stderr. An unavailable value (`--`) means the
 adapter/driver did not provide usable counters for the tuned frequency; it does
 not indicate a beacon-capture failure.
+
+Live logging is optional. Use `--stats-csv` for one flushed row per emitted
+`SecondStats`, and `--beacons-jsonl` for one flushed JSON object per valid raw
+beacon. Parent directories are created automatically. Both formats include
+capture start time, interface, channel, 20 MHz channel width, and explicit
+frequency/band metadata when supplied.
