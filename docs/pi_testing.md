@@ -182,9 +182,10 @@ include interface, channel, 20 MHz width, and replay start-time metadata.
 
 ## Run Minimal Live Mode
 
-Live mode is terminal-only for now. It configures the selected interface for
-monitor mode, tunes with 20 MHz width, starts line-buffered TShark, and prints
-one readable AP/QBSS stats line per second.
+Live mode is terminal-only for now. Beacon analysis is the core path: it
+configures the selected interface for monitor mode, tunes with 20 MHz width,
+starts line-buffered TShark, and prints one readable AP/QBSS stats line per
+second. Local survey counters are not required.
 
 When using the project virtual environment, call the venv Python explicitly
 under `sudo`. This avoids the common `sudo: beacon-live: command not found`
@@ -236,8 +237,8 @@ the capture start time, interface, channel, 20 MHz width, and explicit
 frequency/band metadata when supplied. Logging is disabled when neither option
 is present.
 
-Local survey CU is driver-dependent and opt-in. To poll
-`iw dev <iface> survey dump` once per second and include local CU, add
+Local survey CU is driver-dependent and strictly opt-in. To poll
+`iw dev <iface> survey dump` once per second and populate local CU, add
 `--local-cu`:
 
 ```bash
@@ -256,9 +257,11 @@ frequency, active-time delta, busy-time delta, computed local CU, and reason.
 If `busy_delta_ms=0` while `active_delta_ms` increases, the adapter/driver is
 reporting an idle local busy counter. If the reason says the target frequency
 counters are unavailable, the local survey data cannot be trusted for that tuned
-channel. Live mode will display this optional metric as `local_survey_cu=--` and
-continue collecting valid AP/QBSS data. This is an adapter/driver survey-counter
-limitation, not a beacon-capture error.
+channel. Without `--local-cu`, or when the command is unsupported, counters are
+missing, or output cannot be parsed, live mode displays
+`local_survey_cu=--`. If survey polling was enabled it also prints a warning,
+then continues collecting and logging valid AP/QBSS data. This is an
+adapter/driver survey-counter limitation, not a beacon-capture error.
 
 If you installed the package system-wide, `sudo beacon-live live --iface wlan0
 --channel 36` can also work, but the project-local venv form above is preferred

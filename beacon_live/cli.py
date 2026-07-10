@@ -1,4 +1,4 @@
-"""Command-line interface for WLAN Pi beacon replay workflows."""
+"""Command-line interface for WLAN Pi beacon analysis workflows."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="beacon-live",
-        description="Replay saved WLAN beacon QBSS samples.",
+        description="Analyze WLAN beacon QBSS samples from replay or live capture.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -131,7 +131,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Channel or frequency metadata for logs. Default: 36.",
     )
 
-    live = subparsers.add_parser("live", help="Run a minimal live WLAN capture.")
+    live = subparsers.add_parser(
+        "live",
+        help="Run live beacon analysis with optional local survey CU.",
+    )
     live.add_argument(
         "--iface",
         default="wlan0",

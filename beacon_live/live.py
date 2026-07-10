@@ -308,7 +308,9 @@ def run_live(
     next_survey_poll = time.monotonic() + interval_seconds
     survey_warning_printed = False
 
-    print(_format_live_header(include_local_cu=local_cu), flush=True)
+    # Keep the optional metric visible even in beacon-only mode so operators
+    # can distinguish "unavailable" from a silently omitted measurement.
+    print(_format_live_header(include_local_cu=True), flush=True)
 
     try:
         log_writer.open()
@@ -376,7 +378,7 @@ def run_live(
                     wall_second,
                     latest_local_cu_percent,
                     printed_seconds,
-                    include_local_cu=local_cu,
+                    include_local_cu=True,
                     stats_writer=log_writer.write_stats,
                 )
                 next_survey_poll = _next_interval_deadline(
@@ -390,7 +392,7 @@ def run_live(
                 stats = replace(stats, local_cu_percent=latest_local_cu_percent)
                 _emit_live_stats(
                     stats,
-                    include_local_cu=local_cu,
+                    include_local_cu=True,
                     stats_writer=log_writer.write_stats,
                 )
                 printed_seconds.add(stats.second)
@@ -404,7 +406,7 @@ def run_live(
 def _read_survey_samples_safely(iface: str) -> Optional[list[SurveySample]]:
     try:
         return read_survey_samples(iface)
-    except LiveCommandError:
+    except (LiveCommandError, OSError, ValueError, OverflowError):
         return None
 
 

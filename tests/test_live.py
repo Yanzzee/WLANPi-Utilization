@@ -1,6 +1,13 @@
+import csv
+import io
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from beacon_live.live import LiveCommandError
+from beacon_live.live import _read_survey_samples_safely
 from beacon_live.live import _format_live_header
 from beacon_live.live import _format_live_stats_line
 from beacon_live.live import _format_survey_debug_line
@@ -11,7 +18,9 @@ from beacon_live.live import build_tshark_command
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 from beacon_live.live import resolve_survey_target_frequency_mhz
+from beacon_live.live import run_live
 from beacon_live.models import SecondStats
+from beacon_live.models import SurveySample
 from beacon_live.survey import SurveyCuResult
 
 
@@ -132,6 +141,169 @@ def test_configure_monitor_interface_stops_on_failed_command() -> None:
         ["ip", "link", "set", "wlan0", "down"],
         failing_command,
     ]
+
+
+def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stats_csv = tmp_path / "stats.csv"
+    beacons_jsonl = tmp_path / "beacons.jsonl"
+    _prepare_one_interval_live_run(monkeypatch)
+
+    def unexpected_survey_read(iface: str) -> list[SurveySample]:
+        raise AssertionError(f"survey should be disabled for {iface}")
+
+    monkeypatch.setattr(
+        "beacon_live.live._read_survey_samples_safely",
+        unexpected_survey_read,
+    )
+
+    assert run_live(
+        local_cu=False,
+        interval_seconds=0.1,
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert "unique_bssids=1" in captured.out
+    assert "max_qbss_cu=50.20%" in captured.out
+    assert "local_survey_cu=--" in captured.out
+    assert captured.err == ""
+
+    with stats_csv.open("r", encoding="utf-8", newline="") as stats_file:
+        stats_rows = list(csv.DictReader(stats_file))
+    assert stats_rows[0]["unique_bssid_count"] == "1"
+    assert stats_rows[0]["local_cu_percent"] == ""
+
+    beacons = [
+        json.loads(line)
+        for line in beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(beacons) == 1
+    assert beacons[0]["bssid"] == "aa:aa:aa:aa:aa:aa"
+
+
+def test_survey_enabled_live_mode_uses_available_data(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    survey_reads = iter(
+        [
+            [SurveySample(1.0, 1000, 100, 0, 0, None, 5180, True)],
+            [SurveySample(2.0, 2000, 300, 0, 0, None, 5180, True)],
+        ]
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_survey_samples_safely",
+        lambda iface: next(survey_reads),
+    )
+
+    assert run_live(local_cu=True, interval_seconds=0.1) == 0
+
+    captured = capsys.readouterr()
+    assert "unique_bssids=1" in captured.out
+    assert "local_survey_cu=20.00%" in captured.out
+    assert captured.err == ""
+
+
+def test_survey_enabled_live_mode_survives_unsupported_driver(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    monkeypatch.setattr(
+        "beacon_live.live._read_survey_samples_safely",
+        lambda iface: None,
+    )
+
+    assert run_live(local_cu=True, interval_seconds=0.1) == 0
+
+    captured = capsys.readouterr()
+    assert "unique_bssids=1" in captured.out
+    assert "local_survey_cu=--" in captured.out
+    assert "survey counters unavailable" in captured.err
+
+
+def test_survey_parse_failure_is_treated_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+
+    def unparseable_survey(text: str) -> list[SurveySample]:
+        raise ValueError(f"unparseable survey output: {text}")
+
+    monkeypatch.setattr("beacon_live.live.parse_survey_dump", unparseable_survey)
+    monkeypatch.setattr(
+        "beacon_live.live.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="unsupported driver output",
+            stderr="",
+        ),
+    )
+
+    assert _read_survey_samples_safely("wlan0") is None
+    assert run_live(local_cu=True, interval_seconds=0.1) == 0
+
+    captured = capsys.readouterr()
+    assert "unique_bssids=1" in captured.out
+    assert "local_survey_cu=--" in captured.out
+    assert "survey counters unavailable" in captured.err
+
+
+class _FakeTsharkProcess:
+    def __init__(self) -> None:
+        self.stdout = io.StringIO(
+            "1000.100\tAlpha\taa:aa:aa:aa:aa:aa\t128\t2\t0\n"
+        )
+        self.stderr = io.StringIO("")
+
+    def poll(self) -> None:
+        return None
+
+
+class _FakeSelector:
+    def __init__(self) -> None:
+        self.fileobj: object = None
+
+    def register(self, fileobj: object, events: int) -> None:
+        self.fileobj = fileobj
+
+    def select(self, timeout: float) -> list[tuple[SimpleNamespace, None]]:
+        return [(SimpleNamespace(fileobj=self.fileobj), None)]
+
+    def close(self) -> None:
+        pass
+
+
+def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monotonic_value = -1.0
+
+    def fake_monotonic() -> float:
+        nonlocal monotonic_value
+        monotonic_value += 1.0
+        return monotonic_value
+
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.start_tshark_process",
+        lambda iface: _FakeTsharkProcess(),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.terminate_tshark_process",
+        lambda process: None,
+    )
+    monkeypatch.setattr("beacon_live.live.selectors.DefaultSelector", _FakeSelector)
+    monkeypatch.setattr("beacon_live.live.time.monotonic", fake_monotonic)
+    monkeypatch.setattr("beacon_live.live.time.time", lambda: 1002.0)
 
 
 def _field_args(command: list[str]) -> list[str]:
