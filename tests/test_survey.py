@@ -120,6 +120,7 @@ def test_compute_local_cu_percent_from_samples_uses_target_frequency() -> None:
     )
 
     assert result.local_cu_percent is None
+    assert result.frequency_mhz == 5180
     assert result.reason == "target frequency 5180 MHz counters unavailable"
 
 

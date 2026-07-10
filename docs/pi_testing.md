@@ -239,7 +239,9 @@ frequency, active-time delta, busy-time delta, computed local CU, and reason.
 If `busy_delta_ms=0` while `active_delta_ms` increases, the adapter/driver is
 reporting an idle local busy counter. If the reason says the target frequency
 counters are unavailable, the local survey data cannot be trusted for that tuned
-channel.
+channel. Live mode will display this optional metric as `local_survey_cu=--` and
+continue collecting valid AP/QBSS data. This is an adapter/driver survey-counter
+limitation, not a beacon-capture error.
 
 If you installed the package system-wide, `sudo beacon-live live --iface wlan0
 --channel 36` can also work, but the project-local venv form above is preferred

@@ -338,6 +338,18 @@ def run_live(
                                     file=sys.stderr,
                                     flush=True,
                                 )
+                            elif (
+                                latest_local_cu_percent is None
+                                and not survey_warning_printed
+                            ):
+                                print(
+                                    _format_survey_unavailable_warning(
+                                        survey_cu_result
+                                    ),
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
+                                survey_warning_printed = True
                         previous_survey_samples = current_survey_samples
 
                 wall_second = int(time.time())
@@ -439,7 +451,7 @@ def _next_interval_deadline(previous_deadline: float, interval_seconds: float) -
 def _format_live_header(*, include_local_cu: bool = True) -> str:
     header = "time second unique_bssids qbss_station_sum max_qbss_cu top_qbss_cu"
     if include_local_cu:
-        return f"{header} local_cu"
+        return f"{header} local_survey_cu"
     return header
 
 
@@ -460,7 +472,10 @@ def _format_live_stats_line(
         f"top_qbss_cu={top_label or '--'}"
     )
     if include_local_cu:
-        return f"{line} local_cu={_format_optional_percent(stats.local_cu_percent)}"
+        return (
+            f"{line} "
+            f"local_survey_cu={_format_optional_percent(stats.local_cu_percent)}"
+        )
     return line
 
 
@@ -506,6 +521,14 @@ def _format_survey_debug_line(result: SurveyCuResult) -> str:
         f"freq={frequency} "
         f"active_delta_ms={_format_optional_int(result.active_delta_ms)} "
         f"busy_delta_ms={_format_optional_int(result.busy_delta_ms)} "
-        f"local_cu={_format_optional_percent(result.local_cu_percent)} "
+        f"local_survey_cu={_format_optional_percent(result.local_cu_percent)} "
         f"reason={result.reason}"
+    )
+
+
+def _format_survey_unavailable_warning(result: SurveyCuResult) -> str:
+    return (
+        f"Warning: local survey CU unavailable: {result.reason}. "
+        "The adapter/driver may not expose usable active/busy counters for "
+        "the tuned channel; use --survey-debug for details."
     )

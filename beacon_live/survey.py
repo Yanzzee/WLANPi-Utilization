@@ -153,6 +153,7 @@ def compute_local_cu_result_from_samples(
         return _best_valid_result(
             target_pairs,
             f"target frequency {target_frequency_mhz} MHz counters unavailable",
+            unavailable_frequency_mhz=target_frequency_mhz,
         )
 
     in_use_pairs = [
@@ -197,6 +198,8 @@ def _paired_samples(
 def _best_valid_result(
     pairs: Iterable[tuple[SurveySample, SurveySample]],
     unavailable_reason: str,
+    *,
+    unavailable_frequency_mhz: Optional[int] = None,
 ) -> SurveyCuResult:
     best_result: Optional[SurveyCuResult] = None
 
@@ -232,13 +235,20 @@ def _best_valid_result(
     if best_result is not None:
         return best_result
 
-    return _empty_result(unavailable_reason)
+    return _empty_result(
+        unavailable_reason,
+        frequency_mhz=unavailable_frequency_mhz,
+    )
 
 
-def _empty_result(reason: str) -> SurveyCuResult:
+def _empty_result(
+    reason: str,
+    *,
+    frequency_mhz: Optional[int] = None,
+) -> SurveyCuResult:
     return SurveyCuResult(
         local_cu_percent=None,
-        frequency_mhz=None,
+        frequency_mhz=frequency_mhz,
         active_delta_ms=None,
         busy_delta_ms=None,
         reason=reason,

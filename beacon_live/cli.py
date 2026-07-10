@@ -165,12 +165,18 @@ def _build_parser() -> argparse.ArgumentParser:
     live.add_argument(
         "--survey-debug",
         action="store_true",
-        help="Print local survey counter selection and deltas to stderr.",
+        help=(
+            "Enable local survey CU and print counter selection and deltas "
+            "to stderr."
+        ),
     )
     live.add_argument(
         "--local-cu",
         action="store_true",
-        help="Poll iw survey counters and include local CU in live output.",
+        help=(
+            "Poll optional, driver-dependent iw survey counters and include "
+            "local survey CU in live output."
+        ),
     )
 
     return parser

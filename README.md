@@ -29,7 +29,7 @@ beacon-live replay --input samples/tshark_qbss_sample.tsv
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --local-cu --survey-debug
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug
 ```
 
 The replay command prints tab-separated per-second stats from a saved TShark
@@ -52,6 +52,8 @@ frequency. For 6 GHz PSC channel 5, use either `--frequency-mhz 5975` or
 `--band 6 --channel 5`.
 
 Local survey CU is driver-dependent and opt-in. Add `--local-cu` to poll
-`iw dev <iface> survey dump` once per second and include local CU. Add
-`--survey-debug` to print the selected survey frequency plus active/busy counter
-deltas to stderr.
+`iw dev <iface> survey dump` once per second and include `local_survey_cu` in
+the terminal output. Add `--survey-debug` to print the selected survey frequency
+plus active/busy counter deltas to stderr. An unavailable value (`--`) means the
+adapter/driver did not provide usable counters for the tuned frequency; it does
+not indicate a beacon-capture failure.

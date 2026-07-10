@@ -120,4 +120,4 @@ echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --frequency-mhz
 echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --band 6 --channel 5"
 echo
 echo "For optional local survey CU diagnostics, use:"
-echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --channel 36 --local-cu --survey-debug"
+echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug"

@@ -1,12 +1,18 @@
 import pytest
 
 from beacon_live.live import LiveCommandError
+from beacon_live.live import _format_live_header
+from beacon_live.live import _format_live_stats_line
+from beacon_live.live import _format_survey_debug_line
+from beacon_live.live import _format_survey_unavailable_warning
 from beacon_live.live import build_monitor_setup_commands
 from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 from beacon_live.live import resolve_survey_target_frequency_mhz
+from beacon_live.models import SecondStats
+from beacon_live.survey import SurveyCuResult
 
 
 def test_build_monitor_setup_commands_uses_ht20_channel() -> None:
@@ -70,6 +76,42 @@ def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:
 
 def test_build_survey_command() -> None:
     assert build_survey_command("wlan0") == ["iw", "dev", "wlan0", "survey", "dump"]
+
+
+def test_live_output_labels_local_survey_cu_separately() -> None:
+    stats = SecondStats(
+        second=1000,
+        unique_bssid_count=0,
+        qbss_station_count_sum=0,
+        qbss_cu_min_percent=None,
+        qbss_cu_mean_percent=None,
+        qbss_cu_max_percent=None,
+        top_qbss_cu_ssid=None,
+        top_qbss_cu_bssid=None,
+        top_qbss_cu_percent=None,
+        local_cu_percent=None,
+    )
+
+    assert _format_live_header(include_local_cu=True).endswith("local_survey_cu")
+    assert "local_survey_cu=--" in _format_live_stats_line(
+        stats,
+        include_local_cu=True,
+    )
+
+
+def test_unavailable_survey_diagnostics_keep_target_frequency() -> None:
+    result = SurveyCuResult(
+        local_cu_percent=None,
+        frequency_mhz=5180,
+        active_delta_ms=None,
+        busy_delta_ms=None,
+        reason="target frequency 5180 MHz counters unavailable",
+    )
+
+    assert "freq=5180MHz" in _format_survey_debug_line(result)
+    warning = _format_survey_unavailable_warning(result)
+    assert "local survey CU unavailable" in warning
+    assert "target frequency 5180 MHz counters unavailable" in warning
 
 
 def test_configure_monitor_interface_stops_on_failed_command() -> None:
