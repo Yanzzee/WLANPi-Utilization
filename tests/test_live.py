@@ -8,8 +8,6 @@ import pytest
 
 from beacon_live.live import LiveCommandError
 from beacon_live.live import _read_survey_samples_safely
-from beacon_live.live import _format_live_header
-from beacon_live.live import _format_live_stats_line
 from beacon_live.live import _format_survey_debug_line
 from beacon_live.live import _format_survey_unavailable_warning
 from beacon_live.live import build_monitor_setup_commands
@@ -87,27 +85,6 @@ def test_build_survey_command() -> None:
     assert build_survey_command("wlan0") == ["iw", "dev", "wlan0", "survey", "dump"]
 
 
-def test_live_output_labels_local_survey_cu_separately() -> None:
-    stats = SecondStats(
-        second=1000,
-        unique_bssid_count=0,
-        qbss_station_count_sum=0,
-        qbss_cu_min_percent=None,
-        qbss_cu_mean_percent=None,
-        qbss_cu_max_percent=None,
-        top_qbss_cu_ssid=None,
-        top_qbss_cu_bssid=None,
-        top_qbss_cu_percent=None,
-        local_cu_percent=None,
-    )
-
-    assert _format_live_header(include_local_cu=True).endswith("local_survey_cu")
-    assert "local_survey_cu=--" in _format_live_stats_line(
-        stats,
-        include_local_cu=True,
-    )
-
-
 def test_unavailable_survey_diagnostics_keep_target_frequency() -> None:
     result = SurveyCuResult(
         local_cu_percent=None,
@@ -168,9 +145,14 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     ) == 0
 
     captured = capsys.readouterr()
-    assert "unique_bssids=1" in captured.out
-    assert "max_qbss_cu=50.20%" in captured.out
-    assert "local_survey_cu=--" in captured.out
+    beacon_row = next(
+        line
+        for line in captured.out.splitlines()
+        if "Alpha/aa:aa:aa:aa:aa:aa" in line
+    )
+    assert beacon_row.split()[1:4] == ["1", "2", "50.20%/50.20%/50.20%"]
+    assert "LOCAL SURVEY CU" not in captured.out
+    assert "unavailable" not in captured.out
     assert captured.err == ""
 
     with stats_csv.open("r", encoding="utf-8", newline="") as stats_file:
@@ -205,8 +187,9 @@ def test_survey_enabled_live_mode_uses_available_data(
     assert run_live(local_cu=True, interval_seconds=0.1) == 0
 
     captured = capsys.readouterr()
-    assert "unique_bssids=1" in captured.out
-    assert "local_survey_cu=20.00%" in captured.out
+    assert "Alpha/aa:aa:aa:aa:aa:aa" in captured.out
+    assert "LOCAL SURVEY CU" in captured.out
+    assert "20.00%" in captured.out
     assert captured.err == ""
 
 
@@ -223,8 +206,9 @@ def test_survey_enabled_live_mode_survives_unsupported_driver(
     assert run_live(local_cu=True, interval_seconds=0.1) == 0
 
     captured = capsys.readouterr()
-    assert "unique_bssids=1" in captured.out
-    assert "local_survey_cu=--" in captured.out
+    assert "Alpha/aa:aa:aa:aa:aa:aa" in captured.out
+    assert "LOCAL SURVEY CU" in captured.out
+    assert "unavailable" in captured.out
     assert "survey counters unavailable" in captured.err
 
 
@@ -251,8 +235,9 @@ def test_survey_parse_failure_is_treated_as_unavailable(
     assert run_live(local_cu=True, interval_seconds=0.1) == 0
 
     captured = capsys.readouterr()
-    assert "unique_bssids=1" in captured.out
-    assert "local_survey_cu=--" in captured.out
+    assert "Alpha/aa:aa:aa:aa:aa:aa" in captured.out
+    assert "LOCAL SURVEY CU" in captured.out
+    assert "unavailable" in captured.out
     assert "survey counters unavailable" in captured.err
 
 

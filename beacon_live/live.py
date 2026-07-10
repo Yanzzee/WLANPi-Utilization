@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from beacon_live.aggregator import Aggregator
+from beacon_live.dashboard import TerminalDashboard
 from beacon_live.log_writer import CaptureLogWriter
 from beacon_live.log_writer import LogMetadata
 from beacon_live.models import SecondStats
@@ -277,10 +278,14 @@ def run_live(
     beacons_jsonl: Optional[Path] = None,
 ) -> int:
     local_cu = local_cu or survey_debug
-    target_frequency_mhz = resolve_survey_target_frequency_mhz(
-        channel,
-        frequency_mhz=frequency_mhz,
-        band=band,
+    target_frequency_mhz = (
+        resolve_survey_target_frequency_mhz(
+            channel,
+            frequency_mhz=frequency_mhz,
+            band=band,
+        )
+        if local_cu
+        else None
     )
     configure_monitor_interface(
         iface,
@@ -291,6 +296,7 @@ def run_live(
     process = start_tshark_process(iface)
     selector = selectors.DefaultSelector()
     aggregator = Aggregator()
+    dashboard = TerminalDashboard(include_local_cu=local_cu)
     log_writer = CaptureLogWriter(
         metadata=LogMetadata(
             start_time=_utc_now_iso(),
@@ -307,10 +313,6 @@ def run_live(
     latest_local_cu_percent: Optional[float] = None
     next_survey_poll = time.monotonic() + interval_seconds
     survey_warning_printed = False
-
-    # Keep the optional metric visible even in beacon-only mode so operators
-    # can distinguish "unavailable" from a silently omitted measurement.
-    print(_format_live_header(include_local_cu=True), flush=True)
 
     try:
         log_writer.open()
@@ -336,7 +338,8 @@ def run_live(
                     if current_survey_samples is None:
                         if not survey_warning_printed:
                             print(
-                                "Warning: survey counters unavailable; local CU hidden",
+                                "Warning: survey counters unavailable; "
+                                "local CU marked unavailable",
                                 file=sys.stderr,
                                 flush=True,
                             )
@@ -373,13 +376,16 @@ def run_live(
                         previous_survey_samples = current_survey_samples
 
                 wall_second = int(time.time())
-                _print_completed_live_stats(
+                completed_stats = _completed_live_stats(
                     aggregator,
                     wall_second,
                     latest_local_cu_percent,
                     printed_seconds,
-                    include_local_cu=True,
+                )
+                _publish_live_stats(
+                    completed_stats,
                     stats_writer=log_writer.write_stats,
+                    dashboard=dashboard,
                 )
                 next_survey_poll = _next_interval_deadline(
                     next_survey_poll,
@@ -387,15 +393,17 @@ def run_live(
                 )
     except KeyboardInterrupt:
         print("\nStopping live capture...", file=sys.stderr, flush=True)
+        pending_stats: list[SecondStats] = []
         for stats in aggregator.flush():
             if stats.second not in printed_seconds:
                 stats = replace(stats, local_cu_percent=latest_local_cu_percent)
-                _emit_live_stats(
-                    stats,
-                    include_local_cu=True,
-                    stats_writer=log_writer.write_stats,
-                )
+                pending_stats.append(stats)
                 printed_seconds.add(stats.second)
+        _publish_live_stats(
+            pending_stats,
+            stats_writer=log_writer.write_stats,
+            dashboard=dashboard,
+        )
         return 0
     finally:
         log_writer.close()
@@ -432,48 +440,45 @@ def _handle_tshark_exit(process: subprocess.Popen[str]) -> int:
     return returncode
 
 
-def _print_completed_live_stats(
+def _completed_live_stats(
     aggregator: Aggregator,
     wall_second: int,
     local_cu_percent: Optional[float],
     printed_seconds: set[int],
-    *,
-    include_local_cu: bool,
-    stats_writer: Callable[[SecondStats], None],
-) -> None:
+) -> list[SecondStats]:
     target_second = wall_second - 1
     completed_stats = aggregator.pop_completed_before(wall_second)
     completed_seconds = set()
+    stats_to_publish: list[SecondStats] = []
 
     for stats in completed_stats:
         if stats.second in printed_seconds:
             continue
         completed_seconds.add(stats.second)
         stats = replace(stats, local_cu_percent=local_cu_percent)
-        _emit_live_stats(
-            stats,
-            include_local_cu=include_local_cu,
-            stats_writer=stats_writer,
-        )
+        stats_to_publish.append(stats)
         printed_seconds.add(stats.second)
 
     if target_second not in printed_seconds and target_second not in completed_seconds:
-        _emit_live_stats(
-            _empty_second_stats(target_second, local_cu_percent),
-            include_local_cu=include_local_cu,
-            stats_writer=stats_writer,
+        stats_to_publish.append(
+            _empty_second_stats(target_second, local_cu_percent)
         )
         printed_seconds.add(target_second)
 
+    return stats_to_publish
 
-def _emit_live_stats(
-    stats: SecondStats,
+
+def _publish_live_stats(
+    stats_rows: list[SecondStats],
     *,
-    include_local_cu: bool,
     stats_writer: Callable[[SecondStats], None],
+    dashboard: TerminalDashboard,
 ) -> None:
-    stats_writer(stats)
-    print(_format_live_stats_line(stats, include_local_cu=include_local_cu), flush=True)
+    if not stats_rows:
+        return
+    for stats in stats_rows:
+        stats_writer(stats)
+    dashboard.refresh(stats_rows)
 
 
 def _next_interval_deadline(previous_deadline: float, interval_seconds: float) -> float:
@@ -482,37 +487,6 @@ def _next_interval_deadline(previous_deadline: float, interval_seconds: float) -
     while next_deadline <= now:
         next_deadline += interval_seconds
     return next_deadline
-
-
-def _format_live_header(*, include_local_cu: bool = True) -> str:
-    header = "time second unique_bssids qbss_station_sum max_qbss_cu top_qbss_cu"
-    if include_local_cu:
-        return f"{header} local_survey_cu"
-    return header
-
-
-def _format_live_stats_line(
-    stats: SecondStats,
-    *,
-    include_local_cu: bool = True,
-) -> str:
-    top_ssid = stats.top_qbss_cu_ssid or ""
-    top_bssid = stats.top_qbss_cu_bssid or ""
-    top_label = f"{top_ssid}/{top_bssid}".strip("/")
-    line = (
-        f"time={_format_second_time(stats.second)} "
-        f"second={stats.second} "
-        f"unique_bssids={stats.unique_bssid_count} "
-        f"qbss_station_sum={stats.qbss_station_count_sum} "
-        f"max_qbss_cu={_format_optional_percent(stats.qbss_cu_max_percent)} "
-        f"top_qbss_cu={top_label or '--'}"
-    )
-    if include_local_cu:
-        return (
-            f"{line} "
-            f"local_survey_cu={_format_optional_percent(stats.local_cu_percent)}"
-        )
-    return line
 
 
 def _empty_second_stats(
@@ -530,13 +504,6 @@ def _empty_second_stats(
         top_qbss_cu_bssid=None,
         top_qbss_cu_percent=None,
         local_cu_percent=local_cu_percent,
-    )
-
-
-def _format_second_time(second: int) -> str:
-    return datetime.fromtimestamp(second, timezone.utc).isoformat().replace(
-        "+00:00",
-        "Z",
     )
 
 
