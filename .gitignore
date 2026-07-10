@@ -217,5 +217,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Generated Pi smoke-test captures copied back from hardware
+samples/pi_*.tsv
+samples/pi_*.txt
+
 # Local Pi smoke-test debug bundles
 debug/

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Optional
+from typing import Iterable, Optional
 
 from beacon_live.models import SurveySample
 
@@ -83,6 +83,36 @@ def compute_local_cu_percent(
         return None
 
     return busy_delta / active_delta * 100
+
+
+def compute_local_cu_percent_from_samples(
+    previous_samples: Iterable[SurveySample],
+    current_samples: Iterable[SurveySample],
+) -> Optional[float]:
+    """Compute one local CU value from paired survey dumps.
+
+    ``iw survey dump`` can include many channels. For replay, use the valid
+    before/after pair with the largest active-time delta, which should represent
+    the channel where the adapter spent the capture window.
+    """
+    best_active_delta: Optional[int] = None
+    best_percent: Optional[float] = None
+
+    for previous, current in zip(previous_samples, current_samples):
+        percent = compute_local_cu_percent(previous, current)
+        if (
+            percent is None
+            or previous.active_ms is None
+            or current.active_ms is None
+        ):
+            continue
+
+        active_delta = current.active_ms - previous.active_ms
+        if best_active_delta is None or active_delta > best_active_delta:
+            best_active_delta = active_delta
+            best_percent = percent
+
+    return best_percent
 
 
 def _empty_fields() -> dict[str, Optional[int]]:

@@ -72,7 +72,7 @@ frequency in MHz:
 Defaults:
 
 ```bash
-./scripts/pi_smoke.sh wlan1 36
+./scripts/pi_smoke.sh wlan0 36
 ```
 
 The script assumes a 20 MHz channel width and configures the selected interface
@@ -82,25 +82,28 @@ The three Wi-Fi bands should be supported when the adapter, driver, and local
 regulatory domain allow them:
 
 ```bash
-./scripts/pi_smoke.sh wlan1 2412  # 2.4 GHz, channel 1
-./scripts/pi_smoke.sh wlan1 5180  # 5 GHz, channel 36
-./scripts/pi_smoke.sh wlan1 5955  # 6 GHz, channel 1
+./scripts/pi_smoke.sh wlan0 2412  # 2.4 GHz, channel 1
+./scripts/pi_smoke.sh wlan0 5180  # 5 GHz, channel 36
+./scripts/pi_smoke.sh wlan0 5975  # 6 GHz, channel 5 PSC
 ```
 
 Frequency in MHz is preferred for 5 GHz and 6 GHz testing because channel
 numbers can be ambiguous across bands. For example, 5 GHz channel 149 is
 `5745 MHz`, while 6 GHz channel 149 is `6695 MHz`.
 
+For 6 GHz discovery testing, prefer PSC channels. 6 GHz channel 5 is a PSC and
+uses `5975 MHz`; 6 GHz channel 1 uses `5955 MHz` and is not a PSC.
+
 Channel numbers still work for convenience:
 
 ```bash
-./scripts/pi_smoke.sh wlan1 6
+./scripts/pi_smoke.sh wlan0 6
 ```
 
-If `iw dev` only shows `wlan0`, use that interface instead:
+To use a different adapter, pass that interface explicitly:
 
 ```bash
-./scripts/pi_smoke.sh wlan0 5180
+./scripts/pi_smoke.sh wlan1 5180
 ```
 
 The script writes:
@@ -137,6 +140,38 @@ scp pi@<pi-hostname-or-ip>:~/WLANPi-Utilization/debug/pi_debug_*.tar.gz debug/
 ```
 
 Adjust the remote path if you cloned the repo somewhere else on the Pi.
+
+## Replay Copied Smoke Files
+
+After copying the smoke-test files back to your Mac, replay them locally:
+
+```bash
+beacon-live replay \
+  --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
+  --survey-before samples/pi_survey_before.txt \
+  --survey-after samples/pi_survey_after.txt
+```
+
+The replay output includes per-second AP/QBSS beacon stats plus one local survey
+CU value computed from the before/after survey dumps. The summary at the end
+reports row counts, skipped malformed rows, timestamp range, duration, unique
+BSSID count, and local survey CU when available.
+
+The older replay option still works for simple beacon TSV files:
+
+```bash
+beacon-live replay --input samples/tshark_qbss_sample.tsv
+```
+
+## What to Commit
+
+Do not commit generated `samples/pi_*` files or `debug/pi_debug_*.tar.gz`
+bundles by default. They can include real SSIDs, BSSIDs, client MAC addresses,
+interface addresses, kernel logs, and local environment details.
+
+The repo ignores those generated files. If a hardware capture is useful as a
+regression fixture, create a small sanitized sample with a descriptive name that
+does not start with `pi_`, then commit that curated fixture.
 
 ## Metric Notes
 

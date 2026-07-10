@@ -1,7 +1,11 @@
 import pytest
 
 from beacon_live.models import SurveySample
-from beacon_live.survey import compute_local_cu_percent, parse_survey_dump
+from beacon_live.survey import (
+    compute_local_cu_percent,
+    compute_local_cu_percent_from_samples,
+    parse_survey_dump,
+)
 
 
 def test_parse_survey_dump_extracts_present_fields() -> None:
@@ -61,6 +65,22 @@ def test_compute_local_cu_percent_uses_busy_over_active_delta() -> None:
     current = SurveySample(2.0, 1500, 350, 200, 35, -94)
 
     assert compute_local_cu_percent(previous, current) == pytest.approx(30.0)
+
+
+def test_compute_local_cu_percent_from_samples_uses_largest_active_delta() -> None:
+    previous_samples = [
+        SurveySample(1.0, 1000, 100, 0, 0, None),
+        SurveySample(1.0, 5000, 1000, 0, 0, None),
+    ]
+    current_samples = [
+        SurveySample(2.0, 2000, 300, 0, 0, None),
+        SurveySample(2.0, 5100, 1010, 0, 0, None),
+    ]
+
+    assert compute_local_cu_percent_from_samples(
+        previous_samples,
+        current_samples,
+    ) == pytest.approx(20.0)
 
 
 @pytest.mark.parametrize(

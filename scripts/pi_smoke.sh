@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IFACE="${1:-wlan1}"
+IFACE="${1:-wlan0}"
 CHANNEL_OR_FREQ="${2:-36}"
 CAPTURE_SECONDS=15
 
@@ -26,13 +26,13 @@ Usage:
   ./scripts/pi_smoke.sh [iface] [channel-or-frequency-mhz]
 
 Defaults:
-  iface: wlan1
+  iface: wlan0
   channel-or-frequency-mhz: 36
 
 Examples:
   ./scripts/pi_smoke.sh wlan0 6       # channel 6, normally 2.4 GHz
   ./scripts/pi_smoke.sh wlan0 5180    # 5 GHz channel 36 by frequency
-  ./scripts/pi_smoke.sh wlan0 5955    # 6 GHz channel 1 by frequency
+  ./scripts/pi_smoke.sh wlan0 5975    # 6 GHz channel 5 PSC by frequency
 
 Frequency in MHz is preferred for 5/6 GHz work because channel numbers can be
 ambiguous across bands. The capture is configured for 20 MHz width.
