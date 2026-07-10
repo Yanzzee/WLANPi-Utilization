@@ -40,12 +40,29 @@ else
 fi
 
 if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
-  echo "Missing pip for ${PYTHON_BIN}."
-  echo
-  echo "On Raspberry Pi OS or Debian, install pip manually, for example:"
-  echo "  sudo apt update"
-  echo "  sudo apt install python3-pip python3-venv"
-  exit 1
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    echo "pip is missing from the active virtual environment; trying ensurepip..."
+    if ! "${PYTHON_BIN}" -m ensurepip --upgrade >/dev/null 2>&1; then
+      echo "Missing pip for ${PYTHON_BIN}, and ensurepip could not repair it."
+      echo
+      echo "On Raspberry Pi OS or Debian, install venv/pip support manually, for example:"
+      echo "  sudo apt update"
+      echo "  sudo apt install python3-pip python3-venv"
+      echo
+      echo "Then recreate the virtual environment:"
+      echo "  rm -rf .venv"
+      echo "  python3 -m venv .venv"
+      echo "  source .venv/bin/activate"
+      exit 1
+    fi
+  else
+    echo "Missing pip for ${PYTHON_BIN}."
+    echo
+    echo "On Raspberry Pi OS or Debian, install pip manually, for example:"
+    echo "  sudo apt update"
+    echo "  sudo apt install python3-pip python3-venv"
+    exit 1
+  fi
 fi
 
 "${PYTHON_BIN}" - <<'PY'
@@ -58,6 +75,19 @@ if sys.version_info < (3, 9):
 PY
 
 cd "${REPO_ROOT}"
+
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  echo "Updating virtual environment packaging tools..."
+  if ! "${PYTHON_BIN}" -m pip install --upgrade "pip>=23.1" "setuptools>=64" wheel; then
+    echo "Unable to update packaging tools in the active virtual environment."
+    echo
+    echo "Try running this manually after activating the venv:"
+    echo "  ${PYTHON_BIN} -m pip install --upgrade 'pip>=23.1' 'setuptools>=64' wheel"
+    exit 1
+  fi
+else
+  echo "No active virtual environment; leaving system packaging tools unchanged."
+fi
 
 echo "Installing local package in editable mode with dev dependencies..."
 "${PYTHON_BIN}" -m pip install -e ".[dev]"
