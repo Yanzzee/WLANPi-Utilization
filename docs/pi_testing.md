@@ -187,18 +187,26 @@ monitor mode, tunes the channel with `HT20`, starts line-buffered TShark, polls
 `iw dev <iface> survey dump` once per second, and prints one readable stats line
 per second.
 
+When using the project virtual environment, call the venv Python explicitly
+under `sudo`. This avoids the common `sudo: beacon-live: command not found`
+problem caused by `sudo` using a different `PATH`.
+
 ```bash
-sudo beacon-live live --iface wlan0 --channel 36
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 ```
 
 Defaults are:
 
 ```bash
-sudo beacon-live live
+sudo .venv/bin/python -m beacon_live.cli live
 ```
 
 Use Ctrl-C to stop. The TShark process is terminated on exit. If local survey
 counters are unavailable, live mode continues and shows local CU as unavailable.
+
+If you installed the package system-wide, `sudo beacon-live live --iface wlan0
+--channel 36` can also work, but the project-local venv form above is preferred
+for WLAN Pi testing.
 
 ## What to Commit
 

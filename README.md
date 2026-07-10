@@ -26,7 +26,7 @@ pytest
 ```bash
 beacon-live --help
 beacon-live replay --input samples/tshark_qbss_sample.tsv
-sudo beacon-live live --iface wlan0 --channel 36
+sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 ```
 
 The replay command prints tab-separated per-second stats from a saved TShark

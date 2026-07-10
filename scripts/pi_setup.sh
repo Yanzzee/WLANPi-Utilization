@@ -62,7 +62,16 @@ cd "${REPO_ROOT}"
 echo "Installing local package in editable mode with dev dependencies..."
 "${PYTHON_BIN}" -m pip install -e ".[dev]"
 
+echo "Checking CLI import..."
+"${PYTHON_BIN}" -m beacon_live.cli --help >/dev/null
+
 echo "Running pytest..."
 "${PYTHON_BIN}" -m pytest
 
 echo "Pi setup checks completed."
+echo
+echo "For replay without sudo, use:"
+echo "  ${PYTHON_BIN} -m beacon_live.cli replay --input samples/tshark_qbss_sample.tsv"
+echo
+echo "For live mode with sudo, use:"
+echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --channel 36"
