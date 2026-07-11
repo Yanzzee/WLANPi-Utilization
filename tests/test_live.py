@@ -173,10 +173,8 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     assert stats_rows[0]["local_time"]
     assert stats_rows[0]["frequency_mhz"] == "5180"
     assert stats_rows[0]["band"] == "5"
-    assert (
-        datetime.fromisoformat(stats_rows[0]["start_time"]).utcoffset()
-        is not None
-    )
+    assert next(iter(stats_rows[0])) == "local_time"
+    assert "start_time" not in stats_rows[0]
     assert (
         datetime.fromisoformat(stats_rows[0]["local_time"]).utcoffset()
         is not None

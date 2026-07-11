@@ -102,8 +102,8 @@ timestamped run prefix and writes names such as
 timestamps use local time with the UTC offset. Files remain flushed per stats
 row or beacon record.
 
-Both formats include local capture start time, local record time, interface,
-channel, and resolved frequency/band metadata. Stats CSV records the selected
+Both formats put local record time first, followed by interface, channel, and
+resolved frequency/band metadata. Stats CSV records the selected
 QBSS CU, source SSID/BSSID, and source beacon RSSI. Beacon JSONL retains every
 valid beacon and its RSSI. The fixed 20 MHz width and beacon-only record type
 are intentionally omitted.

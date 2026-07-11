@@ -8,7 +8,6 @@ import sys
 import time
 from dataclasses import dataclass
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -317,7 +316,6 @@ def run_live(
     warmup_filter = LiveWarmupFilter()
     log_writer = CaptureLogWriter(
         metadata=LogMetadata(
-            start_time=_local_now_iso(),
             interface=iface,
             channel=channel,
             frequency_mhz=resolved_frequency_mhz,
@@ -525,10 +523,6 @@ def _empty_second_stats(
         selected_qbss_rssi_dbm=None,
         local_cu_percent=local_cu_percent,
     )
-
-
-def _local_now_iso() -> str:
-    return datetime.now().astimezone().isoformat()
 
 
 def _format_optional_percent(value: Optional[float]) -> str:

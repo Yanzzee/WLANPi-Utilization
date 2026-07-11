@@ -14,12 +14,11 @@ from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
 
 STATS_CSV_FIELDS = [
-    "start_time",
+    "local_time",
     "interface",
     "channel",
     "frequency_mhz",
     "band",
-    "local_time",
     "unique_bssid_count",
     "qbss_station_count_sum",
     "selected_qbss_cu_percent",
@@ -32,7 +31,6 @@ STATS_CSV_FIELDS = [
 
 @dataclass(frozen=True)
 class LogMetadata:
-    start_time: str
     interface: str
     channel: str
     frequency_mhz: Optional[int] = None
@@ -144,22 +142,21 @@ class CaptureLogWriter:
         beacon_fields = asdict(record)
         beacon_fields.pop("timestamp")
         payload = {
-            **asdict(self._metadata),
             "local_time": _local_time_from_epoch(record.timestamp),
+            **asdict(self._metadata),
             **beacon_fields,
         }
-        self._beacons_file.write(json.dumps(payload, sort_keys=True) + "\n")
+        self._beacons_file.write(json.dumps(payload) + "\n")
         self._beacons_file.flush()
 
 
 def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, object]:
     return {
-        "start_time": metadata.start_time,
+        "local_time": _local_time_from_epoch(stats.second),
         "interface": metadata.interface,
         "channel": metadata.channel,
         "frequency_mhz": _optional_value(metadata.frequency_mhz),
         "band": metadata.band or "",
-        "local_time": _local_time_from_epoch(stats.second),
         "unique_bssid_count": stats.unique_bssid_count,
         "qbss_station_count_sum": stats.qbss_station_count_sum,
         "selected_qbss_cu_percent": _format_optional_float(

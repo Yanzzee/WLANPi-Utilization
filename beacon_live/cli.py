@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -248,7 +247,6 @@ def _run_replay(
 ) -> int:
     replay_frequency_mhz = _resolve_replay_frequency_mhz(channel)
     log_metadata = LogMetadata(
-        start_time=_local_now_iso(),
         interface=interface,
         channel=channel,
         frequency_mhz=replay_frequency_mhz,
@@ -369,10 +367,6 @@ def _load_local_survey_cu_percent(
     previous_samples = parse_survey_dump(survey_before.read_text(encoding="utf-8"))
     current_samples = parse_survey_dump(survey_after.read_text(encoding="utf-8"))
     return compute_local_cu_percent_from_samples(previous_samples, current_samples)
-
-
-def _local_now_iso() -> str:
-    return datetime.now().astimezone().isoformat()
 
 
 def _resolve_replay_frequency_mhz(channel: str) -> Optional[int]:

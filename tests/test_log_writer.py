@@ -44,7 +44,6 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     stats_path = tmp_path / "logs" / "nested" / "stats.csv"
     beacons_path = tmp_path / "logs" / "nested" / "beacons.jsonl"
     metadata = LogMetadata(
-        start_time="2026-07-10T12:00:00-06:00",
         interface="wlan9",
         channel="5",
         frequency_mhz=5975,
@@ -93,7 +92,8 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     expected_stats_time = datetime.fromtimestamp(1000).astimezone().isoformat()
     expected_beacon_time = datetime.fromtimestamp(1000.25).astimezone().isoformat()
 
-    assert stats_rows[0]["start_time"] == "2026-07-10T12:00:00-06:00"
+    assert next(iter(stats_rows[0])) == "local_time"
+    assert "start_time" not in stats_rows[0]
     assert stats_rows[0]["interface"] == "wlan9"
     assert stats_rows[0]["channel"] == "5"
     assert stats_rows[0]["frequency_mhz"] == "5975"
@@ -109,8 +109,9 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert "record_type" not in beacon_rows[0]
     assert "channel_width_mhz" not in beacon_rows[0]
     assert "timestamp" not in beacon_rows[0]
+    assert next(iter(beacon_rows[0])) == "local_time"
+    assert "start_time" not in beacon_rows[0]
     assert beacon_rows[0]["local_time"] == expected_beacon_time
-    assert beacon_rows[0]["start_time"] == "2026-07-10T12:00:00-06:00"
     assert beacon_rows[0]["interface"] == "wlan9"
     assert beacon_rows[0]["channel"] == "5"
     assert beacon_rows[0]["frequency_mhz"] == 5975

@@ -178,8 +178,8 @@ beacon-live replay \
 
 The log directory is created automatically. Stats CSV rows are flushed after
 each per-second record, and beacon JSONL is flushed line by line. Log rows
-include local start/record times, interface, channel, and resolved frequency/band
-metadata.
+put local record time first, followed by interface, channel, and resolved
+frequency/band metadata.
 
 ## Run Minimal Live Mode
 
