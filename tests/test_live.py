@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
+from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.models import SecondStats
@@ -65,6 +67,12 @@ def test_resolve_survey_target_frequency_mhz_matches_live_tuning() -> None:
     assert resolve_survey_target_frequency_mhz("6") == 2437
     assert resolve_survey_target_frequency_mhz("5", band="6") == 5975
     assert resolve_survey_target_frequency_mhz("36", frequency_mhz=5975) == 5975
+
+
+def test_frequency_to_band_resolves_log_metadata() -> None:
+    assert frequency_to_band(2437) == "2.4"
+    assert frequency_to_band(5180) == "5"
+    assert frequency_to_band(5975) == "6"
 
 
 def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:
@@ -162,7 +170,17 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     with stats_csv.open("r", encoding="utf-8", newline="") as stats_file:
         stats_rows = list(csv.DictReader(stats_file))
     assert len(stats_rows) == 1
-    assert stats_rows[0]["second"] == "1001"
+    assert stats_rows[0]["local_time"]
+    assert stats_rows[0]["frequency_mhz"] == "5180"
+    assert stats_rows[0]["band"] == "5"
+    assert (
+        datetime.fromisoformat(stats_rows[0]["start_time"]).utcoffset()
+        is not None
+    )
+    assert (
+        datetime.fromisoformat(stats_rows[0]["local_time"]).utcoffset()
+        is not None
+    )
     assert stats_rows[0]["unique_bssid_count"] == "1"
     assert stats_rows[0]["selected_qbss_cu_percent"] == "25.10"
     assert stats_rows[0]["local_cu_percent"] == ""
@@ -174,6 +192,13 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     assert len(beacons) == 2
     assert {beacon["bssid"] for beacon in beacons} == {"aa:aa:aa:aa:aa:aa"}
     assert [beacon["rssi_dbm"] for beacon in beacons] == [-45, -44]
+    assert {beacon["frequency_mhz"] for beacon in beacons} == {5180}
+    assert {beacon["band"] for beacon in beacons} == {"5"}
+    assert all("record_type" not in beacon for beacon in beacons)
+    assert all(
+        datetime.fromisoformat(beacon["local_time"]).utcoffset() is not None
+        for beacon in beacons
+    )
 
 
 def test_survey_enabled_live_mode_uses_available_data(

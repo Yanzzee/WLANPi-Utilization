@@ -1,6 +1,7 @@
 import csv
 import json
 from datetime import datetime
+from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
 
@@ -17,14 +18,23 @@ def test_live_log_paths_use_generated_timestamped_filenames() -> None:
         log_dir,
         write_stats_csv=True,
         write_beacons_jsonl=True,
-        timestamp=datetime(2026, 7, 10, 18, 30, 45, 123456, tzinfo=timezone.utc),
+        timestamp=datetime(
+            2026,
+            7,
+            10,
+            12,
+            30,
+            45,
+            123456,
+            tzinfo=timezone(timedelta(hours=-6)),
+        ),
     )
 
     assert paths.stats_csv == (
-        log_dir / "beacon_live_20260710T183045123456Z_stats.csv"
+        log_dir / "beacon_live_20260710T123045123456-0600_stats.csv"
     )
     assert paths.beacons_jsonl == (
-        log_dir / "beacon_live_20260710T183045123456Z_beacons.jsonl"
+        log_dir / "beacon_live_20260710T123045123456-0600_beacons.jsonl"
     )
 
 
@@ -34,7 +44,7 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     stats_path = tmp_path / "logs" / "nested" / "stats.csv"
     beacons_path = tmp_path / "logs" / "nested" / "beacons.jsonl"
     metadata = LogMetadata(
-        start_time="2026-07-10T18:00:00Z",
+        start_time="2026-07-10T12:00:00-06:00",
         interface="wlan9",
         channel="5",
         frequency_mhz=5975,
@@ -80,20 +90,27 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     ]
 
     assert len(stats_rows) == 1
-    assert stats_rows[0]["start_time"] == "2026-07-10T18:00:00Z"
+    expected_stats_time = datetime.fromtimestamp(1000).astimezone().isoformat()
+    expected_beacon_time = datetime.fromtimestamp(1000.25).astimezone().isoformat()
+
+    assert stats_rows[0]["start_time"] == "2026-07-10T12:00:00-06:00"
     assert stats_rows[0]["interface"] == "wlan9"
     assert stats_rows[0]["channel"] == "5"
     assert stats_rows[0]["frequency_mhz"] == "5975"
     assert stats_rows[0]["band"] == "6"
-    assert stats_rows[0]["channel_width_mhz"] == "20"
-    assert stats_rows[0]["second"] == "1000"
+    assert stats_rows[0]["local_time"] == expected_stats_time
+    assert "channel_width_mhz" not in stats_rows[0]
+    assert "second" not in stats_rows[0]
     assert stats_rows[0]["selected_qbss_cu_percent"] == "50.20"
     assert stats_rows[0]["selected_qbss_bssid"] == "aa:bb:cc:dd:ee:ff"
     assert stats_rows[0]["selected_qbss_rssi_dbm"] == "-47"
 
     assert len(beacon_rows) == 1
-    assert beacon_rows[0]["record_type"] == "beacon"
-    assert beacon_rows[0]["start_time"] == "2026-07-10T18:00:00Z"
+    assert "record_type" not in beacon_rows[0]
+    assert "channel_width_mhz" not in beacon_rows[0]
+    assert "timestamp" not in beacon_rows[0]
+    assert beacon_rows[0]["local_time"] == expected_beacon_time
+    assert beacon_rows[0]["start_time"] == "2026-07-10T12:00:00-06:00"
     assert beacon_rows[0]["interface"] == "wlan9"
     assert beacon_rows[0]["channel"] == "5"
     assert beacon_rows[0]["frequency_mhz"] == 5975

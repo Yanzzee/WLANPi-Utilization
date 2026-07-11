@@ -7,7 +7,6 @@ import json
 from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import IO, Optional
 
@@ -20,8 +19,7 @@ STATS_CSV_FIELDS = [
     "channel",
     "frequency_mhz",
     "band",
-    "channel_width_mhz",
-    "second",
+    "local_time",
     "unique_bssid_count",
     "qbss_station_count_sum",
     "selected_qbss_cu_percent",
@@ -37,7 +35,6 @@ class LogMetadata:
     start_time: str
     interface: str
     channel: str
-    channel_width_mhz: int = 20
     frequency_mhz: Optional[int] = None
     band: Optional[str] = None
 
@@ -58,10 +55,13 @@ def build_live_log_paths(
     timestamp: Optional[datetime] = None,
 ) -> LiveLogPaths:
     """Build timestamped live log paths inside the designated directory."""
-    capture_time = timestamp or datetime.now(timezone.utc)
-    if capture_time.tzinfo is None:
-        capture_time = capture_time.replace(tzinfo=timezone.utc)
-    stamp = capture_time.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    if timestamp is None:
+        capture_time = datetime.now().astimezone()
+    elif timestamp.tzinfo is None:
+        capture_time = timestamp.astimezone()
+    else:
+        capture_time = timestamp
+    stamp = capture_time.strftime("%Y%m%dT%H%M%S%f%z")
     basename = f"beacon_live_{stamp}"
     return LiveLogPaths(
         stats_csv=(log_dir / f"{basename}_stats.csv") if write_stats_csv else None,
@@ -141,10 +141,12 @@ class CaptureLogWriter:
     def write_beacon(self, record: BeaconRecord) -> None:
         if self._beacons_file is None:
             return
+        beacon_fields = asdict(record)
+        beacon_fields.pop("timestamp")
         payload = {
-            "record_type": "beacon",
             **asdict(self._metadata),
-            **asdict(record),
+            "local_time": _local_time_from_epoch(record.timestamp),
+            **beacon_fields,
         }
         self._beacons_file.write(json.dumps(payload, sort_keys=True) + "\n")
         self._beacons_file.flush()
@@ -157,8 +159,7 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
         "channel": metadata.channel,
         "frequency_mhz": _optional_value(metadata.frequency_mhz),
         "band": metadata.band or "",
-        "channel_width_mhz": metadata.channel_width_mhz,
-        "second": stats.second,
+        "local_time": _local_time_from_epoch(stats.second),
         "unique_bssid_count": stats.unique_bssid_count,
         "qbss_station_count_sum": stats.qbss_station_count_sum,
         "selected_qbss_cu_percent": _format_optional_float(
@@ -181,3 +182,7 @@ def _format_optional_float(value: Optional[float]) -> str:
 
 def _optional_value(value: Optional[int]) -> object:
     return "" if value is None else value
+
+
+def _local_time_from_epoch(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp).astimezone().isoformat()

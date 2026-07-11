@@ -178,7 +178,8 @@ beacon-live replay \
 
 The log directory is created automatically. Stats CSV rows are flushed after
 each per-second record, and beacon JSONL is flushed line by line. Log rows
-include interface, channel, 20 MHz width, and replay start-time metadata.
+include local start/record times, interface, channel, and resolved frequency/band
+metadata.
 
 ## Run Minimal Live Mode
 
@@ -265,15 +266,17 @@ sudo .venv/bin/python -m beacon_live.cli live \
   --log-dir logs
 ```
 
-The directory is created automatically. Both files use one app-generated UTC
-timestamp prefix, for example `beacon_live_20260710T183045123456Z_stats.csv`
-and `beacon_live_20260710T183045123456Z_beacons.jsonl`. The stats CSV is flushed
-for each emitted second, and beacon JSONL is flushed line by line. Rows include
-the capture start time, interface, channel, 20 MHz width, and explicit
-frequency/band metadata when supplied. Stats rows include the selected QBSS CU,
+The directory is created automatically. Both files use one app-generated local
+timestamp and UTC-offset prefix, for example
+`beacon_live_20260710T123045123456-0600_stats.csv` and
+`beacon_live_20260710T123045123456-0600_beacons.jsonl`. The stats CSV is flushed
+for each emitted second, and beacon JSONL is flushed line by line. Entries use
+local ISO-8601 timestamps with offsets and include interface, channel, and
+resolved frequency/band metadata. Stats rows include the selected QBSS CU,
 source SSID/BSSID, and source beacon RSSI; beacon JSONL includes every valid
-beacon and its RSSI. Logging is disabled when neither output flag is present.
-Passing a filename after either flag is rejected.
+beacon and its RSSI. Fixed 20 MHz width and beacon-only record type fields are
+omitted. Logging is disabled when neither output flag is present. Passing a
+filename after either flag is rejected.
 
 Local survey CU is driver-dependent and strictly opt-in. To poll
 `iw dev <iface> survey dump` once per second and populate local CU, add

@@ -9,7 +9,6 @@ import time
 from dataclasses import dataclass
 from dataclasses import replace
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -143,6 +142,18 @@ def resolve_survey_target_frequency_mhz(
     if 5000 < frequency < 5925:
         return frequency
 
+    return None
+
+
+def frequency_to_band(frequency_mhz: Optional[int]) -> Optional[str]:
+    if frequency_mhz is None:
+        return None
+    if 2400 <= frequency_mhz <= 2500:
+        return "2.4"
+    if 5000 < frequency_mhz < 5925:
+        return "5"
+    if 5925 <= frequency_mhz <= 7125:
+        return "6"
     return None
 
 
@@ -286,15 +297,13 @@ def run_live(
     beacons_jsonl: Optional[Path] = None,
 ) -> int:
     local_cu = local_cu or survey_debug
-    target_frequency_mhz = (
-        resolve_survey_target_frequency_mhz(
-            channel,
-            frequency_mhz=frequency_mhz,
-            band=band,
-        )
-        if local_cu
-        else None
+    resolved_frequency_mhz = resolve_survey_target_frequency_mhz(
+        channel,
+        frequency_mhz=frequency_mhz,
+        band=band,
     )
+    resolved_band = band or frequency_to_band(resolved_frequency_mhz)
+    target_frequency_mhz = resolved_frequency_mhz if local_cu else None
     configure_monitor_interface(
         iface,
         channel,
@@ -308,11 +317,11 @@ def run_live(
     warmup_filter = LiveWarmupFilter()
     log_writer = CaptureLogWriter(
         metadata=LogMetadata(
-            start_time=_utc_now_iso(),
+            start_time=_local_now_iso(),
             interface=iface,
             channel=channel,
-            frequency_mhz=frequency_mhz,
-            band=band,
+            frequency_mhz=resolved_frequency_mhz,
+            band=resolved_band,
         ),
         stats_csv=stats_csv,
         beacons_jsonl=beacons_jsonl,
@@ -518,8 +527,8 @@ def _empty_second_stats(
     )
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _local_now_iso() -> str:
+    return datetime.now().astimezone().isoformat()
 
 
 def _format_optional_percent(value: Optional[float]) -> str:

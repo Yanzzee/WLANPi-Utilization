@@ -97,9 +97,13 @@ Live logging is optional. Use `--stats-csv` and/or `--beacons-jsonl` to enable
 the main outputs, and optionally set their designated folder with `--log-dir`
 (default: `logs`). These flags do not accept filenames. The app creates a shared
 timestamped run prefix and writes names such as
-`beacon_live_20260710T183045123456Z_stats.csv` and
-`beacon_live_20260710T183045123456Z_beacons.jsonl`. Files remain flushed per
-stats row or beacon record. Both formats include capture start time, interface,
-channel, 20 MHz channel width, and explicit frequency/band metadata when
-supplied. Stats CSV records the selected QBSS CU, source SSID/BSSID, and source
-beacon RSSI. Beacon JSONL retains every valid beacon and its RSSI.
+`beacon_live_20260710T123045123456-0600_stats.csv` and
+`beacon_live_20260710T123045123456-0600_beacons.jsonl`. Filenames and log-entry
+timestamps use local time with the UTC offset. Files remain flushed per stats
+row or beacon record.
+
+Both formats include local capture start time, local record time, interface,
+channel, and resolved frequency/band metadata. Stats CSV records the selected
+QBSS CU, source SSID/BSSID, and source beacon RSSI. Beacon JSONL retains every
+valid beacon and its RSSI. The fixed 20 MHz width and beacon-only record type
+are intentionally omitted.

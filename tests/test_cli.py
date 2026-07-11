@@ -163,20 +163,27 @@ def test_replay_writes_stats_csv_and_beacon_jsonl_logs(
     assert len(stats_rows) == 2
     assert stats_rows[0]["interface"] == "wlan9"
     assert stats_rows[0]["channel"] == "5975"
-    assert stats_rows[0]["channel_width_mhz"] == "20"
-    assert stats_rows[0]["second"] == "1000"
+    assert stats_rows[0]["frequency_mhz"] == "5975"
+    assert stats_rows[0]["band"] == "6"
+    assert "channel_width_mhz" not in stats_rows[0]
+    assert "second" not in stats_rows[0]
+    assert stats_rows[0]["local_time"]
     assert stats_rows[0]["unique_bssid_count"] == "2"
     assert stats_rows[0]["selected_qbss_ssid"] == "Bravo"
-    assert stats_rows[1]["second"] == "1001"
+    assert stats_rows[1]["local_time"]
 
     beacon_lines = beacons_jsonl.read_text(encoding="utf-8").splitlines()
     beacon_records = [json.loads(line) for line in beacon_lines]
 
     assert len(beacon_records) == 3
-    assert {record["record_type"] for record in beacon_records} == {"beacon"}
+    assert all("record_type" not in record for record in beacon_records)
     assert {record["interface"] for record in beacon_records} == {"wlan9"}
     assert {record["channel"] for record in beacon_records} == {"5975"}
-    assert {record["channel_width_mhz"] for record in beacon_records} == {20}
+    assert {record["frequency_mhz"] for record in beacon_records} == {5975}
+    assert {record["band"] for record in beacon_records} == {"6"}
+    assert all("channel_width_mhz" not in record for record in beacon_records)
+    assert all("timestamp" not in record for record in beacon_records)
+    assert all(record["local_time"] for record in beacon_records)
     assert beacon_records[0]["ssid"] == "Alpha"
     assert beacon_records[0]["qbss_cu_raw"] == 128
 

@@ -6,7 +6,6 @@ import argparse
 import sys
 from dataclasses import dataclass
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -16,6 +15,8 @@ from beacon_live.models import SecondStats
 from beacon_live.parser import parse_tshark_row
 from beacon_live.live import LiveCommandError
 from beacon_live.live import SUPPORTED_BANDS
+from beacon_live.live import frequency_to_band
+from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.log_writer import CaptureLogWriter
 from beacon_live.log_writer import LogMetadata
@@ -245,11 +246,13 @@ def _run_replay(
     interface: str = "wlan0",
     channel: str = "36",
 ) -> int:
+    replay_frequency_mhz = _resolve_replay_frequency_mhz(channel)
     log_metadata = LogMetadata(
-        start_time=_utc_now_iso(),
+        start_time=_local_now_iso(),
         interface=interface,
         channel=channel,
-        channel_width_mhz=20,
+        frequency_mhz=replay_frequency_mhz,
+        band=frequency_to_band(replay_frequency_mhz),
     )
     local_cu_percent = _load_local_survey_cu_percent(survey_before, survey_after)
     replay_data = _read_beacon_replay(beacons_tsv)
@@ -368,8 +371,18 @@ def _load_local_survey_cu_percent(
     return compute_local_cu_percent_from_samples(previous_samples, current_samples)
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+def _local_now_iso() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def _resolve_replay_frequency_mhz(channel: str) -> Optional[int]:
+    try:
+        channel_or_frequency = int(channel)
+    except ValueError:
+        return None
+    if 2400 <= channel_or_frequency <= 7125:
+        return channel_or_frequency
+    return resolve_survey_target_frequency_mhz(channel)
 
 
 def _format_header() -> str:
