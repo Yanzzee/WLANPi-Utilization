@@ -186,12 +186,17 @@ Live mode is terminal-only for now. Beacon analysis is the core path: it
 configures the selected interface for monitor mode, tunes with 20 MHz width,
 starts line-buffered TShark, and redraws a compact dashboard once per second.
 The dashboard shows the most recent 120 seconds of AP/QBSS stats using local
-wall-clock time. Each row's QBSS CU min/mean/max covers AP reports observed in
-that second. The graph uses only the maximum from each second, and the rolling
-min/mean/max summary describes that same max-only series. Missing QBSS maxima
-appear as graph gaps and do not enter the numeric summary. The first two update
-cycles are labeled as warm-up and excluded from both the graph and summary.
-Local survey counters are not required.
+wall-clock time. Each row contains one selected QBSS CU value. For that second,
+the app considers only QBSS-bearing beacons, chooses the BSSID with the strongest
+observed RSSI, and then uses the most recent QBSS beacon from that BSSID. If two
+RSSI observations tie, the later beacon wins. When all candidate RSSI values are
+missing, the latest QBSS beacon is the fallback.
+
+The graph and rolling min/mean/max summary use the exact selected values still
+visible in the 120-second rows. Missing values appear as graph gaps and do not
+enter the summary. The first completed live cycle is silently discarded from
+dashboard rows and stats CSV as a one-cycle warm-up; raw beacon JSONL still
+contains every valid warm-up beacon. Local survey counters are not required.
 
 ### Recommended On-Device Launch Command
 
@@ -265,8 +270,10 @@ timestamp prefix, for example `beacon_live_20260710T183045123456Z_stats.csv`
 and `beacon_live_20260710T183045123456Z_beacons.jsonl`. The stats CSV is flushed
 for each emitted second, and beacon JSONL is flushed line by line. Rows include
 the capture start time, interface, channel, 20 MHz width, and explicit
-frequency/band metadata when supplied. Logging is disabled when neither output
-flag is present. Passing a filename after either flag is rejected.
+frequency/band metadata when supplied. Stats rows include the selected QBSS CU,
+source SSID/BSSID, and source beacon RSSI; beacon JSONL includes every valid
+beacon and its RSSI. Logging is disabled when neither output flag is present.
+Passing a filename after either flag is rejected.
 
 Local survey CU is driver-dependent and strictly opt-in. To poll
 `iw dev <iface> survey dump` once per second and populate local CU, add

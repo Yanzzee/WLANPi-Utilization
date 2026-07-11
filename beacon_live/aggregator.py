@@ -113,23 +113,53 @@ def _build_stats(
         for _, station_count in bucket.latest_station_by_bssid.values()
     )
 
-    cu_records = [
-        record for record in bucket.records if record.qbss_cu_percent is not None
-    ]
-    cu_values = [record.qbss_cu_percent for record in cu_records]
-    top_record = max(cu_records, key=lambda record: record.qbss_cu_percent, default=None)
+    selected_record = _select_qbss_record(bucket.records)
 
     return SecondStats(
         second=second,
         unique_bssid_count=len(bssids),
         qbss_station_count_sum=station_count_sum,
-        qbss_cu_min_percent=min(cu_values) if cu_values else None,
-        qbss_cu_mean_percent=sum(cu_values) / len(cu_values) if cu_values else None,
-        qbss_cu_max_percent=max(cu_values) if cu_values else None,
-        top_qbss_cu_ssid=top_record.ssid if top_record is not None else None,
-        top_qbss_cu_bssid=top_record.bssid if top_record is not None else None,
-        top_qbss_cu_percent=(
-            top_record.qbss_cu_percent if top_record is not None else None
+        selected_qbss_cu_percent=(
+            selected_record.qbss_cu_percent
+            if selected_record is not None
+            else None
+        ),
+        selected_qbss_ssid=(selected_record.ssid if selected_record else None),
+        selected_qbss_bssid=(selected_record.bssid if selected_record else None),
+        selected_qbss_rssi_dbm=(
+            selected_record.rssi_dbm if selected_record else None
         ),
         local_cu_percent=local_cu_percent,
+    )
+
+
+def _select_qbss_record(records: list[BeaconRecord]) -> Optional[BeaconRecord]:
+    """Select the latest QBSS beacon from the strongest observed BSSID."""
+    qbss_records = [
+        record for record in records if record.qbss_cu_percent is not None
+    ]
+    if not qbss_records:
+        return None
+
+    strongest_by_bssid: dict[str, BeaconRecord] = {}
+    for record in qbss_records:
+        previous = strongest_by_bssid.get(record.bssid)
+        if previous is None or _signal_key(record) > _signal_key(previous):
+            strongest_by_bssid[record.bssid] = record
+
+    strongest_bssid = max(
+        strongest_by_bssid.values(),
+        key=lambda record: (*_signal_key(record), record.bssid),
+    ).bssid
+    return max(
+        (record for record in qbss_records if record.bssid == strongest_bssid),
+        key=lambda record: record.timestamp,
+    )
+
+
+def _signal_key(record: BeaconRecord) -> tuple[bool, int, float]:
+    return (
+        record.rssi_dbm is not None,
+        record.rssi_dbm if record.rssi_dbm is not None else -200,
+        record.timestamp,
     )

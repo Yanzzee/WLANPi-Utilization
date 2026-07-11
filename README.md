@@ -51,8 +51,11 @@ The replay command prints tab-separated per-second stats from a saved TShark
 sample file with these fields:
 
 ```text
-frame.time_epoch, wlan.ssid, wlan.bssid, wlan.qbss.cu, wlan.qbss.scount, wlan.qbss.adc
+frame.time_epoch, wlan.ssid, wlan.bssid, wlan.qbss.cu, wlan.qbss.scount, wlan.qbss.adc, radiotap.dbm_antsignal
 ```
+
+Legacy six-field replay files without RSSI remain supported, although live
+captures and new smoke captures include `radiotap.dbm_antsignal`.
 
 QBSS channel utilization is converted from raw `0-255` values to percent with:
 
@@ -63,12 +66,17 @@ raw / 255 * 100
 The live command's core path configures the selected interface for monitor
 mode, tunes with 20 MHz width, starts TShark, and prints AP-reported QBSS
 terminal stats in a rolling 120-second dashboard that redraws once per second
-and displays local wall-clock time. Each table row's QBSS CU min/mean/max is
-computed from AP reports observed during that second. The bar graph plots only
-the maximum from each second, and the rolling min/mean/max summary is computed
-from that same max-only series. Seconds without a QBSS maximum are graph gaps
-and are excluded from the numeric summary. The first two dashboard cycles are
-an explicit warm-up period and are excluded from the graph and rolling summary.
+and displays local wall-clock time. Each per-second row contains one selected
+QBSS CU value. Selection considers only QBSS-bearing beacons seen in that
+second, chooses the BSSID with the strongest observed RSSI, then uses the most
+recent QBSS beacon from that BSSID. An RSSI tie prefers the later beacon. If
+RSSI is unavailable for every candidate, recency is used as the fallback.
+
+The graph and rolling min/mean/max summary use exactly the selected values shown
+in the visible 120-second rows. Missing selected values appear as graph gaps and
+are excluded from the numeric summary. The first completed live cycle is a
+silent warm-up: it is omitted from dashboard rows and stats CSV logging. Raw
+beacon JSONL logging still records every valid beacon from that cycle.
 
 Live mode does not require local survey counters. Use
 `--channel` for channel numbers and `--frequency-mhz` for explicit center
@@ -93,4 +101,5 @@ timestamped run prefix and writes names such as
 `beacon_live_20260710T183045123456Z_beacons.jsonl`. Files remain flushed per
 stats row or beacon record. Both formats include capture start time, interface,
 channel, 20 MHz channel width, and explicit frequency/band metadata when
-supplied.
+supplied. Stats CSV records the selected QBSS CU, source SSID/BSSID, and source
+beacon RSSI. Beacon JSONL retains every valid beacon and its RSSI.

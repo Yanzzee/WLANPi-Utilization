@@ -13,6 +13,7 @@ class BeaconRecord:
     qbss_cu_percent: Optional[float]
     qbss_station_count: Optional[int]
     qbss_admission_capacity: Optional[int]
+    rssi_dbm: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -32,10 +33,8 @@ class SecondStats:
     second: int
     unique_bssid_count: int
     qbss_station_count_sum: int
-    qbss_cu_min_percent: Optional[float]
-    qbss_cu_mean_percent: Optional[float]
-    qbss_cu_max_percent: Optional[float]
-    top_qbss_cu_ssid: Optional[str]
-    top_qbss_cu_bssid: Optional[str]
-    top_qbss_cu_percent: Optional[float]
+    selected_qbss_cu_percent: Optional[float]
+    selected_qbss_ssid: Optional[str]
+    selected_qbss_bssid: Optional[str]
+    selected_qbss_rssi_dbm: Optional[int]
     local_cu_percent: Optional[float]

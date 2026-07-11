@@ -378,12 +378,10 @@ def _format_header() -> str:
             "second",
             "unique_bssids",
             "qbss_station_sum",
-            "qbss_cu_min",
-            "qbss_cu_mean",
-            "qbss_cu_max",
-            "top_ssid",
-            "top_bssid",
-            "top_qbss_cu",
+            "selected_qbss_cu",
+            "selected_qbss_ssid",
+            "selected_qbss_bssid",
+            "selected_qbss_rssi_dbm",
             "local_cu",
         ]
     )
@@ -395,12 +393,10 @@ def _format_stats(stats: SecondStats) -> str:
             str(stats.second),
             str(stats.unique_bssid_count),
             str(stats.qbss_station_count_sum),
-            _format_optional_float(stats.qbss_cu_min_percent),
-            _format_optional_float(stats.qbss_cu_mean_percent),
-            _format_optional_float(stats.qbss_cu_max_percent),
-            stats.top_qbss_cu_ssid or "",
-            stats.top_qbss_cu_bssid or "",
-            _format_optional_float(stats.top_qbss_cu_percent),
+            _format_optional_float(stats.selected_qbss_cu_percent),
+            stats.selected_qbss_ssid or "",
+            stats.selected_qbss_bssid or "",
+            _format_optional_int(stats.selected_qbss_rssi_dbm),
             _format_optional_float(stats.local_cu_percent),
         ]
     )
@@ -408,6 +404,10 @@ def _format_stats(stats: SecondStats) -> str:
 
 def _format_optional_float(value: Optional[float]) -> str:
     return "" if value is None else f"{value:.2f}"
+
+
+def _format_optional_int(value: Optional[int]) -> str:
+    return "" if value is None else str(value)
 
 
 def _format_summary(

@@ -203,6 +203,7 @@ run_root tshark -r "${TMP_PCAP}" \
   -e wlan.qbss.cu \
   -e wlan.qbss.scount \
   -e wlan.qbss.adc \
+  -e radiotap.dbm_antsignal \
   >"${QBSS_OUT}"
 
 echo "Extracting general 802.11 MAC TSV to ${MAC_OUT}"

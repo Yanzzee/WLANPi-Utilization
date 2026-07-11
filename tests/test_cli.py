@@ -166,7 +166,7 @@ def test_replay_writes_stats_csv_and_beacon_jsonl_logs(
     assert stats_rows[0]["channel_width_mhz"] == "20"
     assert stats_rows[0]["second"] == "1000"
     assert stats_rows[0]["unique_bssid_count"] == "2"
-    assert stats_rows[0]["top_qbss_cu_ssid"] == "Alpha"
+    assert stats_rows[0]["selected_qbss_ssid"] == "Bravo"
     assert stats_rows[1]["second"] == "1001"
 
     beacon_lines = beacons_jsonl.read_text(encoding="utf-8").splitlines()

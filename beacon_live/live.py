@@ -20,20 +20,15 @@ from beacon_live.log_writer import LogMetadata
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.parser import parse_tshark_row
+from beacon_live.parser import TSHARK_FIELD_NAMES
 from beacon_live.survey import SurveyCuResult
 from beacon_live.survey import compute_local_cu_result_from_samples
 from beacon_live.survey import parse_survey_dump
 
-TSHARK_BEACON_FIELDS = [
-    "frame.time_epoch",
-    "wlan.ssid",
-    "wlan.bssid",
-    "wlan.qbss.cu",
-    "wlan.qbss.scount",
-    "wlan.qbss.adc",
-]
+TSHARK_BEACON_FIELDS = list(TSHARK_FIELD_NAMES)
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
+LIVE_WARMUP_CYCLES = 1
 
 
 @dataclass(frozen=True)
@@ -45,6 +40,19 @@ class LiveCommandError(Exception):
     @property
     def command_text(self) -> str:
         return " ".join(self.command)
+
+
+@dataclass
+class LiveWarmupFilter:
+    """Drop complete per-second stats from initial live refresh cycles."""
+
+    remaining_cycles: int = LIVE_WARMUP_CYCLES
+
+    def filter(self, stats_rows: list[SecondStats]) -> list[SecondStats]:
+        if self.remaining_cycles > 0:
+            self.remaining_cycles -= 1
+            return []
+        return stats_rows
 
 
 def channel_to_frequency_mhz(channel: str, band: str) -> int:
@@ -297,6 +305,7 @@ def run_live(
     selector = selectors.DefaultSelector()
     aggregator = Aggregator()
     dashboard = TerminalDashboard(include_local_cu=local_cu)
+    warmup_filter = LiveWarmupFilter()
     log_writer = CaptureLogWriter(
         metadata=LogMetadata(
             start_time=_utc_now_iso(),
@@ -387,7 +396,7 @@ def run_live(
                     printed_seconds,
                 )
                 _publish_live_stats(
-                    completed_stats,
+                    warmup_filter.filter(completed_stats),
                     stats_writer=log_writer.write_stats,
                     dashboard=dashboard,
                 )
@@ -404,7 +413,7 @@ def run_live(
                 pending_stats.append(stats)
                 printed_seconds.add(stats.second)
         _publish_live_stats(
-            pending_stats,
+            warmup_filter.filter(pending_stats),
             stats_writer=log_writer.write_stats,
             dashboard=dashboard,
         )
@@ -501,12 +510,10 @@ def _empty_second_stats(
         second=second,
         unique_bssid_count=0,
         qbss_station_count_sum=0,
-        qbss_cu_min_percent=None,
-        qbss_cu_mean_percent=None,
-        qbss_cu_max_percent=None,
-        top_qbss_cu_ssid=None,
-        top_qbss_cu_bssid=None,
-        top_qbss_cu_percent=None,
+        selected_qbss_cu_percent=None,
+        selected_qbss_ssid=None,
+        selected_qbss_bssid=None,
+        selected_qbss_rssi_dbm=None,
         local_cu_percent=local_cu_percent,
     )
 

@@ -38,7 +38,7 @@ def test_rolling_window_rejects_invalid_size() -> None:
 
 
 def test_dashboard_formats_all_beacon_metrics_without_local_cu() -> None:
-    dashboard = TerminalDashboard(include_local_cu=False, warmup_cycles=0)
+    dashboard = TerminalDashboard(include_local_cu=False)
     dashboard.update([_stats(1000)])
 
     rendered = dashboard.render()
@@ -46,18 +46,20 @@ def test_dashboard_formats_all_beacon_metrics_without_local_cu() -> None:
     assert "rolling 120s" in rendered
     assert "BSSID COUNT" in rendered
     assert "QBSS STA SUM" in rendered
-    assert "QBSS CU MIN/MEAN/MAX" in rendered
-    assert "10.00%/20.00%/30.00%" in rendered
+    assert "QBSS CU" in rendered
+    assert "QBSS CU MIN/MEAN/MAX" not in rendered
+    assert "30.00%" in rendered
     assert "Alpha/aa:aa:aa:aa:aa:aa" in rendered
+    assert "-45 dBm" in rendered
     assert "LOCAL SURVEY CU" not in rendered
 
 
-def test_rolling_summary_uses_last_120_per_second_max_values() -> None:
-    dashboard = TerminalDashboard(warmup_cycles=0)
+def test_rolling_summary_uses_displayed_values_from_last_120_seconds() -> None:
+    dashboard = TerminalDashboard()
     values = [float(index % 101) for index in range(121)]
     dashboard.update(
         [
-            _stats(1000 + index, qbss_max_percent=value)
+            _stats(1000 + index, selected_qbss_cu_percent=value)
             for index, value in enumerate(values)
         ]
     )
@@ -75,21 +77,17 @@ def test_rolling_summary_uses_last_120_per_second_max_values() -> None:
     assert f"max={max(expected):.2f}%" in rendered
 
 
-def test_graph_data_uses_only_per_second_max_qbss_cu() -> None:
-    dashboard = TerminalDashboard(warmup_cycles=0)
+def test_graph_data_uses_exactly_the_displayed_per_second_qbss_cu() -> None:
+    dashboard = TerminalDashboard()
     dashboard.update(
         [
             replace(
                 _stats(1000),
-                qbss_cu_min_percent=91.0,
-                qbss_cu_mean_percent=92.0,
-                qbss_cu_max_percent=25.0,
+                selected_qbss_cu_percent=25.0,
             ),
             replace(
                 _stats(1001),
-                qbss_cu_min_percent=81.0,
-                qbss_cu_mean_percent=82.0,
-                qbss_cu_max_percent=None,
+                selected_qbss_cu_percent=None,
             ),
         ]
     )
@@ -102,7 +100,6 @@ def test_graph_data_uses_only_per_second_max_qbss_cu() -> None:
 def test_dashboard_formats_local_time() -> None:
     local_timezone = timezone(timedelta(hours=5, minutes=30))
     dashboard = TerminalDashboard(
-        warmup_cycles=0,
         local_timezone=local_timezone,
     )
     dashboard.update([_stats(0)])
@@ -113,28 +110,8 @@ def test_dashboard_formats_local_time() -> None:
     assert "05:30:00" in rendered
 
 
-def test_first_two_cycles_are_explicit_warmup_and_suppressed() -> None:
-    dashboard = TerminalDashboard(warmup_cycles=2)
-
-    dashboard.update([_stats(1000, qbss_max_percent=90.0)])
-    assert dashboard.graph_data == ()
-    assert dashboard.rolling_summary.sample_count == 0
-    assert "Warm-up: cycle 1/2" in dashboard.render()
-
-    dashboard.update([_stats(1001, qbss_max_percent=80.0)])
-    assert dashboard.graph_data == ()
-    assert dashboard.rolling_summary.sample_count == 0
-    assert "Warm-up: cycle 2/2" in dashboard.render()
-
-    dashboard.update([_stats(1002, qbss_max_percent=30.0)])
-    assert dashboard.graph_data == ((1002, 30.0),)
-    assert dashboard.rolling_summary.sample_count == 1
-    assert dashboard.rolling_summary.mean_percent == 30.0
-    assert "Warm-up: complete; first 2 cycles excluded" in dashboard.render()
-
-
 def test_dashboard_marks_enabled_but_missing_local_cu_unavailable() -> None:
-    dashboard = TerminalDashboard(include_local_cu=True, warmup_cycles=0)
+    dashboard = TerminalDashboard(include_local_cu=True)
     dashboard.update([_stats(1000, local_cu_percent=None)])
 
     rendered = dashboard.render()
@@ -144,7 +121,7 @@ def test_dashboard_marks_enabled_but_missing_local_cu_unavailable() -> None:
 
 
 def test_dashboard_formats_available_local_cu() -> None:
-    dashboard = TerminalDashboard(include_local_cu=True, warmup_cycles=0)
+    dashboard = TerminalDashboard(include_local_cu=True)
     dashboard.update([_stats(1000, local_cu_percent=12.5)])
 
     rendered = dashboard.render()
@@ -167,17 +144,15 @@ def _stats(
     second: int,
     *,
     local_cu_percent: Optional[float] = None,
-    qbss_max_percent: Optional[float] = 30.0,
+    selected_qbss_cu_percent: Optional[float] = 30.0,
 ) -> SecondStats:
     return SecondStats(
         second=second,
         unique_bssid_count=3,
         qbss_station_count_sum=12,
-        qbss_cu_min_percent=10.0,
-        qbss_cu_mean_percent=20.0,
-        qbss_cu_max_percent=qbss_max_percent,
-        top_qbss_cu_ssid="Alpha",
-        top_qbss_cu_bssid="aa:aa:aa:aa:aa:aa",
-        top_qbss_cu_percent=qbss_max_percent,
+        selected_qbss_cu_percent=selected_qbss_cu_percent,
+        selected_qbss_ssid="Alpha",
+        selected_qbss_bssid="aa:aa:aa:aa:aa:aa",
+        selected_qbss_rssi_dbm=-45,
         local_cu_percent=local_cu_percent,
     )

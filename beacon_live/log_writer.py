@@ -24,12 +24,10 @@ STATS_CSV_FIELDS = [
     "second",
     "unique_bssid_count",
     "qbss_station_count_sum",
-    "qbss_cu_min_percent",
-    "qbss_cu_mean_percent",
-    "qbss_cu_max_percent",
-    "top_qbss_cu_ssid",
-    "top_qbss_cu_bssid",
-    "top_qbss_cu_percent",
+    "selected_qbss_cu_percent",
+    "selected_qbss_ssid",
+    "selected_qbss_bssid",
+    "selected_qbss_rssi_dbm",
     "local_cu_percent",
 ]
 
@@ -163,12 +161,12 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
         "second": stats.second,
         "unique_bssid_count": stats.unique_bssid_count,
         "qbss_station_count_sum": stats.qbss_station_count_sum,
-        "qbss_cu_min_percent": _format_optional_float(stats.qbss_cu_min_percent),
-        "qbss_cu_mean_percent": _format_optional_float(stats.qbss_cu_mean_percent),
-        "qbss_cu_max_percent": _format_optional_float(stats.qbss_cu_max_percent),
-        "top_qbss_cu_ssid": stats.top_qbss_cu_ssid or "",
-        "top_qbss_cu_bssid": stats.top_qbss_cu_bssid or "",
-        "top_qbss_cu_percent": _format_optional_float(stats.top_qbss_cu_percent),
+        "selected_qbss_cu_percent": _format_optional_float(
+            stats.selected_qbss_cu_percent
+        ),
+        "selected_qbss_ssid": stats.selected_qbss_ssid or "",
+        "selected_qbss_bssid": stats.selected_qbss_bssid or "",
+        "selected_qbss_rssi_dbm": _optional_value(stats.selected_qbss_rssi_dbm),
         "local_cu_percent": _format_optional_float(stats.local_cu_percent),
     }
 

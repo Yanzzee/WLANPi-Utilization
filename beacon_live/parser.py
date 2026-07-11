@@ -11,9 +11,11 @@ TSHARK_FIELD_NAMES = (
     "wlan.qbss.cu",
     "wlan.qbss.scount",
     "wlan.qbss.adc",
+    "radiotap.dbm_antsignal",
 )
 
 EXPECTED_TSHARK_FIELD_COUNT = len(TSHARK_FIELD_NAMES)
+LEGACY_TSHARK_FIELD_COUNT = EXPECTED_TSHARK_FIELD_COUNT - 1
 
 
 def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
@@ -27,10 +29,11 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
         return None
 
     fields = line.split("\t")
-    if len(fields) != EXPECTED_TSHARK_FIELD_COUNT:
+    if len(fields) not in (LEGACY_TSHARK_FIELD_COUNT, EXPECTED_TSHARK_FIELD_COUNT):
         return None
 
-    timestamp_text, ssid_text, bssid_text, cu_text, scount_text, adc_text = fields
+    timestamp_text, ssid_text, bssid_text, cu_text, scount_text, adc_text = fields[:6]
+    rssi_text = fields[6] if len(fields) == EXPECTED_TSHARK_FIELD_COUNT else ""
 
     try:
         timestamp = float(timestamp_text)
@@ -53,6 +56,10 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
     if qbss_admission_capacity is _MALFORMED:
         return None
 
+    rssi_dbm = _parse_optional_int(rssi_text, minimum=-200, maximum=100)
+    if rssi_dbm is _MALFORMED:
+        return None
+
     qbss_cu_percent = (
         qbss_cu_raw / 255 * 100 if qbss_cu_raw is not None else None
     )
@@ -65,6 +72,7 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
         qbss_cu_percent=qbss_cu_percent,
         qbss_station_count=qbss_station_count,
         qbss_admission_capacity=qbss_admission_capacity,
+        rssi_dbm=rssi_dbm,
     )
 
 

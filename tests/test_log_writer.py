@@ -48,17 +48,16 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
         qbss_cu_percent=128 / 255 * 100,
         qbss_station_count=3,
         qbss_admission_capacity=0,
+        rssi_dbm=-47,
     )
     stats = SecondStats(
         second=1000,
         unique_bssid_count=1,
         qbss_station_count_sum=3,
-        qbss_cu_min_percent=128 / 255 * 100,
-        qbss_cu_mean_percent=128 / 255 * 100,
-        qbss_cu_max_percent=128 / 255 * 100,
-        top_qbss_cu_ssid="Test AP",
-        top_qbss_cu_bssid="aa:bb:cc:dd:ee:ff",
-        top_qbss_cu_percent=128 / 255 * 100,
+        selected_qbss_cu_percent=128 / 255 * 100,
+        selected_qbss_ssid="Test AP",
+        selected_qbss_bssid="aa:bb:cc:dd:ee:ff",
+        selected_qbss_rssi_dbm=-47,
         local_cu_percent=None,
     )
 
@@ -88,6 +87,9 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert stats_rows[0]["band"] == "6"
     assert stats_rows[0]["channel_width_mhz"] == "20"
     assert stats_rows[0]["second"] == "1000"
+    assert stats_rows[0]["selected_qbss_cu_percent"] == "50.20"
+    assert stats_rows[0]["selected_qbss_bssid"] == "aa:bb:cc:dd:ee:ff"
+    assert stats_rows[0]["selected_qbss_rssi_dbm"] == "-47"
 
     assert len(beacon_rows) == 1
     assert beacon_rows[0]["record_type"] == "beacon"
@@ -97,3 +99,4 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert beacon_rows[0]["frequency_mhz"] == 5975
     assert beacon_rows[0]["band"] == "6"
     assert beacon_rows[0]["bssid"] == "aa:bb:cc:dd:ee:ff"
+    assert beacon_rows[0]["rssi_dbm"] == -47

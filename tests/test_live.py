@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from beacon_live.live import LiveCommandError
+from beacon_live.live import LiveWarmupFilter
 from beacon_live.live import _read_survey_samples_safely
 from beacon_live.live import _format_survey_debug_line
 from beacon_live.live import _format_survey_unavailable_warning
@@ -78,6 +79,7 @@ def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:
         "wlan.qbss.cu",
         "wlan.qbss.scount",
         "wlan.qbss.adc",
+        "radiotap.dbm_antsignal",
     ]
 
 
@@ -150,22 +152,28 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
         for line in captured.out.splitlines()
         if "Alpha/aa:aa:aa:aa:aa:aa" in line
     )
-    assert beacon_row.split()[1:4] == ["1", "2", "50.20%/50.20%/50.20%"]
+    assert beacon_row.split()[1:4] == ["1", "3", "25.10%"]
+    assert "50.20%" not in captured.out
+    assert "Warm-up" not in captured.out
     assert "LOCAL SURVEY CU" not in captured.out
     assert f"Stats CSV log: {stats_csv}" in captured.err
     assert f"Beacon JSONL log: {beacons_jsonl}" in captured.err
 
     with stats_csv.open("r", encoding="utf-8", newline="") as stats_file:
         stats_rows = list(csv.DictReader(stats_file))
+    assert len(stats_rows) == 1
+    assert stats_rows[0]["second"] == "1001"
     assert stats_rows[0]["unique_bssid_count"] == "1"
+    assert stats_rows[0]["selected_qbss_cu_percent"] == "25.10"
     assert stats_rows[0]["local_cu_percent"] == ""
 
     beacons = [
         json.loads(line)
         for line in beacons_jsonl.read_text(encoding="utf-8").splitlines()
     ]
-    assert len(beacons) == 1
-    assert beacons[0]["bssid"] == "aa:aa:aa:aa:aa:aa"
+    assert len(beacons) == 2
+    assert {beacon["bssid"] for beacon in beacons} == {"aa:aa:aa:aa:aa:aa"}
+    assert [beacon["rssi_dbm"] for beacon in beacons] == [-45, -44]
 
 
 def test_survey_enabled_live_mode_uses_available_data(
@@ -177,6 +185,7 @@ def test_survey_enabled_live_mode_uses_available_data(
         [
             [SurveySample(1.0, 1000, 100, 0, 0, None, 5180, True)],
             [SurveySample(2.0, 2000, 300, 0, 0, None, 5180, True)],
+            [SurveySample(3.0, 3000, 500, 0, 0, None, 5180, True)],
         ]
     )
     monkeypatch.setattr(
@@ -280,10 +289,28 @@ def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
     assert "Stopping live capture" in capsys.readouterr().err
 
 
+def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
+    warmup_filter = LiveWarmupFilter()
+    stats = SecondStats(
+        second=1000,
+        unique_bssid_count=1,
+        qbss_station_count_sum=2,
+        selected_qbss_cu_percent=25.0,
+        selected_qbss_ssid="Alpha",
+        selected_qbss_bssid="aa:aa:aa:aa:aa:aa",
+        selected_qbss_rssi_dbm=-45,
+        local_cu_percent=None,
+    )
+
+    assert warmup_filter.filter([stats]) == []
+    assert warmup_filter.filter([stats]) == [stats]
+
+
 class _FakeTsharkProcess:
     def __init__(self) -> None:
         self.stdout = io.StringIO(
-            "1000.100\tAlpha\taa:aa:aa:aa:aa:aa\t128\t2\t0\n"
+            "1000.100\tAlpha\taa:aa:aa:aa:aa:aa\t128\t2\t0\t-45\n"
+            "1001.100\tAlpha\taa:aa:aa:aa:aa:aa\t64\t3\t0\t-44\n"
         )
         self.stderr = io.StringIO("")
 
@@ -307,6 +334,7 @@ class _FakeSelector:
 
 def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monotonic_value = -1.0
+    wall_times = iter([1001.0, 1002.0])
 
     def fake_monotonic() -> float:
         nonlocal monotonic_value
@@ -327,7 +355,7 @@ def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("beacon_live.live.selectors.DefaultSelector", _FakeSelector)
     monkeypatch.setattr("beacon_live.live.time.monotonic", fake_monotonic)
-    monkeypatch.setattr("beacon_live.live.time.time", lambda: 1002.0)
+    monkeypatch.setattr("beacon_live.live.time.time", lambda: next(wall_times))
 
 
 def _field_args(command: list[str]) -> list[str]:
