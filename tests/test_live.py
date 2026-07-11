@@ -241,6 +241,45 @@ def test_survey_parse_failure_is_treated_as_unavailable(
     assert "survey counters unavailable" in captured.err
 
 
+def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    process = _FakeTsharkProcess()
+    terminated_processes: list[_FakeTsharkProcess] = []
+
+    class InterruptingSelector:
+        def register(self, fileobj: object, events: int) -> None:
+            pass
+
+        def select(self, timeout: float) -> list[object]:
+            raise KeyboardInterrupt
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.start_tshark_process",
+        lambda iface: process,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.terminate_tshark_process",
+        terminated_processes.append,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.selectors.DefaultSelector",
+        InterruptingSelector,
+    )
+
+    assert run_live(local_cu=False) == 0
+    assert terminated_processes == [process]
+    assert "Stopping live capture" in capsys.readouterr().err
+
+
 class _FakeTsharkProcess:
     def __init__(self) -> None:
         self.stdout = io.StringIO(

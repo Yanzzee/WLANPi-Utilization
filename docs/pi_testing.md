@@ -188,6 +188,27 @@ starts line-buffered TShark, and redraws a compact dashboard once per second.
 The dashboard shows the most recent 60 seconds of AP/QBSS stats. Local survey
 counters are not required.
 
+### Recommended On-Device Launch Command
+
+Setup installs `wlanpi-beacon-live`, a foreground entrypoint intended for a
+future WLANPi front-panel/menu action. From the repository, launch it with:
+
+```bash
+sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+```
+
+For a future menu definition, use the executable's absolute path rather than
+depending on shell activation or `PATH`, for example:
+
+```text
+/home/<user>/WLANPi-Utilization/.venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+```
+
+The process stays in the foreground and exits cleanly on Ctrl-C. This is only a
+launch boundary: it delegates to the existing live CLI and core capture,
+aggregation, logging, and dashboard code. It does not implement WLANPi display
+APIs, menu rendering, services, or observed-client tracking.
+
 When using the project virtual environment, call the venv Python explicitly
 under `sudo`. This avoids the common `sudo: beacon-live: command not found`
 problem caused by `sudo` using a different `PATH`.
@@ -216,7 +237,7 @@ number 5975 and the kernel will reject it as an unknown channel.
 Defaults are:
 
 ```bash
-sudo .venv/bin/python -m beacon_live.cli live
+sudo .venv/bin/wlanpi-beacon-live
 ```
 
 Use Ctrl-C to stop. The TShark process is terminated on exit.

@@ -17,5 +17,10 @@ setup(
     packages=find_packages(include=["beacon_live", "beacon_live.*"]),
     install_requires=[],
     extras_require={"dev": ["pytest>=7.4,<9"]},
-    entry_points={"console_scripts": ["beacon-live=beacon_live.cli:main"]},
+    entry_points={
+        "console_scripts": [
+            "beacon-live=beacon_live.cli:main",
+            "wlanpi-beacon-live=beacon_live.device:main",
+        ]
+    },
 )

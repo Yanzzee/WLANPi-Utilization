@@ -46,34 +46,57 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
 
     if args.command == "live":
-        if args.interval_seconds <= 0:
-            parser.error("live --interval-seconds must be greater than zero")
-        if args.frequency_mhz is not None and args.band is not None:
-            parser.error("live accepts --frequency-mhz or --band/--channel, not both")
-        try:
-            return run_live(
-                iface=args.iface,
-                channel=args.channel,
-                frequency_mhz=args.frequency_mhz,
-                band=args.band,
-                interval_seconds=args.interval_seconds,
-                local_cu=args.local_cu or args.survey_debug,
-                survey_debug=args.survey_debug,
-                stats_csv=args.stats_csv,
-                beacons_jsonl=args.beacons_jsonl,
-            )
-        except ValueError as exc:
-            parser.error(f"live {exc}")
-        except LiveCommandError as exc:
-            print(f"Command failed: {exc.command_text}", file=sys.stderr)
-            if exc.returncode is not None:
-                print(f"Exit status: {exc.returncode}", file=sys.stderr)
-            if exc.stderr:
-                print(exc.stderr, file=sys.stderr)
-            return 1
+        return _run_live_command(args, parser)
 
     parser.print_help()
     return 0
+
+
+def live_main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run only the live CLI, for the dedicated on-device entrypoint."""
+    parser = argparse.ArgumentParser(
+        prog="wlanpi-beacon-live",
+        description="Run foreground WLANPi beacon analysis.",
+    )
+    _add_live_arguments(parser)
+    return _run_live_command(parser.parse_args(argv), parser)
+
+
+def _run_live_command(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> int:
+    command_prefix = "live " if parser.prog == "beacon-live" else ""
+    if args.interval_seconds <= 0:
+        parser.error(
+            f"{command_prefix}--interval-seconds must be greater than zero"
+        )
+    if args.frequency_mhz is not None and args.band is not None:
+        parser.error(
+            f"{command_prefix}accepts --frequency-mhz or --band/--channel, "
+            "not both"
+        )
+    try:
+        return run_live(
+            iface=args.iface,
+            channel=args.channel,
+            frequency_mhz=args.frequency_mhz,
+            band=args.band,
+            interval_seconds=args.interval_seconds,
+            local_cu=args.local_cu or args.survey_debug,
+            survey_debug=args.survey_debug,
+            stats_csv=args.stats_csv,
+            beacons_jsonl=args.beacons_jsonl,
+        )
+    except ValueError as exc:
+        parser.error(f"{command_prefix}{exc}")
+    except LiveCommandError as exc:
+        print(f"Command failed: {exc.command_text}", file=sys.stderr)
+        if exc.returncode is not None:
+            print(f"Exit status: {exc.returncode}", file=sys.stderr)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -135,23 +158,29 @@ def _build_parser() -> argparse.ArgumentParser:
         "live",
         help="Run live beacon analysis with optional local survey CU.",
     )
-    live.add_argument(
+    _add_live_arguments(live)
+
+    return parser
+
+
+def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
         "--iface",
         default="wlan0",
         help="Wireless interface to use. Default: wlan0.",
     )
-    live.add_argument(
+    parser.add_argument(
         "--channel",
         default="36",
         help="Channel number to tune with HT20. Default: 36.",
     )
-    live.add_argument(
+    parser.add_argument(
         "--frequency-mhz",
         required=False,
         type=int,
         help="Explicit center frequency in MHz, for example 5975 for 6 GHz PSC channel 5.",
     )
-    live.add_argument(
+    parser.add_argument(
         "--band",
         required=False,
         choices=sorted(SUPPORTED_BANDS),
@@ -160,13 +189,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "for 5975 MHz."
         ),
     )
-    live.add_argument(
+    parser.add_argument(
         "--interval-seconds",
         default=1.0,
         type=float,
         help="Terminal update interval and optional survey polling interval. Default: 1.",
     )
-    live.add_argument(
+    parser.add_argument(
         "--survey-debug",
         action="store_true",
         help=(
@@ -174,7 +203,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "to stderr."
         ),
     )
-    live.add_argument(
+    parser.add_argument(
         "--local-cu",
         action="store_true",
         help=(
@@ -182,20 +211,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "local survey CU in live output."
         ),
     )
-    live.add_argument(
+    parser.add_argument(
         "--stats-csv",
         required=False,
         type=Path,
         help="Write each emitted per-second stats row to this CSV path.",
     )
-    live.add_argument(
+    parser.add_argument(
         "--beacons-jsonl",
         required=False,
         type=Path,
         help="Write each valid raw beacon record to this JSONL path.",
     )
-
-    return parser
 
 
 def _run_replay(

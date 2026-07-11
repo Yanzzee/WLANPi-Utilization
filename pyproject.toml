@@ -20,6 +20,7 @@ dev = [
 
 [project.scripts]
 beacon-live = "beacon_live.cli:main"
+wlanpi-beacon-live = "beacon_live.device:main"
 
 [tool.setuptools.packages.find]
 include = ["beacon_live*"]

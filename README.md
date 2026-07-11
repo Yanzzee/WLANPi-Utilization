@@ -26,12 +26,26 @@ pytest
 ```bash
 beacon-live --help
 beacon-live replay --input samples/tshark_qbss_sample.tsv
+sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --stats-csv logs/stats.csv --beacons-jsonl logs/beacons.jsonl
 ```
+
+`wlanpi-beacon-live` is the on-device foreground launcher intended for future
+WLANPi menu integration. It always runs live mode, accepts the same options as
+`beacon-live live`, and exits cleanly on Ctrl-C. A front-panel menu should launch
+the installed executable by absolute path, for example:
+
+```text
+/home/<user>/WLANPi-Utilization/.venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+```
+
+The launcher is only a stable process boundary. Capture, aggregation, logging,
+and dashboard behavior remain in the core package; it does not contain
+display-specific hardware integration or observed-client tracking.
 
 The replay command prints tab-separated per-second stats from a saved TShark
 sample file with these fields:

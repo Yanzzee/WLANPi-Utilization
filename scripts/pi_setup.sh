@@ -105,6 +105,7 @@ fi
 
 echo "Checking CLI import..."
 "${PYTHON_BIN}" -m beacon_live.cli --help >/dev/null
+"${PYTHON_BIN}" -m beacon_live.device --help >/dev/null
 
 echo "Running pytest..."
 "${PYTHON_BIN}" -m pytest
@@ -114,10 +115,16 @@ echo
 echo "For replay without sudo, use:"
 echo "  ${PYTHON_BIN} -m beacon_live.cli replay --input samples/tshark_qbss_sample.tsv"
 echo
-echo "For live mode with sudo, use:"
-echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --channel 36"
-echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975"
-echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --band 6 --channel 5"
+if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+  LIVE_LAUNCHER="${VIRTUAL_ENV}/bin/wlanpi-beacon-live"
+else
+  LIVE_LAUNCHER="${PYTHON_BIN} -m beacon_live.device"
+fi
+
+echo "For the recommended on-device foreground launcher, use:"
+echo "  sudo ${LIVE_LAUNCHER} --iface wlan0 --channel 36"
+echo "  sudo ${LIVE_LAUNCHER} --frequency-mhz 5975"
+echo "  sudo ${LIVE_LAUNCHER} --band 6 --channel 5"
 echo
 echo "For optional local survey CU diagnostics, use:"
-echo "  sudo ${PYTHON_BIN} -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug"
+echo "  sudo ${LIVE_LAUNCHER} --iface wlan0 --channel 36 --survey-debug"
