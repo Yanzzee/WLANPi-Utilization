@@ -152,8 +152,8 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     )
     assert beacon_row.split()[1:4] == ["1", "2", "50.20%/50.20%/50.20%"]
     assert "LOCAL SURVEY CU" not in captured.out
-    assert "unavailable" not in captured.out
-    assert captured.err == ""
+    assert f"Stats CSV log: {stats_csv}" in captured.err
+    assert f"Beacon JSONL log: {beacons_jsonl}" in captured.err
 
     with stats_csv.open("r", encoding="utf-8", newline="") as stats_file:
         stats_rows = list(csv.DictReader(stats_file))

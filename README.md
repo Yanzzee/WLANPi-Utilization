@@ -31,7 +31,7 @@ sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --stats-csv logs/stats.csv --beacons-jsonl logs/beacons.jsonl
+sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36 --stats-csv --beacons-jsonl --log-dir logs
 ```
 
 `wlanpi-beacon-live` is the on-device foreground launcher intended for future
@@ -62,8 +62,15 @@ raw / 255 * 100
 
 The live command's core path configures the selected interface for monitor
 mode, tunes with 20 MHz width, starts TShark, and prints AP-reported QBSS
-terminal stats in a rolling 60-second dashboard that redraws once per second.
-It does not require local survey counters. Use
+terminal stats in a rolling 120-second dashboard that redraws once per second
+and displays local wall-clock time. Each table row's QBSS CU min/mean/max is
+computed from AP reports observed during that second. The bar graph plots only
+the maximum from each second, and the rolling min/mean/max summary is computed
+from that same max-only series. Seconds without a QBSS maximum are graph gaps
+and are excluded from the numeric summary. The first two dashboard cycles are
+an explicit warm-up period and are excluded from the graph and rolling summary.
+
+Live mode does not require local survey counters. Use
 `--channel` for channel numbers and `--frequency-mhz` for explicit center
 frequency. For 6 GHz PSC channel 5, use either `--frequency-mhz 5975` or
 `--band 6 --channel 5`.
@@ -78,8 +85,12 @@ frequency; it does not indicate a beacon-capture failure. Unsupported, missing,
 or unparseable survey output produces a warning while beacon capture, dashboard
 updates, and logging continue normally.
 
-Live logging is optional. Use `--stats-csv` for one flushed row per emitted
-`SecondStats`, and `--beacons-jsonl` for one flushed JSON object per valid raw
-beacon. Parent directories are created automatically. Both formats include
-capture start time, interface, channel, 20 MHz channel width, and explicit
-frequency/band metadata when supplied.
+Live logging is optional. Use `--stats-csv` and/or `--beacons-jsonl` to enable
+the main outputs, and optionally set their designated folder with `--log-dir`
+(default: `logs`). These flags do not accept filenames. The app creates a shared
+timestamped run prefix and writes names such as
+`beacon_live_20260710T183045123456Z_stats.csv` and
+`beacon_live_20260710T183045123456Z_beacons.jsonl`. Files remain flushed per
+stats row or beacon record. Both formats include capture start time, interface,
+channel, 20 MHz channel width, and explicit frequency/band metadata when
+supplied.

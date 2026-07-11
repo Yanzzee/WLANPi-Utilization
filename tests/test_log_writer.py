@@ -1,11 +1,31 @@
 import csv
 import json
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 
 from beacon_live.log_writer import CaptureLogWriter
 from beacon_live.log_writer import LogMetadata
+from beacon_live.log_writer import build_live_log_paths
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
+
+
+def test_live_log_paths_use_generated_timestamped_filenames() -> None:
+    log_dir = Path("designated-logs")
+    paths = build_live_log_paths(
+        log_dir,
+        write_stats_csv=True,
+        write_beacons_jsonl=True,
+        timestamp=datetime(2026, 7, 10, 18, 30, 45, 123456, tzinfo=timezone.utc),
+    )
+
+    assert paths.stats_csv == (
+        log_dir / "beacon_live_20260710T183045123456Z_stats.csv"
+    )
+    assert paths.beacons_jsonl == (
+        log_dir / "beacon_live_20260710T183045123456Z_beacons.jsonl"
+    )
 
 
 def test_capture_log_writer_creates_directories_and_flushes_rows(

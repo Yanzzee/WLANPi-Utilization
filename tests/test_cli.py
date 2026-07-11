@@ -225,13 +225,12 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
 
 
-def test_live_accepts_log_paths(
+def test_live_generates_log_filenames_in_configured_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
-    stats_csv = tmp_path / "logs" / "stats.csv"
-    beacons_jsonl = tmp_path / "logs" / "beacons.jsonl"
+    log_dir = tmp_path / "designated-logs"
 
     def fake_run_live(**kwargs: object) -> int:
         calls.append(kwargs)
@@ -247,16 +246,37 @@ def test_live_accepts_log_paths(
             "--channel",
             "44",
             "--stats-csv",
-            str(stats_csv),
             "--beacons-jsonl",
-            str(beacons_jsonl),
+            "--log-dir",
+            str(log_dir),
         ]
     ) == 0
 
-    assert calls[0]["stats_csv"] == stats_csv
-    assert calls[0]["beacons_jsonl"] == beacons_jsonl
+    stats_csv = calls[0]["stats_csv"]
+    beacons_jsonl = calls[0]["beacons_jsonl"]
+    assert isinstance(stats_csv, Path)
+    assert isinstance(beacons_jsonl, Path)
+    assert stats_csv.parent == log_dir
+    assert beacons_jsonl.parent == log_dir
+    assert stats_csv.name.startswith("beacon_live_")
+    assert stats_csv.name.endswith("_stats.csv")
+    assert beacons_jsonl.name.startswith("beacon_live_")
+    assert beacons_jsonl.name.endswith("_beacons.jsonl")
+    assert stats_csv.name.removesuffix("_stats.csv") == (
+        beacons_jsonl.name.removesuffix("_beacons.jsonl")
+    )
     assert calls[0]["iface"] == "wlan9"
     assert calls[0]["channel"] == "44"
+
+
+def test_live_log_flags_reject_arbitrary_filenames(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["live", "--stats-csv", "custom.csv"])
+
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: custom.csv" in capsys.readouterr().err
 
 
 def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) -> None:

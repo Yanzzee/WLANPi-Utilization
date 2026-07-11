@@ -185,8 +185,13 @@ include interface, channel, 20 MHz width, and replay start-time metadata.
 Live mode is terminal-only for now. Beacon analysis is the core path: it
 configures the selected interface for monitor mode, tunes with 20 MHz width,
 starts line-buffered TShark, and redraws a compact dashboard once per second.
-The dashboard shows the most recent 60 seconds of AP/QBSS stats. Local survey
-counters are not required.
+The dashboard shows the most recent 120 seconds of AP/QBSS stats using local
+wall-clock time. Each row's QBSS CU min/mean/max covers AP reports observed in
+that second. The graph uses only the maximum from each second, and the rolling
+min/mean/max summary describes that same max-only series. Missing QBSS maxima
+appear as graph gaps and do not enter the numeric summary. The first two update
+cycles are labeled as warm-up and excluded from both the graph and summary.
+Local survey counters are not required.
 
 ### Recommended On-Device Launch Command
 
@@ -242,22 +247,26 @@ sudo .venv/bin/wlanpi-beacon-live
 
 Use Ctrl-C to stop. The TShark process is terminated on exit.
 
-To keep per-second stats and valid raw beacon records from a live run, add one
-or both optional logging paths:
+To keep per-second stats and valid raw beacon records from a live run, enable
+one or both output types. You may select the containing directory, but not the
+filenames:
 
 ```bash
 sudo .venv/bin/python -m beacon_live.cli live \
   --iface wlan0 \
   --channel 36 \
-  --stats-csv logs/stats.csv \
-  --beacons-jsonl logs/beacons.jsonl
+  --stats-csv \
+  --beacons-jsonl \
+  --log-dir logs
 ```
 
-Parent directories are created automatically. The stats CSV is flushed for
-each emitted second, and raw beacon JSONL is flushed line by line. Rows include
+The directory is created automatically. Both files use one app-generated UTC
+timestamp prefix, for example `beacon_live_20260710T183045123456Z_stats.csv`
+and `beacon_live_20260710T183045123456Z_beacons.jsonl`. The stats CSV is flushed
+for each emitted second, and beacon JSONL is flushed line by line. Rows include
 the capture start time, interface, channel, 20 MHz width, and explicit
-frequency/band metadata when supplied. Logging is disabled when neither option
-is present.
+frequency/band metadata when supplied. Logging is disabled when neither output
+flag is present. Passing a filename after either flag is rejected.
 
 Local survey CU is driver-dependent and strictly opt-in. To poll
 `iw dev <iface> survey dump` once per second and populate local CU, add
@@ -267,7 +276,8 @@ Local survey CU is driver-dependent and strictly opt-in. To poll
 sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --local-cu
 ```
 
-If local CU always shows `0.00%` or `--`, run live mode with survey diagnostics.
+If local CU always shows `0.00%` or `unavailable`, run live mode with survey
+diagnostics.
 `--survey-debug` also enables local CU:
 
 ```bash

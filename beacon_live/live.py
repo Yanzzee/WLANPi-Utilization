@@ -316,6 +316,10 @@ def run_live(
 
     try:
         log_writer.open()
+        if stats_csv is not None:
+            print(f"Stats CSV log: {stats_csv}", file=sys.stderr, flush=True)
+        if beacons_jsonl is not None:
+            print(f"Beacon JSONL log: {beacons_jsonl}", file=sys.stderr, flush=True)
         if process.stdout is None:
             raise LiveCommandError(build_tshark_command(iface), stderr="missing stdout")
         selector.register(process.stdout, selectors.EVENT_READ)

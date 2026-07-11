@@ -11,7 +11,7 @@ def test_device_launcher_enters_live_mode_and_forwards_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[dict[str, object]] = []
-    stats_csv = tmp_path / "stats.csv"
+    log_dir = tmp_path / "logs"
 
     def fake_run_live(
         *,
@@ -52,22 +52,24 @@ def test_device_launcher_enters_live_mode_and_forwards_options(
             "5",
             "--local-cu",
             "--stats-csv",
-            str(stats_csv),
+            "--log-dir",
+            str(log_dir),
         ]
     ) == 0
-    assert calls == [
-        {
-            "iface": "wlan9",
-            "channel": "5",
-            "frequency_mhz": None,
-            "band": "6",
-            "interval_seconds": 1.0,
-            "local_cu": True,
-            "survey_debug": False,
-            "stats_csv": stats_csv,
-            "beacons_jsonl": None,
-        }
-    ]
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["iface"] == "wlan9"
+    assert call["channel"] == "5"
+    assert call["frequency_mhz"] is None
+    assert call["band"] == "6"
+    assert call["interval_seconds"] == 1.0
+    assert call["local_cu"] is True
+    assert call["survey_debug"] is False
+    assert call["beacons_jsonl"] is None
+    stats_csv = call["stats_csv"]
+    assert isinstance(stats_csv, Path)
+    assert stats_csv.parent == log_dir
+    assert stats_csv.name.endswith("_stats.csv")
 
 
 def test_device_launcher_uses_live_defaults(
@@ -98,6 +100,7 @@ def test_device_launcher_exposes_live_help(
     assert "--iface" in help_output
     assert "--local-cu" in help_output
     assert "--stats-csv" in help_output
+    assert "--log-dir" in help_output
 
 
 def test_device_launcher_exits_cleanly_if_setup_is_interrupted(

@@ -19,6 +19,7 @@ from beacon_live.live import SUPPORTED_BANDS
 from beacon_live.live import run_live
 from beacon_live.log_writer import CaptureLogWriter
 from beacon_live.log_writer import LogMetadata
+from beacon_live.log_writer import build_live_log_paths
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
     parse_survey_dump,
@@ -76,6 +77,11 @@ def _run_live_command(
             f"{command_prefix}accepts --frequency-mhz or --band/--channel, "
             "not both"
         )
+    log_paths = build_live_log_paths(
+        args.log_dir,
+        write_stats_csv=args.stats_csv,
+        write_beacons_jsonl=args.beacons_jsonl,
+    )
     try:
         return run_live(
             iface=args.iface,
@@ -85,8 +91,8 @@ def _run_live_command(
             interval_seconds=args.interval_seconds,
             local_cu=args.local_cu or args.survey_debug,
             survey_debug=args.survey_debug,
-            stats_csv=args.stats_csv,
-            beacons_jsonl=args.beacons_jsonl,
+            stats_csv=log_paths.stats_csv,
+            beacons_jsonl=log_paths.beacons_jsonl,
         )
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
@@ -213,15 +219,19 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--stats-csv",
-        required=False,
-        type=Path,
-        help="Write each emitted per-second stats row to this CSV path.",
+        action="store_true",
+        help="Write per-second stats to an app-named CSV in --log-dir.",
     )
     parser.add_argument(
         "--beacons-jsonl",
-        required=False,
+        action="store_true",
+        help="Write beacons to an app-named JSONL file in --log-dir.",
+    )
+    parser.add_argument(
+        "--log-dir",
         type=Path,
-        help="Write each valid raw beacon record to this JSONL path.",
+        default=Path("logs"),
+        help="Directory for generated live log filenames. Default: logs.",
     )
 
 

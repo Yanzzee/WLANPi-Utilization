@@ -6,6 +6,8 @@ import csv
 import json
 from dataclasses import asdict
 from dataclasses import dataclass
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 from typing import IO, Optional
 
@@ -40,6 +42,37 @@ class LogMetadata:
     channel_width_mhz: int = 20
     frequency_mhz: Optional[int] = None
     band: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class LiveLogPaths:
+    """Application-generated paths for one live capture run."""
+
+    stats_csv: Optional[Path]
+    beacons_jsonl: Optional[Path]
+
+
+def build_live_log_paths(
+    log_dir: Path,
+    *,
+    write_stats_csv: bool,
+    write_beacons_jsonl: bool,
+    timestamp: Optional[datetime] = None,
+) -> LiveLogPaths:
+    """Build timestamped live log paths inside the designated directory."""
+    capture_time = timestamp or datetime.now(timezone.utc)
+    if capture_time.tzinfo is None:
+        capture_time = capture_time.replace(tzinfo=timezone.utc)
+    stamp = capture_time.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    basename = f"beacon_live_{stamp}"
+    return LiveLogPaths(
+        stats_csv=(log_dir / f"{basename}_stats.csv") if write_stats_csv else None,
+        beacons_jsonl=(
+            log_dir / f"{basename}_beacons.jsonl"
+            if write_beacons_jsonl
+            else None
+        ),
+    )
 
 
 class CaptureLogWriter:
