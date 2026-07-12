@@ -25,5 +25,5 @@ python3 -m venv "${APP_VENV}"
 mkdir -p /run/wlanpi-beacon-live /var/log/wlanpi-beacon-live
 systemctl restart wlanpi-fpms
 
-echo "Channel Utilization is installed under FPMS Apps."
+echo "Utilization is installed under FPMS Apps."
 echo "Select a band, channel, then Display or Display + Log."

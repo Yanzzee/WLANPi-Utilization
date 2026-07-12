@@ -10,7 +10,7 @@ from integration.wlanpi_fpms import channel_utilization
 def test_fpms_menu_is_band_channel_then_display_mode() -> None:
     menu = channel_utilization.build_channel_utilization_menu({})
 
-    assert menu["name"] == "Channel Utilization"
+    assert menu["name"] == "Utilization"
     bands = menu["action"]
     assert isinstance(bands, list)
     assert [band["name"] for band in bands] == [

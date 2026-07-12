@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the Channel Utilization adapter into WLAN Pi FPMS 2.x."""
+"""Install the Utilization adapter into WLAN Pi FPMS 2.x."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def main() -> int:
     shutil.copy2(args.adapter, apps_dir / "channel_utilization.py")
     _patch_fpms(fpms_file)
     _patch_buttons(buttons_file)
-    print(f"Installed Channel Utilization FPMS adapter in {package}")
+    print(f"Installed Utilization FPMS adapter in {package}")
     return 0
 
 

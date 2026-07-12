@@ -201,7 +201,7 @@ Navigate with the control stick:
 
 ```text
 Apps
-  Channel Utilization
+  Utilization
     2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
       <channel and center frequency>
         Display | Display + Log
@@ -228,17 +228,19 @@ The exact command behind `5 GHz > Ch 36 5180 MHz > Display` is:
 The 128x128 screen contains a centered 120x64 graph. It displays the latest 120
 seconds from left to right with one pixel per second. The vertical scale maps
 the raw QBSS CU range `0-255` into 64 pixels. Once full, new seconds scroll in
-from the right. Text above the graph shows selected CU, `SUM`, `BSS`, rolling
-minimum/average/maximum, band, channel, frequency, and local time. `SUM` is the
+from the right. Two larger rows above the graph show band, channel, frequency,
+`STA`, `SUM`, selected CU, and rolling minimum/average/maximum. `SUM` is the
 sum of the latest QBSS station counts from every BSSID observed during that
-second, since those stations share airtime on the channel. `BSS` is the QBSS
+second, since those stations share airtime on the channel. `STA` is the QBSS
 station count advertised by the BSSID selected as the CU source. Text below
-shows the selected AP's RSSI, SSID, and BSSID. Missing CU values are blank graph
-columns and do not enter the summary.
+uses two larger rows for the selected AP's RSSI, SSID, and BSSID. Long SSIDs are
+truncated. The screen does not show a clock or exit hint; log timestamps are
+unchanged. Missing CU values are blank graph columns and do not enter the
+summary.
 
 The AP selected each second is the QBSS-bearing BSSID with the strongest
 observed RSSI; the latest beacon from that BSSID supplies CU and the individual
-`BSS` station count. The `SUM` station count is computed independently across
+`STA` station count. The `SUM` station count is computed independently across
 all observed BSSIDs. This is beacon-only analysis. It does not track observed
 clients.
 
@@ -246,8 +248,8 @@ clients.
 
 After installation:
 
-1. Open a Display channel and confirm the clock matches `date +%H:%M:%S`, then
-   leave it open long enough to observe one new graph column each second.
+1. Open a Display channel and leave it open long enough to observe one new
+   graph column each second.
 2. Press left and confirm FPMS returns to the selected channel menu.
 3. Open the same channel with Display + Log, wait several seconds, press left,
    and confirm both timestamped files exist:
@@ -263,10 +265,10 @@ After installation:
    sudo journalctl -u wlanpi-fpms -n 100 --no-pager
    ```
 
-The automated tests cover local-time formatting, recursive frame/log directory
-creation, one-second window updates, FPMS command construction, SIGINT exit,
-and TShark cleanup. The checklist verifies the physical LCD, GPIO control stick,
-radio, and installed OS packages together.
+The automated tests cover log local-time formatting, recursive frame/log
+directory creation, one-second window updates, FPMS command construction,
+SIGINT exit, and TShark cleanup. The checklist verifies the physical LCD, GPIO
+control stick, radio, and installed OS packages together.
 
 ## Run Live Mode From a Terminal
 

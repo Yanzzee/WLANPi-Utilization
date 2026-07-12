@@ -82,7 +82,7 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
     """Return one FPMS Apps menu node with band/channel-first selection."""
     app = ChannelUtilizationApp(g_vars)
     return {
-        "name": "Channel Utilization",
+        "name": "Utilization",
         "action": [
             _band_menu(app, "2.4 GHz", "2.4", _24_GHZ_CHANNELS),
             _band_menu(app, "5 GHz", "5", _5_GHZ_CHANNELS),

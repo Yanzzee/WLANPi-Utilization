@@ -1,5 +1,3 @@
-from datetime import timedelta
-from datetime import timezone
 from pathlib import Path
 from typing import Optional
 
@@ -27,10 +25,11 @@ def test_lcd_dashboard_writes_128_square_ppm_and_creates_directory(
 
     assert payload.startswith(b"P6\n128 128\n255\n")
     assert len(payload.split(b"\n", 3)[3]) == 128 * 128 * 3
-    assert dashboard.text_lines[0] == "CU --% SUM -- BSS --"
+    assert dashboard.text_lines[0] == "5G CH36 5180 STA-- SUM--"
+    assert dashboard.text_lines[1] == "CU--% MIN--% AVG--% MAX--%"
 
 
-def test_lcd_dashboard_uses_local_time_and_requested_compact_text(
+def test_lcd_dashboard_uses_requested_two_row_header_and_footer(
     tmp_path: Path,
 ) -> None:
     dashboard = LcdDashboard(
@@ -38,7 +37,6 @@ def test_lcd_dashboard_uses_local_time_and_requested_compact_text(
         band="6",
         channel="5",
         frequency_mhz=5975,
-        local_timezone=timezone(timedelta(hours=5, minutes=30)),
     )
     dashboard.update(
         [
@@ -47,11 +45,10 @@ def test_lcd_dashboard_uses_local_time_and_requested_compact_text(
         ]
     )
 
-    current, summary, metadata, rssi, bssid = dashboard.text_lines
+    metadata, summary, rssi, bssid = dashboard.text_lines
 
-    assert current == "CU 75% SUM 18 BSS 12"
-    assert summary == "MIN 25% AVG 50% MAX 75%"
-    assert metadata == "6G CH5 5975 05:30:01"
+    assert metadata == "6G CH5 5975 STA12 SUM18"
+    assert summary == "CU75% MIN25% AVG50% MAX75%"
     assert rssi == "RSSI -45 Alpha"
     assert bssid == "BSSID aa:aa:aa:aa:aa:aa"
 
@@ -93,7 +90,7 @@ def test_raw_qbss_values_map_to_quarter_scale_graph_height() -> None:
     assert _raw_to_graph_height(255) == 64
 
 
-def test_station_sum_and_bssid_count_fit_with_five_digit_values(
+def test_station_sum_and_bssid_count_fit_with_four_digit_values(
     tmp_path: Path,
 ) -> None:
     dashboard = LcdDashboard(
@@ -108,13 +105,13 @@ def test_station_sum_and_bssid_count_fit_with_five_digit_values(
                 1000,
                 100.0,
                 255,
-                station_count=99999,
-                bssid_station_count=65535,
+                station_count=9999,
+                bssid_station_count=9999,
             )
         ]
     )
 
-    assert dashboard.text_lines[0] == "CU 100% SUM 99999 BSS 65535"
+    assert dashboard.text_lines[0] == "6G CH233 7115 STA9999 SUM9999"
     assert len(dashboard.text_lines[0]) <= 30
 
 

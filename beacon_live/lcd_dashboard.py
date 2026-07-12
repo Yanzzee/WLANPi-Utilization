@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
-from datetime import tzinfo
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -35,13 +33,11 @@ class LcdDashboard:
         band: Optional[str],
         channel: str,
         frequency_mhz: Optional[int],
-        local_timezone: Optional[tzinfo] = None,
     ) -> None:
         self.frame_path = frame_path
         self.band = band
         self.channel = channel
         self.frequency_mhz = frequency_mhz
-        self.local_timezone = local_timezone
         self.window = RollingStatsWindow(max_seconds=GRAPH_WIDTH)
         self.refresh()
 
@@ -64,7 +60,7 @@ class LcdDashboard:
         return tuple(values)
 
     @property
-    def text_lines(self) -> tuple[str, str, str, str, str]:
+    def text_lines(self) -> tuple[str, str, str, str]:
         latest = self.latest
         values = [
             stats.selected_qbss_cu_percent
@@ -83,16 +79,17 @@ class LcdDashboard:
         )
         if values:
             summary = (
-                f"MIN {round(min(values))}% AVG "
-                f"{round(sum(values) / len(values))}% MAX {round(max(values))}%"
+                f"CU{current_cu}% MIN{round(min(values))}% "
+                f"AVG{round(sum(values) / len(values))}% "
+                f"MAX{round(max(values))}%"
             )
         else:
-            summary = "MIN --% AVG --% MAX --%"
+            summary = "CU--% MIN--% AVG--% MAX--%"
 
         metadata = f"{_short_band(self.band)} CH{self.channel}"
         if self.frequency_mhz is not None:
             metadata += f" {self.frequency_mhz}"
-        metadata += f" {_local_time(latest, self.local_timezone)}"
+        metadata += f" STA{bssid_station_count} SUM{station_sum}"
 
         rssi = "--"
         ssid = "--"
@@ -109,22 +106,18 @@ class LcdDashboard:
             bssid = latest.selected_qbss_bssid or "--"
 
         return (
-            f"CU {current_cu}% SUM {station_sum} BSS {bssid_station_count}",
-            summary,
             metadata,
+            summary,
             f"RSSI {rssi} {ssid}",
             f"BSSID {bssid}",
         )
 
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
-        top_current, top_summary, top_metadata, bottom_rssi, bottom_bssid = (
-            self.text_lines
-        )
+        top_metadata, top_summary, bottom_rssi, bottom_bssid = self.text_lines
 
-        canvas.text(4, 1, top_current, _CURRENT)
-        canvas.text(4, 9, top_summary, _WHITE)
-        canvas.text(4, 17, top_metadata, _WHITE)
+        canvas.text(2, 2, top_metadata, _WHITE, scale_y=2)
+        canvas.text(2, 18, top_summary, _CURRENT, scale_y=2)
 
         for y in (GRAPH_Y, GRAPH_Y + 16, GRAPH_Y + 32, GRAPH_Y + 48, GRAPH_Y + 63):
             canvas.horizontal_line(GRAPH_X, GRAPH_X + GRAPH_WIDTH - 1, y, _DIM)
@@ -151,9 +144,8 @@ class LcdDashboard:
                     _GRAPH,
                 )
 
-        canvas.text(4, 99, _truncate_pixels(bottom_rssi), _WHITE)
-        canvas.text(4, 107, _truncate_pixels(bottom_bssid), _WHITE)
-        canvas.text(4, 120, "LEFT EXIT", _DIM)
+        canvas.text(2, 99, _truncate_pixels(bottom_rssi), _WHITE, scale_y=2)
+        canvas.text(2, 115, _truncate_pixels(bottom_bssid), _WHITE, scale_y=2)
         return canvas.ppm()
 
     def refresh(self, stats_rows: Iterable[SecondStats] = ()) -> None:
@@ -167,15 +159,6 @@ def _whole_percent(value: Optional[float]) -> str:
 
 def _short_band(band: Optional[str]) -> str:
     return "?G" if band is None else f"{band}G"
-
-
-def _local_time(stats: Optional[SecondStats], timezone: Optional[tzinfo]) -> str:
-    timestamp = stats.second if stats is not None else datetime.now().timestamp()
-    if timezone is None:
-        value = datetime.fromtimestamp(timestamp).astimezone()
-    else:
-        value = datetime.fromtimestamp(timestamp, timezone)
-    return value.strftime("%H:%M:%S")
 
 
 def _raw_to_graph_height(raw: int) -> int:
@@ -237,6 +220,8 @@ class _Canvas:
         y: int,
         value: str,
         color: tuple[int, int, int],
+        *,
+        scale_y: int = 1,
     ) -> None:
         cursor = x
         for character in value.upper():
@@ -244,7 +229,12 @@ class _Canvas:
             for row, bits in enumerate(glyph):
                 for column in range(3):
                     if bits & (1 << (2 - column)):
-                        self.pixel(cursor + column, y + row, color)
+                        for scaled_row in range(scale_y):
+                            self.pixel(
+                                cursor + column,
+                                y + row * scale_y + scaled_row,
+                                color,
+                            )
             cursor += 4
 
     def ppm(self) -> bytes:

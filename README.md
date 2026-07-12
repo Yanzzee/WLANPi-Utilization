@@ -49,7 +49,7 @@ sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
 The installer creates an application virtual environment at
-`/opt/wlanpi-beacon-live`, adds `Apps > Channel Utilization` to WLAN Pi FPMS,
+`/opt/wlanpi-beacon-live`, adds `Apps > Utilization` to WLAN Pi FPMS,
 adds a generic page-exit callback to FPMS, and restarts `wlanpi-fpms`. It keeps
 one-time `.beacon-live.bak` copies of the two patched FPMS files. Rerun the
 installer after an FPMS package upgrade because that package can replace its
@@ -58,8 +58,8 @@ own Python files.
 The menu order is band, channel, then launch mode:
 
 ```text
-Apps > Channel Utilization > <band> > <channel and frequency> > Display
-Apps > Channel Utilization > <band> > <channel and frequency> > Display + Log
+Apps > Utilization > <band> > <channel and frequency> > Display
+Apps > Utilization > <band> > <channel and frequency> > Display + Log
 ```
 
 Bands are `2.4 GHz`, `5 GHz`, `6 GHz PSC`, and `6 GHz All`. PSC entries in the
@@ -114,13 +114,14 @@ RSSI is unavailable for every candidate, recency is used as the fallback.
 The R4 LCD frame is 128x128. Its centered plot is 120 pixels wide by 64 pixels
 high, with one horizontal pixel per second and raw QBSS `0-255` values mapped
 to 64 vertical pixels in four-value steps. New samples scroll in from the
-right. Compact text shows current selected CU, `SUM` for the sum of the latest
-QBSS station counts advertised by all BSSIDs observed during that second, and
-`BSS` for the QBSS station count advertised by the BSSID selected as the CU
-source. It also shows rolling minimum, average, and maximum CU; band, channel,
-frequency, and local time; and the selected AP's strongest RSSI, SSID, and
-BSSID. `SUM` represents stations sharing airtime on the channel, while `BSS`
-provides the selected AP's individual value. Missing CU seconds are graph gaps.
+right. Two larger text rows above the graph show band, channel, frequency,
+`STA`, and `SUM`, followed by current CU and rolling minimum, average, and
+maximum CU. `SUM` is the sum of the latest QBSS station counts advertised by
+all BSSIDs observed during that second; `STA` is the QBSS station count
+advertised by the BSSID selected as the CU source. Two larger rows below show
+the selected AP's strongest RSSI, SSID, and BSSID. Long SSIDs are truncated.
+The on-screen clock and exit hint are intentionally omitted; log records retain
+their local timestamps. Missing CU seconds are graph gaps.
 
 The graph and rolling min/mean/max summary use exactly the selected values in
 the visible 120-second window. Missing selected values are excluded from the
