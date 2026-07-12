@@ -23,7 +23,21 @@ def test_aggregator_selects_latest_qbss_from_strongest_rssi_bssid() -> None:
     assert stats.selected_qbss_ssid == "Alpha"
     assert stats.selected_qbss_bssid == "aa"
     assert stats.selected_qbss_rssi_dbm == -55
+    assert stats.selected_qbss_cu_raw is None
+    assert stats.selected_qbss_station_count == 4
+    assert stats.selected_qbss_strongest_rssi_dbm == -40
     assert stats.local_cu_percent is None
+
+
+def test_aggregator_preserves_selected_raw_qbss_value_for_lcd_scaling() -> None:
+    record = _record(1000.1, "Alpha", "aa", 128 / 255 * 100, 2, -40)
+    record = BeaconRecord(
+        **{**record.__dict__, "qbss_cu_raw": 128},
+    )
+
+    stats = aggregate_records([record])[0]
+
+    assert stats.selected_qbss_cu_raw == 128
 
 
 def test_strongest_rssi_selection_ignores_beacons_without_qbss() -> None:
@@ -50,6 +64,7 @@ def test_rssi_tie_prefers_latest_beacon_then_latest_from_selected_bssid() -> Non
     assert stats.selected_qbss_bssid == "bb"
     assert stats.selected_qbss_cu_percent == 30.0
     assert stats.selected_qbss_rssi_dbm == -60
+    assert stats.selected_qbss_strongest_rssi_dbm == -45
 
 
 def test_aggregate_records_returns_none_qbss_stats_when_no_cu_present() -> None:

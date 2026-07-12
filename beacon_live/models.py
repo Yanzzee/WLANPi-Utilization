@@ -38,3 +38,6 @@ class SecondStats:
     selected_qbss_bssid: Optional[str]
     selected_qbss_rssi_dbm: Optional[int]
     local_cu_percent: Optional[float]
+    selected_qbss_cu_raw: Optional[int] = None
+    selected_qbss_station_count: Optional[int] = None
+    selected_qbss_strongest_rssi_dbm: Optional[int] = None

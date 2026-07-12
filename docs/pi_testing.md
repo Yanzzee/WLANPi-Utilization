@@ -1,9 +1,9 @@
 # Raspberry Pi / WLAN Pi Smoke Testing
 
-These scripts help collect first-pass evidence from a Raspberry Pi or WLAN Pi
-without implementing the full live capture app yet. They do not install or
-modify system services, and they do not integrate with the WLAN Pi display or
-menu system.
+These instructions cover hardware-free replay, Pi smoke capture, terminal live
+testing, and WLAN Pi R4 front-panel installation. The smoke/setup scripts do
+not change services; the separate `install_wlanpi_fpms.sh` installer performs
+the documented FPMS integration and service restart.
 
 ## Clone the Repo
 
@@ -181,44 +181,102 @@ each per-second record, and beacon JSONL is flushed line by line. Log rows
 put local record time first, followed by interface, channel, and resolved
 frequency/band metadata.
 
-## Run Minimal Live Mode
+## Install the WLAN Pi R4 Front-Panel App
 
-Live mode is terminal-only for now. Beacon analysis is the core path: it
-configures the selected interface for monitor mode, tunes with 20 MHz width,
-starts line-buffered TShark, and redraws a compact dashboard once per second.
-The dashboard shows the most recent 120 seconds of AP/QBSS stats using local
-wall-clock time. Each row contains one selected QBSS CU value. For that second,
-the app considers only QBSS-bearing beacons, chooses the BSSID with the strongest
-observed RSSI, and then uses the most recent QBSS beacon from that BSSID. If two
-RSSI observations tie, the later beacon wins. When all candidate RSSI values are
-missing, the latest QBSS beacon is the fallback.
+The WLAN Pi FPMS process owns the Waveshare SPI display and control-stick GPIO.
+Install this project as an FPMS app instead of trying to send terminal output to
+the display:
 
-The graph and rolling min/mean/max summary use the exact selected values still
-visible in the 120-second rows. Missing values appear as graph gaps and do not
-enter the summary. The first completed live cycle is silently discarded from
-dashboard rows and stats CSV as a one-cycle warm-up; raw beacon JSONL still
-contains every valid warm-up beacon. Local survey counters are not required.
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+```
 
-### Recommended On-Device Launch Command
+The installer creates `/opt/wlanpi-beacon-live`, installs a thin FPMS adapter,
+patches the FPMS Apps menu and page-exit callback, and restarts
+`wlanpi-fpms`. The adapter only launches/stops the child and copies complete
+frames to the LCD. All beacon analysis and frame rendering stays in this
+project. Rerun the installer after upgrading the `wlanpi-fpms` package.
 
-Setup installs `wlanpi-beacon-live`, a foreground entrypoint intended for a
-future WLANPi front-panel/menu action. From the repository, launch it with:
+Navigate with the control stick:
+
+```text
+Apps
+  Channel Utilization
+    2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
+      <channel and center frequency>
+        Display | Display + Log
+```
+
+PSC channels are marked in the `6 GHz All` list. Selecting `Display` or
+`Display + Log` starts live beacon capture immediately. Press left while the
+graph is open to send SIGINT to the capture process, terminate TShark, flush and
+close any enabled logs, and return to the FPMS menu. No other control-stick or
+button action is used by this first version.
+
+The exact command behind `5 GHz > Ch 36 5180 MHz > Display` is:
+
+```text
+/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm
+```
+
+`Display + Log` uses the same command plus:
+
+```text
+--stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
+```
+
+The 128x128 screen contains a centered 120x64 graph. It displays the latest 120
+seconds from left to right with one pixel per second. The vertical scale maps
+the raw QBSS CU range `0-255` into 64 pixels. Once full, new seconds scroll in
+from the right. Text above the graph shows selected CU, `SUM`, `BSS`, rolling
+minimum/average/maximum, band, channel, frequency, and local time. `SUM` is the
+sum of the latest QBSS station counts from every BSSID observed during that
+second, since those stations share airtime on the channel. `BSS` is the QBSS
+station count advertised by the BSSID selected as the CU source. Text below
+shows the selected AP's RSSI, SSID, and BSSID. Missing CU values are blank graph
+columns and do not enter the summary.
+
+The AP selected each second is the QBSS-bearing BSSID with the strongest
+observed RSSI; the latest beacon from that BSSID supplies CU and the individual
+`BSS` station count. The `SUM` station count is computed independently across
+all observed BSSIDs. This is beacon-only analysis. It does not track observed
+clients.
+
+### On-Device Acceptance Check
+
+After installation:
+
+1. Open a Display channel and confirm the clock matches `date +%H:%M:%S`, then
+   leave it open long enough to observe one new graph column each second.
+2. Press left and confirm FPMS returns to the selected channel menu.
+3. Open the same channel with Display + Log, wait several seconds, press left,
+   and confirm both timestamped files exist:
+
+   ```bash
+   sudo ls -l /var/log/wlanpi-beacon-live
+   ```
+
+4. Confirm no capture child was left behind and inspect service errors:
+
+   ```bash
+   pgrep -af 'wlanpi-beacon-live|tshark'
+   sudo journalctl -u wlanpi-fpms -n 100 --no-pager
+   ```
+
+The automated tests cover local-time formatting, recursive frame/log directory
+creation, one-second window updates, FPMS command construction, SIGINT exit,
+and TShark cleanup. The checklist verifies the physical LCD, GPIO control stick,
+radio, and installed OS packages together.
+
+## Run Live Mode From a Terminal
+
+For direct testing outside FPMS, run:
 
 ```bash
 sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
 ```
 
-For a future menu definition, use the executable's absolute path rather than
-depending on shell activation or `PATH`, for example:
-
-```text
-/home/<user>/WLANPi-Utilization/.venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
-```
-
-The process stays in the foreground and exits cleanly on Ctrl-C. This is only a
-launch boundary: it delegates to the existing live CLI and core capture,
-aggregation, logging, and dashboard code. It does not implement WLANPi display
-APIs, menu rendering, services, or observed-client tracking.
+The terminal process stays in the foreground and exits cleanly on Ctrl-C.
 
 When using the project virtual environment, call the venv Python explicitly
 under `sudo`. This avoids the common `sudo: beacon-live: command not found`

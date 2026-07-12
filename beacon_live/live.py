@@ -9,10 +9,11 @@ import time
 from dataclasses import dataclass
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional, Protocol
 
 from beacon_live.aggregator import Aggregator
 from beacon_live.dashboard import TerminalDashboard
+from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.log_writer import CaptureLogWriter
 from beacon_live.log_writer import LogMetadata
 from beacon_live.models import SecondStats
@@ -27,6 +28,11 @@ TSHARK_BEACON_FIELDS = list(TSHARK_FIELD_NAMES)
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
 LIVE_WARMUP_CYCLES = 1
+
+
+class LiveDashboard(Protocol):
+    def refresh(self, stats_rows: Iterable[SecondStats] = ()) -> None:
+        ...
 
 
 @dataclass(frozen=True)
@@ -294,6 +300,7 @@ def run_live(
     survey_debug: bool = False,
     stats_csv: Optional[Path] = None,
     beacons_jsonl: Optional[Path] = None,
+    lcd_frame: Optional[Path] = None,
 ) -> int:
     local_cu = local_cu or survey_debug
     resolved_frequency_mhz = resolve_survey_target_frequency_mhz(
@@ -309,10 +316,19 @@ def run_live(
         frequency_mhz=frequency_mhz,
         band=band,
     )
+    aggregator = Aggregator()
+    dashboard: LiveDashboard = (
+        LcdDashboard(
+            lcd_frame,
+            band=resolved_band,
+            channel=channel,
+            frequency_mhz=resolved_frequency_mhz,
+        )
+        if lcd_frame is not None
+        else TerminalDashboard(include_local_cu=local_cu)
+    )
     process = start_tshark_process(iface)
     selector = selectors.DefaultSelector()
-    aggregator = Aggregator()
-    dashboard = TerminalDashboard(include_local_cu=local_cu)
     warmup_filter = LiveWarmupFilter()
     log_writer = CaptureLogWriter(
         metadata=LogMetadata(
@@ -492,7 +508,7 @@ def _publish_live_stats(
     stats_rows: list[SecondStats],
     *,
     stats_writer: Callable[[SecondStats], None],
-    dashboard: TerminalDashboard,
+    dashboard: LiveDashboard,
 ) -> None:
     if not stats_rows:
         return

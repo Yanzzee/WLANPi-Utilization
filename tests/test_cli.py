@@ -276,6 +276,48 @@ def test_live_generates_log_filenames_in_configured_directory(
     assert calls[0]["channel"] == "44"
 
 
+def test_live_wires_hidden_lcd_frame_for_fpms_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    frame = tmp_path / "display.ppm"
+
+    def fake_run_live(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(
+        [
+            "live",
+            "--band",
+            "5",
+            "--channel",
+            "36",
+            "--lcd-frame",
+            str(frame),
+        ]
+    ) == 0
+    assert calls[0]["lcd_frame"] == frame
+
+
+def test_live_does_not_pass_lcd_frame_for_normal_terminal_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(["live"]) == 0
+    assert "lcd_frame" not in calls[0]
+
+
 def test_live_log_flags_reject_arbitrary_filenames(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

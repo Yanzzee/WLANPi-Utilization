@@ -128,3 +128,6 @@ echo "  sudo ${LIVE_LAUNCHER} --band 6 --channel 5"
 echo
 echo "For optional local survey CU diagnostics, use:"
 echo "  sudo ${LIVE_LAUNCHER} --iface wlan0 --channel 36 --survey-debug"
+echo
+echo "For WLAN Pi R4 front-panel integration, run:"
+echo "  sudo ./scripts/install_wlanpi_fpms.sh"

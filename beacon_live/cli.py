@@ -83,7 +83,7 @@ def _run_live_command(
         write_beacons_jsonl=args.beacons_jsonl,
     )
     try:
-        return run_live(
+        live_options = dict(
             iface=args.iface,
             channel=args.channel,
             frequency_mhz=args.frequency_mhz,
@@ -94,6 +94,9 @@ def _run_live_command(
             stats_csv=log_paths.stats_csv,
             beacons_jsonl=log_paths.beacons_jsonl,
         )
+        if args.lcd_frame is not None:
+            live_options["lcd_frame"] = args.lcd_frame
+        return run_live(**live_options)
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
     except LiveCommandError as exc:
@@ -232,6 +235,12 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=Path("logs"),
         help="Directory for generated live log filenames. Default: logs.",
+    )
+    parser.add_argument(
+        "--lcd-frame",
+        type=Path,
+        required=False,
+        help=argparse.SUPPRESS,
     )
 
 

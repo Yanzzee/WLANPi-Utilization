@@ -6,8 +6,8 @@ Requires Python 3.9 or newer.
 
 Replay mode is hardware-free: it parses saved TShark TSV rows and saved
 `iw dev <iface> survey dump` text, then aggregates beacon records into
-per-second stats. A minimal WLAN Pi live mode is also available for terminal
-testing.
+per-second stats. Live mode supports terminal testing and the WLAN Pi R4
+Waveshare 128x128 front-panel display.
 
 ## Install
 
@@ -34,18 +34,59 @@ sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --surve
 sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36 --stats-csv --beacons-jsonl --log-dir logs
 ```
 
-`wlanpi-beacon-live` is the on-device foreground launcher intended for future
-WLANPi menu integration. It always runs live mode, accepts the same options as
-`beacon-live live`, and exits cleanly on Ctrl-C. A front-panel menu should launch
-the installed executable by absolute path, for example:
+`wlanpi-beacon-live` is the on-device foreground launcher used by the FPMS
+adapter. It always runs live mode, accepts the same options as `beacon-live
+live`, and exits cleanly on Ctrl-C or FPMS left-stick exit.
 
-```text
-/home/<user>/WLANPi-Utilization/.venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+## WLAN Pi R4 Front-Panel Installation
+
+On the WLAN Pi, clone this repository and run the normal setup checks, then
+install the app and FPMS adapter:
+
+```bash
+./scripts/pi_setup.sh
+sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-The launcher is only a stable process boundary. Capture, aggregation, logging,
-and dashboard behavior remain in the core package; it does not contain
-display-specific hardware integration or observed-client tracking.
+The installer creates an application virtual environment at
+`/opt/wlanpi-beacon-live`, adds `Apps > Channel Utilization` to WLAN Pi FPMS,
+adds a generic page-exit callback to FPMS, and restarts `wlanpi-fpms`. It keeps
+one-time `.beacon-live.bak` copies of the two patched FPMS files. Rerun the
+installer after an FPMS package upgrade because that package can replace its
+own Python files.
+
+The menu order is band, channel, then launch mode:
+
+```text
+Apps > Channel Utilization > <band> > <channel and frequency> > Display
+Apps > Channel Utilization > <band> > <channel and frequency> > Display + Log
+```
+
+Bands are `2.4 GHz`, `5 GHz`, `6 GHz PSC`, and `6 GHz All`. PSC entries in the
+full 6 GHz list are prefixed `PSC`. Selecting a launch mode starts capture.
+Pressing the control stick left sends SIGINT to the foreground capture, waits
+for TShark and logs to close, and returns to the FPMS menu.
+
+The static menu follows WLAN Pi's unbonded 20 MHz channel list. The active
+regulatory domain and adapter still decide whether `iw` can tune a listed
+channel; a rejected tune is reported in the `wlanpi-fpms` journal.
+
+For example, the exact Display command for 5 GHz channel 36 is:
+
+```text
+/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm
+```
+
+`Display + Log` appends the following exact options:
+
+```text
+--stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
+```
+
+FPMS owns the SPI display and control-stick input. Its adapter contains only
+menu, child-process, and frame-copy wiring. Capture, QBSS selection,
+aggregation, summaries, logging, and the 128x128 frame renderer remain in this
+package. No observed-client tracking is included.
 
 The replay command prints tab-separated per-second stats from a saved TShark
 sample file with these fields:
@@ -64,19 +105,28 @@ raw / 255 * 100
 ```
 
 The live command's core path configures the selected interface for monitor
-mode, tunes with 20 MHz width, starts TShark, and prints AP-reported QBSS
-terminal stats in a rolling 120-second dashboard that redraws once per second
-and displays local wall-clock time. Each per-second row contains one selected
-QBSS CU value. Selection considers only QBSS-bearing beacons seen in that
+mode, tunes with 20 MHz width, starts TShark, and produces one selected QBSS CU
+value per second. Selection considers only QBSS-bearing beacons seen in that
 second, chooses the BSSID with the strongest observed RSSI, then uses the most
 recent QBSS beacon from that BSSID. An RSSI tie prefers the later beacon. If
 RSSI is unavailable for every candidate, recency is used as the fallback.
 
-The graph and rolling min/mean/max summary use exactly the selected values shown
-in the visible 120-second rows. Missing selected values appear as graph gaps and
-are excluded from the numeric summary. The first completed live cycle is a
-silent warm-up: it is omitted from dashboard rows and stats CSV logging. Raw
-beacon JSONL logging still records every valid beacon from that cycle.
+The R4 LCD frame is 128x128. Its centered plot is 120 pixels wide by 64 pixels
+high, with one horizontal pixel per second and raw QBSS `0-255` values mapped
+to 64 vertical pixels in four-value steps. New samples scroll in from the
+right. Compact text shows current selected CU, `SUM` for the sum of the latest
+QBSS station counts advertised by all BSSIDs observed during that second, and
+`BSS` for the QBSS station count advertised by the BSSID selected as the CU
+source. It also shows rolling minimum, average, and maximum CU; band, channel,
+frequency, and local time; and the selected AP's strongest RSSI, SSID, and
+BSSID. `SUM` represents stations sharing airtime on the channel, while `BSS`
+provides the selected AP's individual value. Missing CU seconds are graph gaps.
+
+The graph and rolling min/mean/max summary use exactly the selected values in
+the visible 120-second window. Missing selected values are excluded from the
+numeric summary. The first completed live cycle is a silent warm-up: it is
+omitted from the display and stats CSV logging. Raw beacon JSONL logging still
+records every valid beacon from that cycle.
 
 Live mode does not require local survey counters. Use
 `--channel` for channel numbers and `--frequency-mhz` for explicit center

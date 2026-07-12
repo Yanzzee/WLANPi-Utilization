@@ -130,6 +130,19 @@ def _build_stats(
             selected_record.rssi_dbm if selected_record else None
         ),
         local_cu_percent=local_cu_percent,
+        selected_qbss_cu_raw=(
+            selected_record.qbss_cu_raw if selected_record is not None else None
+        ),
+        selected_qbss_station_count=(
+            selected_record.qbss_station_count
+            if selected_record is not None
+            else None
+        ),
+        selected_qbss_strongest_rssi_dbm=(
+            _strongest_rssi_for_bssid(bucket.records, selected_record.bssid)
+            if selected_record is not None
+            else None
+        ),
     )
 
 
@@ -163,3 +176,15 @@ def _signal_key(record: BeaconRecord) -> tuple[bool, int, float]:
         record.rssi_dbm if record.rssi_dbm is not None else -200,
         record.timestamp,
     )
+
+
+def _strongest_rssi_for_bssid(
+    records: list[BeaconRecord],
+    bssid: str,
+) -> Optional[int]:
+    values = [
+        record.rssi_dbm
+        for record in records
+        if record.bssid == bssid and record.rssi_dbm is not None
+    ]
+    return max(values) if values else None
