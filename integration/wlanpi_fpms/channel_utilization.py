@@ -7,6 +7,7 @@ in the ``beacon_live`` package launched as a child process.
 
 from __future__ import annotations
 
+import json
 import signal
 import subprocess
 import threading
@@ -255,21 +256,135 @@ class _DisplaySession:
 
 
 def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 
     import fpms.modules.wlanpi_oled as oled
-    from fpms.modules.constants import PAGE_SLEEP
+    from fpms.modules.constants import PAGE_SLEEP, SMART_FONT
 
     with Image.open(frame_path) as source:
         frame = source.convert("RGB").copy()
+    state = _read_display_state(frame_path.with_suffix(".json"))
+    draw = ImageDraw.Draw(frame)
+    font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
+    _draw_text_top(draw, 2, 1, state["metadata"], font, (255, 255, 255))
+    _draw_text_top(draw, 2, 17, state["summary"], font, (255, 220, 0))
+    _draw_left_right(
+        draw,
+        2,
+        98,
+        state["ssid"],
+        state["rssi"],
+        font,
+        (255, 255, 255),
+        truncate_left=True,
+    )
+    _draw_left_right(
+        draw,
+        2,
+        114,
+        state["bssid"],
+        state["channel"],
+        font,
+        (255, 255, 255),
+        truncate_left=False,
+    )
     g_vars["drawing_in_progress"] = True
     try:
         g_vars["pageSleepCountdown"] = PAGE_SLEEP
         g_vars["image"] = frame
-        g_vars["draw"] = ImageDraw.Draw(frame)
+        g_vars["draw"] = draw
         oled.drawImage(frame)
     finally:
         g_vars["drawing_in_progress"] = False
+
+
+def _read_display_state(path: Path) -> dict[str, str]:
+    defaults = {
+        "metadata": "?G STA -- SUM --",
+        "summary": "CU --% AV --% MX --%",
+        "ssid": "--",
+        "rssi": "--",
+        "bssid": "--",
+        "channel": "--",
+    }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return defaults
+    return {
+        key: str(payload.get(key, default))
+        for key, default in defaults.items()
+    }
+
+
+def _select_scanner_font(draw, state, smart_font, image_font_module):
+    """Use a stable 9 px Scanner font, with an 8 px safety fallback."""
+    font_path = getattr(smart_font, "path", None)
+    candidates = (
+        [image_font_module.truetype(font_path, size) for size in (9, 8)]
+        if font_path is not None
+        else [smart_font]
+    )
+
+    for font in candidates:
+        if _font_fits(draw, state, font):
+            return font
+    return candidates[-1]
+
+
+def _font_fits(draw, state: dict[str, str], font) -> bool:
+    width = 124
+    fixed_rows = (state["metadata"], state["summary"])
+    if any(_text_width(draw, text, font) > width for text in fixed_rows):
+        return False
+    footer_width = (
+        _text_width(draw, state["bssid"], font)
+        + _text_width(draw, " ", font)
+        + _text_width(draw, state["channel"], font)
+    )
+    return footer_width <= width
+
+
+def _draw_left_right(
+    draw,
+    left_x: int,
+    top_y: int,
+    left: str,
+    right: str,
+    font,
+    color,
+    *,
+    truncate_left: bool,
+) -> None:
+    right_x = 126 - _text_width(draw, right, font)
+    available_left_width = max(0, right_x - left_x - 4)
+    displayed_left = (
+        _truncate_text(draw, left, font, available_left_width)
+        if truncate_left
+        else left
+    )
+    _draw_text_top(draw, left_x, top_y, displayed_left, font, color)
+    _draw_text_top(draw, right_x, top_y, right, font, color)
+
+
+def _truncate_text(draw, text: str, font, max_width: int) -> str:
+    if _text_width(draw, text, font) <= max_width:
+        return text
+    ellipsis = "…"
+    value = text
+    while value and _text_width(draw, value + ellipsis, font) > max_width:
+        value = value[:-1]
+    return value + ellipsis if value else ""
+
+
+def _draw_text_top(draw, x: int, y: int, text: str, font, color) -> None:
+    bounds = draw.textbbox((0, 0), text, font=font)
+    draw.text((x - bounds[0], y - bounds[1]), text, font=font, fill=color)
+
+
+def _text_width(draw, text: str, font) -> int:
+    bounds = draw.textbbox((0, 0), text, font=font)
+    return bounds[2] - bounds[0]
 
 
 def _display_error(g_vars: dict[str, object], message: str) -> None:

@@ -1,7 +1,8 @@
-"""Dependency-free 128x128 dashboard renderer for WLAN Pi FPMS integration."""
+"""Build the 128x128 graph and display state for WLAN Pi FPMS integration."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Iterable, Optional
@@ -17,10 +18,9 @@ GRAPH_WIDTH = 120
 GRAPH_HEIGHT = 64
 
 _BLACK = (0, 0, 0)
-_WHITE = (255, 255, 255)
 _DIM = (48, 64, 64)
-_GRAPH = (0, 220, 120)
-_CURRENT = (255, 220, 0)
+_CU_GRAPH = (0, 220, 120)
+_STATION_GRAPH = (255, 128, 0)
 
 
 class LcdDashboard:
@@ -32,12 +32,10 @@ class LcdDashboard:
         *,
         band: Optional[str],
         channel: str,
-        frequency_mhz: Optional[int],
     ) -> None:
         self.frame_path = frame_path
         self.band = band
         self.channel = channel
-        self.frequency_mhz = frequency_mhz
         self.window = RollingStatsWindow(max_seconds=GRAPH_WIDTH)
         self.refresh()
 
@@ -60,7 +58,15 @@ class LcdDashboard:
         return tuple(values)
 
     @property
-    def text_lines(self) -> tuple[str, str, str, str]:
+    def station_graph_data(self) -> tuple[tuple[int, int], ...]:
+        """Return the unclamped station sums paired with displayed seconds."""
+        return tuple(
+            (stats.second, stats.qbss_station_count_sum)
+            for stats in self.window.rows
+        )
+
+    @property
+    def text_lines(self) -> tuple[str, str, str, str, str, str]:
         latest = self.latest
         values = [
             stats.selected_qbss_cu_percent
@@ -70,26 +76,28 @@ class LcdDashboard:
         current_cu = _whole_percent(
             latest.selected_qbss_cu_percent if latest is not None else None
         )
-        station_sum = str(latest.qbss_station_count_sum) if latest else "--"
+        station_sum = (
+            _format_station_count(latest.qbss_station_count_sum)
+            if latest
+            else "--"
+        )
         bssid_station_count = (
-            str(latest.selected_qbss_station_count)
+            _format_station_count(latest.selected_qbss_station_count)
             if latest is not None
             and latest.selected_qbss_station_count is not None
             else "--"
         )
         if values:
             summary = (
-                f"CU{current_cu}% MIN{round(min(values))}% "
-                f"AVG{round(sum(values) / len(values))}% "
-                f"MAX{round(max(values))}%"
+                f"CU {current_cu}% AV {round(sum(values) / len(values))}% "
+                f"MX {round(max(values))}%"
             )
         else:
-            summary = "CU--% MIN--% AVG--% MAX--%"
+            summary = "CU --% AV --% MX --%"
 
-        metadata = f"{_short_band(self.band)} CH{self.channel}"
-        if self.frequency_mhz is not None:
-            metadata += f" {self.frequency_mhz}"
-        metadata += f" STA{bssid_station_count} SUM{station_sum}"
+        metadata = (
+            f"{_short_band(self.band)} STA {bssid_station_count} SUM {station_sum}"
+        )
 
         rssi = "--"
         ssid = "--"
@@ -108,16 +116,14 @@ class LcdDashboard:
         return (
             metadata,
             summary,
-            f"RSSI {rssi} {ssid}",
-            f"BSSID {bssid}",
+            ssid,
+            rssi,
+            bssid,
+            self.channel,
         )
 
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
-        top_metadata, top_summary, bottom_rssi, bottom_bssid = self.text_lines
-
-        canvas.text(2, 2, top_metadata, _WHITE, scale_y=2)
-        canvas.text(2, 18, top_summary, _CURRENT, scale_y=2)
 
         for y in (GRAPH_Y, GRAPH_Y + 16, GRAPH_Y + 32, GRAPH_Y + 48, GRAPH_Y + 63):
             canvas.horizontal_line(GRAPH_X, GRAPH_X + GRAPH_WIDTH - 1, y, _DIM)
@@ -129,32 +135,58 @@ class LcdDashboard:
             _DIM,
         )
 
-        data = self.graph_data[-GRAPH_WIDTH:]
-        start_x = GRAPH_X + GRAPH_WIDTH - len(data)
+        cu_data = self.graph_data[-GRAPH_WIDTH:]
+        station_data = self.station_graph_data[-GRAPH_WIDTH:]
+        start_x = GRAPH_X + GRAPH_WIDTH - len(cu_data)
         baseline = GRAPH_Y + GRAPH_HEIGHT - 1
-        for offset, (_, raw) in enumerate(data):
-            if raw is None:
-                continue
-            height = _raw_to_graph_height(raw)
-            if height:
+        for offset, ((_, raw), (_, station_sum)) in enumerate(
+            zip(cu_data, station_data)
+        ):
+            bars: list[tuple[int, tuple[int, int, int]]] = [
+                (_station_count_to_graph_height(station_sum), _STATION_GRAPH)
+            ]
+            if raw is not None:
+                bars.append((_raw_to_graph_height(raw), _CU_GRAPH))
+            for height, color in sorted(
+                bars,
+                key=lambda bar: bar[0],
+                reverse=True,
+            ):
+                if height <= 0:
+                    continue
                 canvas.vertical_line(
                     start_x + offset,
                     baseline - height + 1,
                     baseline,
-                    _GRAPH,
+                    color,
                 )
 
-        canvas.text(2, 99, _truncate_pixels(bottom_rssi), _WHITE, scale_y=2)
-        canvas.text(2, 115, _truncate_pixels(bottom_bssid), _WHITE, scale_y=2)
         return canvas.ppm()
 
     def refresh(self, stats_rows: Iterable[SecondStats] = ()) -> None:
         self.update(stats_rows)
+        metadata, summary, ssid, rssi, bssid, channel = self.text_lines
+        state = {
+            "metadata": metadata,
+            "summary": summary,
+            "ssid": ssid,
+            "rssi": rssi,
+            "bssid": bssid,
+            "channel": channel,
+        }
+        _atomic_write(
+            _frame_state_path(self.frame_path),
+            json.dumps(state, ensure_ascii=False).encode("utf-8"),
+        )
         _atomic_write(self.frame_path, self.render())
 
 
 def _whole_percent(value: Optional[float]) -> str:
     return "--" if value is None else str(round(value))
+
+
+def _format_station_count(value: int) -> str:
+    return "∞" if value > 999 else str(value)
 
 
 def _short_band(band: Optional[str]) -> str:
@@ -167,8 +199,14 @@ def _raw_to_graph_height(raw: int) -> int:
     return bounded // 4 + 1
 
 
-def _truncate_pixels(value: str) -> str:
-    return value[:30]
+def _station_count_to_graph_height(station_count: int) -> int:
+    """Map a station sum of 0-100 to the graph, clamping larger values."""
+    bounded = min(100, max(0, station_count))
+    return round(bounded * GRAPH_HEIGHT / 100)
+
+
+def _frame_state_path(frame_path: Path) -> Path:
+    return frame_path.with_suffix(".json")
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
@@ -214,78 +252,7 @@ class _Canvas:
         for y in range(start_y, end_y + 1):
             self.pixel(x, y, color)
 
-    def text(
-        self,
-        x: int,
-        y: int,
-        value: str,
-        color: tuple[int, int, int],
-        *,
-        scale_y: int = 1,
-    ) -> None:
-        cursor = x
-        for character in value.upper():
-            glyph = _FONT.get(character, _FONT["?"])
-            for row, bits in enumerate(glyph):
-                for column in range(3):
-                    if bits & (1 << (2 - column)):
-                        for scaled_row in range(scale_y):
-                            self.pixel(
-                                cursor + column,
-                                y + row * scale_y + scaled_row,
-                                color,
-                            )
-            cursor += 4
-
     def ppm(self) -> bytes:
         return f"P6\n{self.width} {self.height}\n255\n".encode("ascii") + bytes(
             self.pixels
         )
-
-
-_FONT = {
-    " ": (0, 0, 0, 0, 0),
-    "-": (0, 0, 7, 0, 0),
-    ".": (0, 0, 0, 0, 2),
-    ":": (0, 2, 0, 2, 0),
-    "%": (5, 1, 2, 4, 5),
-    "<": (1, 2, 4, 2, 1),
-    ">": (4, 2, 1, 2, 4),
-    "?": (6, 1, 2, 0, 2),
-    "0": (7, 5, 5, 5, 7),
-    "1": (2, 6, 2, 2, 7),
-    "2": (6, 1, 7, 4, 7),
-    "3": (6, 1, 3, 1, 6),
-    "4": (5, 5, 7, 1, 1),
-    "5": (7, 4, 6, 1, 6),
-    "6": (3, 4, 7, 5, 7),
-    "7": (7, 1, 2, 2, 2),
-    "8": (7, 5, 7, 5, 7),
-    "9": (7, 5, 7, 1, 6),
-    "A": (2, 5, 7, 5, 5),
-    "B": (6, 5, 6, 5, 6),
-    "C": (3, 4, 4, 4, 3),
-    "D": (6, 5, 5, 5, 6),
-    "E": (7, 4, 6, 4, 7),
-    "F": (7, 4, 6, 4, 4),
-    "G": (3, 4, 5, 5, 3),
-    "H": (5, 5, 7, 5, 5),
-    "I": (7, 2, 2, 2, 7),
-    "J": (1, 1, 1, 5, 2),
-    "K": (5, 5, 6, 5, 5),
-    "L": (4, 4, 4, 4, 7),
-    "M": (5, 7, 7, 5, 5),
-    "N": (5, 7, 7, 7, 5),
-    "O": (2, 5, 5, 5, 2),
-    "P": (6, 5, 6, 4, 4),
-    "Q": (2, 5, 5, 7, 3),
-    "R": (6, 5, 6, 5, 5),
-    "S": (3, 4, 2, 1, 6),
-    "T": (7, 2, 2, 2, 2),
-    "U": (5, 5, 5, 5, 7),
-    "V": (5, 5, 5, 5, 2),
-    "W": (5, 5, 7, 7, 5),
-    "X": (5, 5, 2, 5, 5),
-    "Y": (5, 5, 2, 2, 2),
-    "Z": (7, 1, 2, 4, 7),
-}

@@ -55,11 +55,22 @@ def _patch_fpms(path: Path) -> None:
         text = text.replace(anchor, anchor + import_line, 1)
 
     menu_line = "            build_channel_utilization_menu(g_vars),\n"
-    if menu_line not in text:
-        anchor = '        {"name": "Apps", "action": [\n'
+    text = text.replace(menu_line, "")
+
+    append_code = (
+        "    # Keep the third-party Utilization app last in the Apps menu.\n"
+        "    for menu_item in menu:\n"
+        "        if menu_item[\"name\"] == \"Apps\":\n"
+        "            menu_item[\"action\"].append(\n"
+        "                build_channel_utilization_menu(g_vars)\n"
+        "            )\n"
+        "            break\n\n"
+    )
+    if append_code not in text:
+        anchor = "    # update menu options data structure if we're in non-classic mode\n"
         if anchor not in text:
-            raise SystemExit(f"FPMS Apps menu anchor not found in {path}")
-        text = text.replace(anchor, anchor + menu_line, 1)
+            raise SystemExit(f"FPMS post-menu anchor not found in {path}")
+        text = text.replace(anchor, append_code + anchor, 1)
 
     _write_with_backup(path, text)
 

@@ -62,6 +62,8 @@ Apps > Utilization > <band> > <channel and frequency> > Display
 Apps > Utilization > <band> > <channel and frequency> > Display + Log
 ```
 
+`Utilization` is appended at the bottom of the existing FPMS Apps menu.
+
 Bands are `2.4 GHz`, `5 GHz`, `6 GHz PSC`, and `6 GHz All`. PSC entries in the
 full 6 GHz list are prefixed `PSC`. Selecting a launch mode starts capture.
 Pressing the control stick left sends SIGINT to the foreground capture, waits
@@ -83,10 +85,10 @@ For example, the exact Display command for 5 GHz channel 36 is:
 --stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
 ```
 
-FPMS owns the SPI display and control-stick input. Its adapter contains only
-menu, child-process, and frame-copy wiring. Capture, QBSS selection,
-aggregation, summaries, logging, and the 128x128 frame renderer remain in this
-package. No observed-client tracking is included.
+FPMS owns the SPI display and control-stick input. Its adapter contains menu,
+child-process, frame-copy, and Scanner-font layout wiring only. Capture, QBSS
+selection, aggregation, summaries, logging, graph rendering, and display-field
+formatting remain in this package. No observed-client tracking is included.
 
 The replay command prints tab-separated per-second stats from a saved TShark
 sample file with these fields:
@@ -112,16 +114,31 @@ recent QBSS beacon from that BSSID. An RSSI tie prefers the later beacon. If
 RSSI is unavailable for every candidate, recency is used as the fallback.
 
 The R4 LCD frame is 128x128. Its centered plot is 120 pixels wide by 64 pixels
-high, with one horizontal pixel per second and raw QBSS `0-255` values mapped
-to 64 vertical pixels in four-value steps. New samples scroll in from the
-right. Two larger text rows above the graph show band, channel, frequency,
-`STA`, and `SUM`, followed by current CU and rolling minimum, average, and
-maximum CU. `SUM` is the sum of the latest QBSS station counts advertised by
-all BSSIDs observed during that second; `STA` is the QBSS station count
-advertised by the BSSID selected as the CU source. Two larger rows below show
-the selected AP's strongest RSSI, SSID, and BSSID. Long SSIDs are truncated.
-The on-screen clock and exit hint are intentionally omitted; log records retain
-their local timestamps. Missing CU seconds are graph gaps.
+high, with one horizontal pixel per second. The CU bar maps raw QBSS `0-255`
+values to 64 vertical pixels in four-value steps. A second, contrasting bar
+maps the QBSS station-count `SUM` from 0-100; sums above 100 are clamped only on
+the graph while the text retains the actual value. Both bars share a column,
+with the shorter bar drawn on top so both values remain visible. New samples
+scroll in from the right.
+
+Two larger text rows above the graph show band, `STA`, and `SUM`, followed by
+current `CU`, rolling average `AV`, and rolling maximum `MX`. `SUM` is the sum
+of the latest QBSS station counts advertised by all BSSIDs observed during
+that second; `STA` is the QBSS station count advertised by the BSSID selected
+as the CU source. Counts through 999 are shown exactly; larger counts appear as
+`∞` on screen while logs retain the actual values. Below the graph, the first
+row left-aligns SSID and
+right-aligns the unlabeled RSSI. The second row left-aligns the unlabeled BSSID
+and right-aligns the unlabeled channel. Long SSIDs are truncated. The on-screen
+clock and exit hint are intentionally omitted; log records retain their local
+timestamps. Missing CU seconds are graph gaps.
+
+FPMS applies the same DejaVu Sans Mono Bold face used by Scanner at a stable
+9 px, versus Scanner's 10 px. An 8 px safety fallback handles unexpected field
+widths. Horizontal width remains the limiting dimension. The tightest row is
+`CU 99% AV 99% MX 99%`; the second constraint is a full BSSID plus a
+three-digit right-aligned channel. The SSID is the only variable field allowed
+to truncate.
 
 The graph and rolling min/mean/max summary use exactly the selected values in
 the visible 120-second window. Missing selected values are excluded from the

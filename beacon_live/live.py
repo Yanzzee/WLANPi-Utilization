@@ -322,7 +322,6 @@ def run_live(
             lcd_frame,
             band=resolved_band,
             channel=channel,
-            frequency_mhz=resolved_frequency_mhz,
         )
         if lcd_frame is not None
         else TerminalDashboard(include_local_cu=local_cu)

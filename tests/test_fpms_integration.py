@@ -113,6 +113,39 @@ def test_launch_failure_is_reported_without_leaving_session(
     assert "channel_utilization_session" not in g_vars
 
 
+def test_scanner_font_falls_back_to_nine_pixels_for_summary_width() -> None:
+    state = {
+        "metadata": "2.4G STA 999 SUM 999",
+        "summary": "CU 99% AV 99% MX 99%",
+        "ssid": "Example",
+        "rssi": "-45",
+        "bssid": "aa:bb:cc:dd:ee:ff",
+        "channel": "233",
+    }
+    smart_font = _FakeFont(size=10, path="scanner.ttf", character_width=6)
+
+    selected = channel_utilization._select_scanner_font(
+        _FakeDraw(),
+        state,
+        smart_font,
+        _FakeImageFontModule,
+    )
+
+    assert selected.size == 9
+
+
+def test_ssid_truncation_uses_ellipsis_but_keeps_right_field() -> None:
+    value = channel_utilization._truncate_text(
+        _FakeDraw(),
+        "VeryLongNetworkName",
+        _FakeFont(size=9, path="scanner.ttf", character_width=5),
+        40,
+    )
+
+    assert value.endswith("…")
+    assert len(value) * 5 <= 40
+
+
 class _FakeProcess:
     def __init__(self, command: list[str]) -> None:
         self.command = command
@@ -136,3 +169,31 @@ class _FakeProcess:
 
     def kill(self) -> None:
         self.running = False
+
+
+class _FakeFont:
+    def __init__(self, *, size: int, path: str, character_width: int) -> None:
+        self.size = size
+        self.path = path
+        self.character_width = character_width
+
+
+class _FakeDraw:
+    def textbbox(
+        self,
+        position: tuple[int, int],
+        text: str,
+        *,
+        font: _FakeFont,
+    ) -> tuple[int, int, int, int]:
+        return (0, 0, len(text) * font.character_width, font.size)
+
+
+class _FakeImageFontModule:
+    @staticmethod
+    def truetype(path: str, size: int) -> _FakeFont:
+        return _FakeFont(
+            size=size,
+            path=path,
+            character_width=5 if size == 9 else 4,
+        )

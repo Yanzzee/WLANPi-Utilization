@@ -193,9 +193,10 @@ sudo ./scripts/install_wlanpi_fpms.sh
 
 The installer creates `/opt/wlanpi-beacon-live`, installs a thin FPMS adapter,
 patches the FPMS Apps menu and page-exit callback, and restarts
-`wlanpi-fpms`. The adapter only launches/stops the child and copies complete
-frames to the LCD. All beacon analysis and frame rendering stays in this
-project. Rerun the installer after upgrading the `wlanpi-fpms` package.
+`wlanpi-fpms`. The adapter launches/stops the child, copies graph frames, and
+lays out already-formatted fields with FPMS's Scanner font. All beacon analysis,
+summaries, graph rendering, and field formatting stay in this project. Rerun
+the installer after upgrading the `wlanpi-fpms` package.
 
 Navigate with the control stick:
 
@@ -213,6 +214,8 @@ graph is open to send SIGINT to the capture process, terminate TShark, flush and
 close any enabled logs, and return to the FPMS menu. No other control-stick or
 button action is used by this first version.
 
+`Utilization` appears after the existing entries at the bottom of Apps.
+
 The exact command behind `5 GHz > Ch 36 5180 MHz > Display` is:
 
 ```text
@@ -226,17 +229,25 @@ The exact command behind `5 GHz > Ch 36 5180 MHz > Display` is:
 ```
 
 The 128x128 screen contains a centered 120x64 graph. It displays the latest 120
-seconds from left to right with one pixel per second. The vertical scale maps
-the raw QBSS CU range `0-255` into 64 pixels. Once full, new seconds scroll in
-from the right. Two larger rows above the graph show band, channel, frequency,
-`STA`, `SUM`, selected CU, and rolling minimum/average/maximum. `SUM` is the
-sum of the latest QBSS station counts from every BSSID observed during that
-second, since those stations share airtime on the channel. `STA` is the QBSS
-station count advertised by the BSSID selected as the CU source. Text below
-uses two larger rows for the selected AP's RSSI, SSID, and BSSID. Long SSIDs are
-truncated. The screen does not show a clock or exit hint; log timestamps are
-unchanged. Missing CU values are blank graph columns and do not enter the
-summary.
+seconds from left to right with one pixel per second. One bar maps raw QBSS CU
+`0-255` into 64 pixels. A contrasting bar maps station `SUM` from 0-100; text
+continues to report the accurate sum above 100. The shorter of the two bars is
+drawn on top. Once full, new seconds scroll in from the right.
+
+Two larger rows above the graph show band, `STA`, `SUM`, selected `CU`, rolling
+average `AV`, and rolling maximum `MX`. `SUM` is the sum of the latest QBSS
+station counts from every BSSID observed during that second, since those
+stations share airtime on the channel. `STA` is the QBSS station count
+advertised by the BSSID selected as the CU source. Values through 999 are exact;
+larger values display as `∞` while their logs remain exact. Below the graph,
+SSID and BSSID are left-aligned; unlabeled RSSI and channel are right-aligned on
+their respective rows, matching the scanner layout. Long SSIDs are truncated.
+The screen does not show a clock or exit hint; log timestamps are unchanged.
+Missing CU values are graph gaps and do not enter the summary.
+
+Text uses Scanner's DejaVu Sans Mono Bold face at a stable 9 px, with an 8 px
+safety fallback. The width constraints are the CU/AV/MX row at two-digit
+utilization and the BSSID/channel footer; only SSID may truncate.
 
 The AP selected each second is the QBSS-bearing BSSID with the strongest
 observed RSSI; the latest beacon from that BSSID supplies CU and the individual
