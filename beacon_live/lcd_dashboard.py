@@ -13,14 +13,13 @@ from beacon_live.models import SecondStats
 LCD_WIDTH = 128
 LCD_HEIGHT = 128
 GRAPH_X = 4
-GRAPH_Y = 32
+GRAPH_Y = 30
 GRAPH_WIDTH = 120
 GRAPH_HEIGHT = 64
 
 _BLACK = (0, 0, 0)
 _DIM = (48, 64, 64)
 _CU_GRAPH = (0, 220, 120)
-_STATION_GRAPH = (255, 128, 0)
 
 
 class LcdDashboard:
@@ -32,10 +31,12 @@ class LcdDashboard:
         *,
         band: Optional[str],
         channel: str,
+        frequency_mhz: Optional[int] = None,
     ) -> None:
         self.frame_path = frame_path
         self.band = band
         self.channel = channel
+        self.frequency_mhz = frequency_mhz
         self.window = RollingStatsWindow(max_seconds=GRAPH_WIDTH)
         self.refresh()
 
@@ -56,14 +57,6 @@ class LcdDashboard:
                 raw = round(stats.selected_qbss_cu_percent * 255 / 100)
             values.append((stats.second, raw))
         return tuple(values)
-
-    @property
-    def station_graph_data(self) -> tuple[tuple[int, int], ...]:
-        """Return the unclamped station sums paired with displayed seconds."""
-        return tuple(
-            (stats.second, stats.qbss_station_count_sum)
-            for stats in self.window.rows
-        )
 
     @property
     def text_lines(self) -> tuple[str, str, str, str, str, str]:
@@ -89,20 +82,20 @@ class LcdDashboard:
         )
         if values:
             summary = (
-                f"CU {current_cu}% AV {round(sum(values) / len(values))}% "
-                f"MX {round(max(values))}%"
+                f"CU {current_cu}% AVG {round(sum(values) / len(values))}% "
+                f"MAX {round(max(values))}%"
             )
         else:
-            summary = "CU --% AV --% MX --%"
+            summary = "CU --% AVG --% MAX --%"
 
         metadata = (
             f"{_short_band(self.band)} STA {bssid_station_count} SUM {station_sum}"
         )
 
         rssi = "--"
-        ssid = "--"
+        ssid = "<No QBSS Beacons>"
         bssid = "--"
-        if latest is not None:
+        if latest is not None and latest.selected_qbss_bssid is not None:
             selected_rssi = (
                 latest.selected_qbss_strongest_rssi_dbm
                 if latest.selected_qbss_strongest_rssi_dbm is not None
@@ -122,6 +115,32 @@ class LcdDashboard:
             self.channel,
         )
 
+    @property
+    def metadata_candidates(self) -> tuple[str, ...]:
+        latest = self.latest
+        station_sum = (
+            _format_station_count(latest.qbss_station_count_sum)
+            if latest
+            else "--"
+        )
+        bssid_station_count = (
+            _format_station_count(latest.selected_qbss_station_count)
+            if latest is not None
+            and latest.selected_qbss_station_count is not None
+            else "--"
+        )
+        station_fields = f"STA {bssid_station_count} SUM {station_sum}"
+        band = _short_band(self.band)
+        if self.frequency_mhz is None:
+            return (f"{band} {station_fields}",)
+
+        frequency = f"{self.frequency_mhz}MHz"
+        candidates = [f"{band} {frequency} {station_fields}"]
+        if band == "2.4G":
+            candidates.append(f"2G {frequency} {station_fields}")
+        candidates.append(f"{frequency} {station_fields}")
+        return tuple(candidates)
+
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
 
@@ -136,30 +155,18 @@ class LcdDashboard:
         )
 
         cu_data = self.graph_data[-GRAPH_WIDTH:]
-        station_data = self.station_graph_data[-GRAPH_WIDTH:]
         start_x = GRAPH_X + GRAPH_WIDTH - len(cu_data)
         baseline = GRAPH_Y + GRAPH_HEIGHT - 1
-        for offset, ((_, raw), (_, station_sum)) in enumerate(
-            zip(cu_data, station_data)
-        ):
-            bars: list[tuple[int, tuple[int, int, int]]] = [
-                (_station_count_to_graph_height(station_sum), _STATION_GRAPH)
-            ]
-            if raw is not None:
-                bars.append((_raw_to_graph_height(raw), _CU_GRAPH))
-            for height, color in sorted(
-                bars,
-                key=lambda bar: bar[0],
-                reverse=True,
-            ):
-                if height <= 0:
-                    continue
-                canvas.vertical_line(
-                    start_x + offset,
-                    baseline - height + 1,
-                    baseline,
-                    color,
-                )
+        for offset, (_, raw) in enumerate(cu_data):
+            if raw is None:
+                continue
+            height = _raw_to_graph_height(raw)
+            canvas.vertical_line(
+                start_x + offset,
+                baseline - height + 1,
+                baseline,
+                _CU_GRAPH,
+            )
 
         return canvas.ppm()
 
@@ -168,6 +175,7 @@ class LcdDashboard:
         metadata, summary, ssid, rssi, bssid, channel = self.text_lines
         state = {
             "metadata": metadata,
+            "metadata_candidates": self.metadata_candidates,
             "summary": summary,
             "ssid": ssid,
             "rssi": rssi,
@@ -197,12 +205,6 @@ def _raw_to_graph_height(raw: int) -> int:
     """Map raw QBSS 0-255 to 64 equal four-integer display buckets."""
     bounded = min(255, max(0, raw))
     return bounded // 4 + 1
-
-
-def _station_count_to_graph_height(station_count: int) -> int:
-    """Map a station sum of 0-100 to the graph, clamping larger values."""
-    bounded = min(100, max(0, station_count))
-    return round(bounded * GRAPH_HEIGHT / 100)
 
 
 def _frame_state_path(frame_path: Path) -> Path:

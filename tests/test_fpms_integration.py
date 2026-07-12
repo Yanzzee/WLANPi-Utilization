@@ -116,7 +116,12 @@ def test_launch_failure_is_reported_without_leaving_session(
 def test_scanner_font_falls_back_to_nine_pixels_for_summary_width() -> None:
     state = {
         "metadata": "2.4G STA 999 SUM 999",
-        "summary": "CU 99% AV 99% MX 99%",
+        "metadata_candidates": [
+            "2.4G 2484MHz STA 999 SUM 999",
+            "2G 2484MHz STA 999 SUM 999",
+            "2484MHz STA 999 SUM 999",
+        ],
+        "summary": "CU 99% AVG 99% MAX 99%",
         "ssid": "Example",
         "rssi": "-45",
         "bssid": "aa:bb:cc:dd:ee:ff",
@@ -132,6 +137,48 @@ def test_scanner_font_falls_back_to_nine_pixels_for_summary_width() -> None:
     )
 
     assert selected.size == 9
+
+
+def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
+    state = {
+        "metadata": "2.4G STA 999 SUM 999",
+        "metadata_candidates": [
+            "2.4G 2484MHz STA 999 SUM 999",
+            "2G 2484MHz STA 999 SUM 999",
+            "2484MHz STA 999 SUM 999",
+        ],
+        "summary": "CU 99% AVG 99% MAX 99%",
+        "ssid": "Example",
+        "rssi": "-45",
+        "bssid": "aa:bb:cc:dd:ee:ff",
+        "channel": "14",
+    }
+    font = _FakeFont(size=9, path="scanner.ttf", character_width=5)
+
+    selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
+
+    assert selected == "2484MHz STA 999 SUM 999"
+
+
+def test_metadata_shortens_24_band_before_removing_it() -> None:
+    state = {
+        "metadata": "2.4G STA 1 SUM 2",
+        "metadata_candidates": [
+            "2.4G 2484MHz STA 1 SUM 2",
+            "2G 2484MHz STA 1 SUM 2",
+            "2484MHz STA 1 SUM 2",
+        ],
+        "summary": "CU 9% AVG 9% MAX 9%",
+        "ssid": "Example",
+        "rssi": "-45",
+        "bssid": "aa:bb:cc:dd:ee:ff",
+        "channel": "14",
+    }
+    font = _FakeFont(size=9, path="scanner.ttf", character_width=5.4)
+
+    selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
+
+    assert selected == "2G 2484MHz STA 1 SUM 2"
 
 
 def test_ssid_truncation_uses_ellipsis_but_keeps_right_field() -> None:
@@ -172,7 +219,7 @@ class _FakeProcess:
 
 
 class _FakeFont:
-    def __init__(self, *, size: int, path: str, character_width: int) -> None:
+    def __init__(self, *, size: int, path: str, character_width: float) -> None:
         self.size = size
         self.path = path
         self.character_width = character_width

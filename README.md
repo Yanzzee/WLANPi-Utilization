@@ -114,15 +114,15 @@ recent QBSS beacon from that BSSID. An RSSI tie prefers the later beacon. If
 RSSI is unavailable for every candidate, recency is used as the fallback.
 
 The R4 LCD frame is 128x128. Its centered plot is 120 pixels wide by 64 pixels
-high, with one horizontal pixel per second. The CU bar maps raw QBSS `0-255`
-values to 64 vertical pixels in four-value steps. A second, contrasting bar
-maps the QBSS station-count `SUM` from 0-100; sums above 100 are clamped only on
-the graph while the text retains the actual value. Both bars share a column,
-with the shorter bar drawn on top so both values remain visible. New samples
-scroll in from the right.
+high, with one horizontal pixel per second. The single CU bar maps raw QBSS
+`0-255` values to 64 vertical pixels in four-value steps. New samples scroll in
+from the right. The graph starts two pixels higher than the original layout to
+leave more space before the footer.
 
-Two larger text rows above the graph show band, `STA`, and `SUM`, followed by
-current `CU`, rolling average `AV`, and rolling maximum `MX`. `SUM` is the sum
+Two larger text rows above the graph show frequency, `STA`, and `SUM`, followed
+by current `CU`, rolling average `AVG`, and rolling maximum `MAX`. The first
+row includes the band when it fits. For 2.4 GHz it next tries `2G`; if that is
+still too wide, the band is omitted and frequency remains labeled `MHz`. `SUM` is the sum
 of the latest QBSS station counts advertised by all BSSIDs observed during
 that second; `STA` is the QBSS station count advertised by the BSSID selected
 as the CU source. Counts through 999 are shown exactly; larger counts appear as
@@ -131,12 +131,13 @@ row left-aligns SSID and
 right-aligns the unlabeled RSSI. The second row left-aligns the unlabeled BSSID
 and right-aligns the unlabeled channel. Long SSIDs are truncated. The on-screen
 clock and exit hint are intentionally omitted; log records retain their local
-timestamps. Missing CU seconds are graph gaps.
+timestamps. Missing CU seconds are graph gaps. With no selected QBSS beacon,
+the SSID field displays `<No QBSS Beacons>` rather than `<HIDDEN>`.
 
 FPMS applies the same DejaVu Sans Mono Bold face used by Scanner at a stable
 9 px, versus Scanner's 10 px. An 8 px safety fallback handles unexpected field
 widths. Horizontal width remains the limiting dimension. The tightest row is
-`CU 99% AV 99% MX 99%`; the second constraint is a full BSSID plus a
+`CU 99% AVG 99% MAX 99%`; the second constraint is a full BSSID plus a
 three-digit right-aligned channel. The SSID is the only variable field allowed
 to truncate.
 

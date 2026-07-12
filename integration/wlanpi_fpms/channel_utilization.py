@@ -266,7 +266,8 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
     state = _read_display_state(frame_path.with_suffix(".json"))
     draw = ImageDraw.Draw(frame)
     font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
-    _draw_text_top(draw, 2, 1, state["metadata"], font, (255, 255, 255))
+    metadata = _select_metadata(draw, state, font)
+    _draw_text_top(draw, 1, 1, metadata, font, (255, 255, 255))
     _draw_text_top(draw, 2, 17, state["summary"], font, (255, 220, 0))
     _draw_left_right(
         draw,
@@ -298,10 +299,11 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         g_vars["drawing_in_progress"] = False
 
 
-def _read_display_state(path: Path) -> dict[str, str]:
+def _read_display_state(path: Path) -> dict[str, object]:
     defaults = {
         "metadata": "?G STA -- SUM --",
-        "summary": "CU --% AV --% MX --%",
+        "metadata_candidates": ["?G STA -- SUM --"],
+        "summary": "CU --% AVG --% MAX --%",
         "ssid": "--",
         "rssi": "--",
         "bssid": "--",
@@ -311,10 +313,16 @@ def _read_display_state(path: Path) -> dict[str, str]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeError):
         return defaults
-    return {
+    state: dict[str, object] = {
         key: str(payload.get(key, default))
         for key, default in defaults.items()
+        if key != "metadata_candidates"
     }
+    candidates = payload.get("metadata_candidates", defaults["metadata_candidates"])
+    if not isinstance(candidates, list):
+        candidates = defaults["metadata_candidates"]
+    state["metadata_candidates"] = [str(value) for value in candidates]
+    return state
 
 
 def _select_scanner_font(draw, state, smart_font, image_font_module):
@@ -332,17 +340,29 @@ def _select_scanner_font(draw, state, smart_font, image_font_module):
     return candidates[-1]
 
 
-def _font_fits(draw, state: dict[str, str], font) -> bool:
+def _font_fits(draw, state: dict[str, object], font) -> bool:
     width = 124
-    fixed_rows = (state["metadata"], state["summary"])
-    if any(_text_width(draw, text, font) > width for text in fixed_rows):
+    if _text_width(draw, str(state["summary"]), font) > width:
+        return False
+    if not any(
+        _text_width(draw, candidate, font) <= 126
+        for candidate in state["metadata_candidates"]
+    ):
         return False
     footer_width = (
-        _text_width(draw, state["bssid"], font)
+        _text_width(draw, str(state["bssid"]), font)
         + _text_width(draw, " ", font)
-        + _text_width(draw, state["channel"], font)
+        + _text_width(draw, str(state["channel"]), font)
     )
     return footer_width <= width
+
+
+def _select_metadata(draw, state: dict[str, object], font) -> str:
+    candidates = state["metadata_candidates"]
+    for candidate in candidates:
+        if _text_width(draw, candidate, font) <= 126:
+            return candidate
+    return str(candidates[-1])
 
 
 def _draw_left_right(
