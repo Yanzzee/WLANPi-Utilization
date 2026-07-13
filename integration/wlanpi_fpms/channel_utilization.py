@@ -267,7 +267,7 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
     draw = ImageDraw.Draw(frame)
     font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
     metadata = _select_metadata(draw, state, font)
-    _draw_compact_text(draw, 1, 1, metadata, font, (255, 255, 255), gap=3)
+    _draw_compact_text(draw, 1, 3, metadata, font, (255, 255, 255), gap=3)
     _draw_compact_text(
         draw,
         2,

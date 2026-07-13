@@ -246,7 +246,8 @@ Horizontal space is the constraint. At expected 10-pixel Scanner metrics, the
 worst-case frequency/`STA`/`SUM` row uses all 126 available pixels, the
 `CU`/`AVG`/`MAX` row uses about 122 of 124 pixels, and a full BSSID beside a
 three-digit channel uses all 124 footer pixels. Vertically, 10-pixel text fits
-at the existing row positions without moving or resizing the 120x64 graph.
+with the first header at `y=3`; the other text rows and the 120x64 graph retain
+their positions.
 
 ## Secondary use: command line
 
