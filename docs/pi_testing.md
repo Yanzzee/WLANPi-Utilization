@@ -1,16 +1,30 @@
-# Raspberry Pi / WLAN Pi Smoke Testing
+# WLANPi Beacon Live 1.0: Raspberry Pi / WLAN Pi Testing
 
 These instructions cover hardware-free replay, Pi smoke capture, terminal live
 testing, and WLAN Pi R4 front-panel installation. The smoke/setup scripts do
 not change services; the separate `install_wlanpi_fpms.sh` installer performs
 the documented FPMS integration and service restart.
 
+For the normal, primary WLAN Pi FPMS installation, use:
+
+```bash
+git clone https://github.com/Yanzzee/WLANPi-Utilization.git
+cd WLANPi-Utilization
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+The complete hardware, OS, package, installation, menu, and graphical-display
+requirements are in the [README](../README.md). The virtual-environment and
+`pi_setup.sh` steps below are for CLI use and development verification; they are
+not prerequisites for the FPMS installer, which creates its own isolated
+environment under `/opt/wlanpi-beacon-live`.
+
 ## Clone the Repo
 
 On the Pi:
 
 ```bash
-git clone https://github.com/<your-org-or-user>/WLANPi-Utilization.git
+git clone https://github.com/Yanzzee/WLANPi-Utilization.git
 cd WLANPi-Utilization
 ```
 
@@ -23,7 +37,7 @@ git pull
 
 ## Create or Activate a Virtual Environment
 
-Using a project-local virtual environment is recommended:
+For CLI testing and development, use a project-local virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -35,6 +49,19 @@ before running setup. `scripts/pi_setup.sh` uses the active virtual environment
 when `VIRTUAL_ENV` is set; otherwise it falls back to `python3 -m pip`.
 
 The project supports Python 3.9 or newer.
+
+On Raspberry Pi OS or Debian, install the complete CLI/development system
+package set with:
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv git iproute2 iw tshark wireshark-common
+```
+
+The project itself has no third-party Python runtime dependencies. The
+development extra installs `pytest>=7.4,<9`; `setuptools` and `wheel` are build
+requirements. On a WLAN Pi, FPMS separately supplies Pillow, the Scanner font,
+LCD/GPIO support, and its service environment.
 
 ## Run Setup Checks
 
@@ -240,7 +267,8 @@ without a band. `SUM` is the sum of the latest QBSS
 station counts from every BSSID observed during that second, since those
 stations share airtime on the channel. `STA` is the QBSS station count
 advertised by the BSSID selected as the CU source. Values through 999 are exact;
-larger values display as `∞` while their logs remain exact. Below the graph,
+larger values display as `∞`; stats CSV retains the uncapped sum and raw beacon
+JSONL retains advertised station counts. Below the graph,
 SSID and BSSID are left-aligned; unlabeled RSSI and channel are right-aligned on
 their respective rows, matching the scanner layout. Long SSIDs are truncated.
 The screen does not show a clock or exit hint; log timestamps are unchanged.

@@ -1,178 +1,383 @@
-# WLANPi Beacon Live
+# WLANPi Beacon Live 1.0
 
-Python CLI for live and replayed WLAN beacon QBSS channel-utilization analysis.
+WLANPi Beacon Live displays live 802.11 beacon QBSS channel utilization on a
+WLAN Pi R4. Version 1.0 is designed primarily for the WLAN Pi graphical
+front-panel menu and its 128x128 display. A separate command-line interface is
+available for terminal use, replay, diagnostics, and development.
 
-Requires Python 3.9 or newer.
+The application analyzes QBSS information advertised in beacon frames. It does
+not track observed clients, and it keeps AP-advertised QBSS utilization separate
+from optional local radio survey utilization.
 
-Replay mode is hardware-free: it parses saved TShark TSV rows and saved
-`iw dev <iface> survey dump` text, then aggregates beacon records into
-per-second stats. Live mode supports terminal testing and the WLAN Pi R4
-Waveshare 128x128 front-panel display.
+## Getting started: WLAN Pi front-panel app
 
-## Install
+This is the primary installation and usage path.
+
+### Requirements
+
+- WLAN Pi R4 (Raspberry Pi 4) running WLAN Pi OS.
+- Waveshare 1.44-inch 128x128 LCD HAT with control stick, as supported by WLAN
+  Pi FPMS.
+- WLAN Pi FPMS 2.x installed and working. The installer expects `/usr/sbin/fpms`
+  and exactly one FPMS Python package under `/opt/wlanpi-fpms/lib/python*/site-packages/fpms`.
+- A monitor-mode-capable Wi-Fi interface named `wlan0`.
+- Root access through `sudo`.
+- Python 3.9 or newer with virtual-environment support.
+- `git`, `ip`, `iw`, `tshark`, and `dumpcap`.
+- An adapter, driver, and regulatory domain that allow the selected 20 MHz
+  channel. Menu entries are not a guarantee that the local radio may tune every
+  listed channel.
+
+On WLAN Pi OS, many or all system packages may already be installed. Install
+any missing packages with:
 
 ```bash
-pip install -e ".[dev]"
+sudo apt update
+sudo apt install python3 python3-venv git iproute2 iw tshark wireshark-common
 ```
 
-## Run tests
+`wireshark-common` supplies `dumpcap`. The FPMS installation supplies its own
+Python runtime, Pillow support, display/GPIO integration, Scanner font, and the
+`wlanpi-fpms` service; this repository does not replace those components.
+
+Package and component summary:
+
+| Package or component | Needed for | Purpose |
+| --- | --- | --- |
+| `wlanpi-fpms` 2.x | FPMS app | Existing WLAN Pi menu, LCD, GPIO, Pillow, and Scanner font runtime |
+| `python3` 3.9+ | All workflows | Application and installer runtime |
+| `python3-venv` | FPMS and CLI installs | Creates `/opt/wlanpi-beacon-live` or `.venv` |
+| `git` | Source installation | Clones and updates this repository |
+| `iproute2` | Live capture | Supplies `ip` to bring the interface down/up |
+| `iw` | Live capture | Sets monitor mode/channel and optionally reads survey counters |
+| `tshark`, `wireshark-common` | Live capture | Supplies TShark and Dumpcap packet-capture components |
+| `python3-pip` | CLI/development only | Installs the project into `.venv`; not used by the FPMS installer |
+| `setuptools>=64`, `wheel` | CLI/development only | Python build requirements resolved by `pip` |
+| `pytest>=7.4,<9` | Tests only | Installed by the `dev` extra |
+
+There are no third-party Python runtime dependencies in the application
+environment created by this project.
+
+### Install
+
+Clone the repository and run the FPMS installer:
 
 ```bash
-pytest
-```
-
-## CLI
-
-```bash
-beacon-live --help
-beacon-live replay --input samples/tshark_qbss_sample.tsv
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --frequency-mhz 5975
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --band 6 --channel 5
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36 --survey-debug
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36 --stats-csv --beacons-jsonl --log-dir logs
-```
-
-`wlanpi-beacon-live` is the on-device foreground launcher used by the FPMS
-adapter. It always runs live mode, accepts the same options as `beacon-live
-live`, and exits cleanly on Ctrl-C or FPMS left-stick exit.
-
-## WLAN Pi R4 Front-Panel Installation
-
-On the WLAN Pi, clone this repository and run the normal setup checks, then
-install the app and FPMS adapter:
-
-```bash
-./scripts/pi_setup.sh
+git clone https://github.com/Yanzzee/WLANPi-Utilization.git
+cd WLANPi-Utilization
 sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-The installer creates an application virtual environment at
-`/opt/wlanpi-beacon-live`, adds `Apps > Utilization` to WLAN Pi FPMS,
-adds a generic page-exit callback to FPMS, and restarts `wlanpi-fpms`. It keeps
-one-time `.beacon-live.bak` copies of the two patched FPMS files. Rerun the
-installer after an FPMS package upgrade because that package can replace its
-own Python files.
+For an existing clone:
 
-The menu order is band, channel, then launch mode:
-
-```text
-Apps > Utilization > <band> > <channel and frequency> > Display
-Apps > Utilization > <band> > <channel and frequency> > Display + Log
+```bash
+cd WLANPi-Utilization
+git pull
+sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-`Utilization` is appended at the bottom of the existing FPMS Apps menu.
+The installer does not run `apt` or `pip`. It:
 
-Bands are `2.4 GHz`, `5 GHz`, `6 GHz PSC`, and `6 GHz All`. PSC entries in the
-full 6 GHz list are prefixed `PSC`. Selecting a launch mode starts capture.
-Pressing the control stick left sends SIGINT to the foreground capture, waits
-for TShark and logs to close, and returns to the FPMS menu.
+- creates an isolated application environment at `/opt/wlanpi-beacon-live`;
+- copies the version 1.0 application into that environment and creates the
+  `wlanpi-beacon-live` and `beacon-live` launchers;
+- copies the thin display/menu adapter into the installed FPMS package;
+- adds `Utilization` at the bottom of the FPMS Apps menu;
+- adds the FPMS page-exit callback used by the left control-stick action;
+- creates `/run/wlanpi-beacon-live` and `/var/log/wlanpi-beacon-live`;
+- keeps one-time `.beacon-live.bak` copies of the two modified FPMS files; and
+- restarts `wlanpi-fpms`.
 
-The static menu follows WLAN Pi's unbonded 20 MHz channel list. The active
-regulatory domain and adapter still decide whether `iw` can tune a listed
-channel; a rejected tune is reported in the `wlanpi-fpms` journal.
+The patch targets the current FPMS 2.x Python layout and exits with an error if
+its required files or patch anchors are not found. Rerun the installer after a
+`wlanpi-fpms` package upgrade because the upgrade can replace the adapter or
+patched files.
 
-For example, the exact Display command for 5 GHz channel 36 is:
+### Start from the hardware menu
+
+Use the control stick to select:
+
+```text
+Apps
+  Utilization
+    2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
+      <channel and center frequency>
+        Display | Display + Log
+```
+
+The four band menus contain the application's static, unbonded 20 MHz channel
+lists. `6 GHz PSC` contains only preferred scanning channels. In `6 GHz All`,
+PSC entries are prefixed `PSC`; other entries are prefixed `Ch`.
+
+Selecting `Display` starts capture immediately without log files. Selecting
+`Display + Log` starts the same display and writes both per-second CSV stats and
+raw valid-beacon JSONL records under `/var/log/wlanpi-beacon-live`.
+
+Press the control stick left while the display is open to stop capture and
+return to the menu. FPMS sends SIGINT to the foreground application, which
+stops TShark and flushes and closes enabled logs. No other stick direction or
+button controls Utilization in version 1.0.
+
+### Exact FPMS launch commands
+
+For `5 GHz > Ch 36 5180 MHz > Display`, FPMS runs:
 
 ```text
 /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm
 ```
 
-`Display + Log` appends the following exact options:
+For `5 GHz > Ch 36 5180 MHz > Display + Log`, FPMS runs:
 
 ```text
---stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
+/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm --stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
 ```
 
-FPMS owns the SPI display and control-stick input. Its adapter contains menu,
-child-process, frame-copy, and Scanner-font layout wiring only. Capture, QBSS
-selection, aggregation, summaries, logging, graph rendering, and display-field
-formatting remain in this package. No observed-client tracking is included.
+Other menu selections use the same commands with the selected band and channel.
+The band argument is `2.4`, `5`, or `6`. FPMS owns the physical display and
+control-stick input; the child process only writes its PPM graph frame and JSON
+display state under `/run/wlanpi-beacon-live`.
 
-The replay command prints tab-separated per-second stats from a saved TShark
-sample file with these fields:
+## Graphical display reference
+
+The display is a 128x128-pixel frame with two header rows, a centered graph,
+and two footer rows. It intentionally has no clock and no on-screen exit hint.
+Log timestamps are unaffected.
+
+```text
+┌──────────────────────────────┐
+│ band/frequency  STA n SUM n  │  header row 1
+│ CU n% AVG n% MAX n%          │  header row 2
+│ ┌──────────────────────────┐ │
+│ │                          │ │
+│ │  120-second QBSS CU      │ │  120x64 graph
+│ │                          │ │
+│ └──────────────────────────┘ │
+│ SSID                   -RSSI │  footer row 1
+│ BSSID                channel │  footer row 2
+└──────────────────────────────┘
+```
+
+The diagram shows field placement, not exact character widths.
+
+### Header row 1: radio and station counts
+
+The first row displays frequency and the following fields:
+
+- `STA`: the QBSS station count advertised by the BSSID selected as the current
+  utilization source.
+- `SUM`: the sum of the latest QBSS station counts advertised by every BSSID
+  observed in that second. This channel-wide total is shown because stations
+  across BSSIDs share airtime on the selected channel.
+
+Station values from 0 through 999 are shown exactly. A larger value is shown as
+`∞`; this is display formatting only. Stats CSV retains the uncapped `SUM`, and
+beacon JSONL retains each raw advertised station count.
+
+FPMS chooses the first form that fits horizontally:
+
+1. band, frequency, `STA`, and `SUM`, such as `5G 5180MHz STA 2 SUM 14`;
+2. for 2.4 GHz only, the shortened `2G` band label;
+3. frequency with `MHz`, `STA`, and `SUM`, with the band omitted.
+
+If no frequency is available, the row uses the short band plus `STA` and `SUM`.
+
+### Header row 2: utilization summary
+
+The second row displays:
+
+- `CU`: the current selected QBSS channel-utilization percentage;
+- `AVG`: the arithmetic mean of valid selected CU values in the visible
+  120-second window; and
+- `MAX`: the maximum valid selected CU value in that window.
+
+Percentages use whole-number display rounding. Missing values appear as `--`
+and are excluded from `AVG` and `MAX`.
+
+### Graph
+
+- The plot is 120 pixels wide by 64 pixels high, from `x=4` through `x=123`
+  and `y=30` through `y=93`.
+- A dim border occupies the adjacent left and right columns, leaving four
+  display pixels outside the graph on each side.
+- Each horizontal pixel represents one completed one-second aggregation.
+- The newest value is at the right edge. During startup, unused history is
+  blank on the left; after 120 samples, older values scroll off the left.
+- The single green bar series is selected AP QBSS channel utilization. Station
+  counts are text only and are not graphed in version 1.0.
+- Raw QBSS CU is an integer from 0 through 255 and is converted to percentage as
+  `raw / 255 * 100`. The graph maps it into 64 four-value buckets; values 0-3
+  occupy the bottom pixel and 252-255 reach the top.
+- Dim horizontal guides occur at the top, bottom, and each 16-pixel quarter.
+- A second without a selected QBSS CU value is a gap rather than a zero and is
+  excluded from the summary.
+- The first live publish cycle is a silent warm-up and is not added to the graph
+  or stats CSV. Valid raw beacons from that cycle are still eligible for JSONL
+  logging.
+
+### Footer
+
+The first footer row left-aligns the selected SSID and right-aligns its strongest
+RSSI for that second. RSSI has no label. SSID is the only field that may be
+truncated, and an ellipsis indicates truncation.
+
+The second footer row left-aligns the selected BSSID and right-aligns the
+configured channel. Neither field has a label. If no QBSS-bearing beacon was
+selected, the SSID is `<No QBSS Beacons>`. `<HIDDEN>` is reserved for a selected
+beacon whose SSID is actually empty or hidden.
+
+### Selection, colors, and text
+
+For each second, analysis considers only QBSS-bearing beacons. It chooses the
+BSSID with the strongest observed RSSI and uses the most recent QBSS beacon from
+that BSSID. An RSSI tie prefers the later beacon. If every candidate lacks RSSI,
+the most recent candidate wins. `STA` comes from that selected beacon; `SUM` is
+computed independently across all BSSIDs observed in the second.
+
+The graph has a black background, dim blue-gray guides/borders, and a green CU
+series. Header/footer text is white except for the yellow CU summary row. Text
+uses FPMS Scanner's DejaVu Sans Mono Bold face at 9 pixels, with an 8-pixel
+safety fallback if required. Horizontal space is the constraint: the longest
+fixed rows are `CU 99% AVG 99% MAX 99%` and a full BSSID beside a three-digit
+channel.
+
+## Secondary use: command line
+
+The CLI is a separate workflow. It does not use the FPMS menu, control stick, or
+physical display. Use it for terminal live capture, replay, logging, local
+survey diagnostics, and development.
+
+### CLI requirements and installation
+
+Install the system packages, create a project virtual environment, and install
+the package:
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-venv git iproute2 iw tshark wireshark-common
+git clone https://github.com/Yanzzee/WLANPi-Utilization.git
+cd WLANPi-Utilization
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+The Python package has no third-party runtime dependencies. `setuptools` and
+`wheel` are build requirements. Development and test installation adds only
+`pytest>=7.4,<9`:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+### Live terminal capture
+
+Live mode configures the interface for monitor mode, tunes a 20 MHz channel,
+starts TShark, and updates once per second. It requires root privileges:
+
+```bash
+sudo .venv/bin/beacon-live live --iface wlan0 --channel 36
+```
+
+Use the explicit virtual-environment path under `sudo`; the activated shell
+`PATH` is commonly not preserved. Stop with Ctrl-C. The foreground launcher
+used internally by FPMS can also be run directly:
+
+```bash
+sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+```
+
+For an explicit frequency or an unambiguous 6 GHz channel mapping:
+
+```bash
+sudo .venv/bin/beacon-live live --iface wlan0 --frequency-mhz 5975
+sudo .venv/bin/beacon-live live --iface wlan0 --band 6 --channel 5
+```
+
+Do not pass a frequency to `--channel`; for example, `--channel 5975` requests
+channel number 5975 rather than frequency 5975 MHz.
+
+Enable one or both live log formats with flags. Live flags select formats, not
+filenames:
+
+```bash
+sudo .venv/bin/beacon-live live \
+  --iface wlan0 \
+  --channel 36 \
+  --stats-csv \
+  --beacons-jsonl \
+  --log-dir logs
+```
+
+The application creates the log directory recursively. Both files share a
+local-time run prefix containing a UTC offset, for example
+`beacon_live_20260710T123045123456-0600_stats.csv` and
+`beacon_live_20260710T123045123456-0600_beacons.jsonl`. Records contain local
+ISO-8601 timestamps with offsets. CSV is flushed per stats row and JSONL per
+beacon record.
+
+Stats CSV columns are local time, interface, channel, resolved frequency/band,
+unique BSSID count, uncapped QBSS station-count sum, selected QBSS CU,
+SSID/BSSID/RSSI, and optional local survey CU. Beacon JSONL stores every valid
+parsed beacon with the same run metadata plus SSID, BSSID, raw and percentage
+QBSS CU, advertised station count, admission capacity, and RSSI.
+
+Local survey channel utilization is an optional, driver-dependent metric. It is
+not used by the graphical FPMS display. Add `--local-cu` to poll `iw dev
+<iface> survey dump`, or `--survey-debug` to enable it and print counter
+selection/deltas to stderr:
+
+```bash
+sudo .venv/bin/beacon-live live --iface wlan0 --channel 36 --local-cu
+sudo .venv/bin/beacon-live live --iface wlan0 --channel 36 --survey-debug
+```
+
+Unsupported or unusable survey counters produce a warning while QBSS beacon
+capture continues. AP QBSS CU and local survey CU are different measurements
+and are never combined.
+
+### Replay without Wi-Fi hardware
+
+Replay parses saved TShark TSV rows and requires neither root nor Wi-Fi
+hardware:
+
+```bash
+.venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
+```
+
+Input fields are:
 
 ```text
 frame.time_epoch, wlan.ssid, wlan.bssid, wlan.qbss.cu, wlan.qbss.scount, wlan.qbss.adc, radiotap.dbm_antsignal
 ```
 
-Legacy six-field replay files without RSSI remain supported, although live
-captures and new smoke captures include `radiotap.dbm_antsignal`.
+Legacy six-field files without RSSI remain supported. Replay can also combine a
+beacon TSV with saved before/after survey dumps:
 
-QBSS channel utilization is converted from raw `0-255` values to percent with:
-
-```text
-raw / 255 * 100
+```bash
+.venv/bin/beacon-live replay \
+  --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
+  --survey-before samples/pi_survey_before.txt \
+  --survey-after samples/pi_survey_after.txt
 ```
 
-The live command's core path configures the selected interface for monitor
-mode, tunes with 20 MHz width, starts TShark, and produces one selected QBSS CU
-value per second. Selection considers only QBSS-bearing beacons seen in that
-second, chooses the BSSID with the strongest observed RSSI, then uses the most
-recent QBSS beacon from that BSSID. An RSSI tie prefers the later beacon. If
-RSSI is unavailable for every candidate, recency is used as the fallback.
+See [Raspberry Pi / WLAN Pi testing](docs/pi_testing.md) for smoke capture,
+debug collection, replay logging, physical acceptance checks, and troubleshooting.
 
-The R4 LCD frame is 128x128. Its centered plot is 120 pixels wide by 64 pixels
-high, with one horizontal pixel per second. The single CU bar maps raw QBSS
-`0-255` values to 64 vertical pixels in four-value steps. New samples scroll in
-from the right. The graph starts two pixels higher than the original layout to
-leave more space before the footer.
+## Version 1.0 scope
 
-Two larger text rows above the graph show frequency, `STA`, and `SUM`, followed
-by current `CU`, rolling average `AVG`, and rolling maximum `MAX`. The first
-row includes the band when it fits. For 2.4 GHz it next tries `2G`; if that is
-still too wide, the band is omitted and frequency remains labeled `MHz`. `SUM` is the sum
-of the latest QBSS station counts advertised by all BSSIDs observed during
-that second; `STA` is the QBSS station count advertised by the BSSID selected
-as the CU source. Counts through 999 are shown exactly; larger counts appear as
-`∞` on screen while logs retain the actual values. Below the graph, the first
-row left-aligns SSID and
-right-aligns the unlabeled RSSI. The second row left-aligns the unlabeled BSSID
-and right-aligns the unlabeled channel. Long SSIDs are truncated. The on-screen
-clock and exit hint are intentionally omitted; log records retain their local
-timestamps. Missing CU seconds are graph gaps. With no selected QBSS beacon,
-the SSID field displays `<No QBSS Beacons>` rather than `<HIDDEN>`.
+Version 1.0 focuses on beacon/QBSS channel-utilization analysis and the WLAN Pi
+front-panel graph. It includes:
 
-FPMS applies the same DejaVu Sans Mono Bold face used by Scanner at a stable
-9 px, versus Scanner's 10 px. An 8 px safety fallback handles unexpected field
-widths. Horizontal width remains the limiting dimension. The tightest row is
-`CU 99% AVG 99% MAX 99%`; the second constraint is a full BSSID plus a
-three-digit right-aligned channel. The SSID is the only variable field allowed
-to truncate.
+- live foreground capture and hardware-free TSV replay;
+- strongest-BSSID QBSS selection once per second;
+- selected-BSSID and summed QBSS station counts;
+- a scrolling 120-second CU graph and four-row text layout;
+- optional CSV stats and JSONL beacon logging;
+- clean Ctrl-C and FPMS left-stick shutdown; and
+- optional terminal-only local survey CU diagnostics.
 
-The graph and rolling min/mean/max summary use exactly the selected values in
-the visible 120-second window. Missing selected values are excluded from the
-numeric summary. The first completed live cycle is a silent warm-up: it is
-omitted from the display and stats CSV logging. Raw beacon JSONL logging still
-records every valid beacon from that cycle.
-
-Live mode does not require local survey counters. Use
-`--channel` for channel numbers and `--frequency-mhz` for explicit center
-frequency. For 6 GHz PSC channel 5, use either `--frequency-mhz 5975` or
-`--band 6 --channel 5`.
-
-Local survey CU is driver-dependent and strictly opt-in. Add `--local-cu` to poll
-`iw dev <iface> survey dump` once per second and populate `local_survey_cu` in
-the terminal dashboard. Without that flag, local survey CU is neither measured
-nor displayed. Add `--survey-debug` to print the selected survey frequency plus
-active/busy counter deltas to stderr. When polling is enabled, an `unavailable`
-value means the adapter/driver did not provide usable counters for the tuned
-frequency; it does not indicate a beacon-capture failure. Unsupported, missing,
-or unparseable survey output produces a warning while beacon capture, dashboard
-updates, and logging continue normally.
-
-Live logging is optional. Use `--stats-csv` and/or `--beacons-jsonl` to enable
-the main outputs, and optionally set their designated folder with `--log-dir`
-(default: `logs`). These flags do not accept filenames. The app creates a shared
-timestamped run prefix and writes names such as
-`beacon_live_20260710T123045123456-0600_stats.csv` and
-`beacon_live_20260710T123045123456-0600_beacons.jsonl`. Filenames and log-entry
-timestamps use local time with the UTC offset. Files remain flushed per stats
-row or beacon record.
-
-Both formats put local record time first, followed by interface, channel, and
-resolved frequency/band metadata. Stats CSV records the selected
-QBSS CU, source SSID/BSSID, and source beacon RSSI. Beacon JSONL retains every
-valid beacon and its RSSI. The fixed 20 MHz width and beacon-only record type
-are intentionally omitted.
+Version 1.0 does not include observed-client tracking, station-count graphing,
+Parquet output, selectable graph duration, background logging-only operation,
+an information page, or debug options in the hardware menu.
