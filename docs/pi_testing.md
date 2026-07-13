@@ -261,9 +261,9 @@ seconds from left to right with one pixel per second. One bar maps raw QBSS CU
 graph is shifted two pixels upward to increase separation from the footer.
 
 Two larger rows above the graph show frequency, `STA`, `SUM`, selected `CU`,
-rolling average `AVG`, and rolling maximum `MAX`. Band is included when it
-fits; 2.4 GHz falls back from `2.4G` to `2G`, then to frequency plus `MHz`
-without a band. `SUM` is the sum of the latest QBSS
+rolling average `AVG`, and rolling maximum `MAX`. Band is not shown. Frequency
+normally includes `MHz`; the suffix is omitted only if the full first row does
+not fit at 10 pixels. `SUM` is the sum of the latest QBSS
 station counts from every BSSID observed during that second, since those
 stations share airtime on the channel. `STA` is the QBSS station count
 advertised by the BSSID selected as the CU source. Values through 999 are exact;
@@ -275,9 +275,11 @@ The screen does not show a clock or exit hint; log timestamps are unchanged.
 Missing CU values are graph gaps and do not enter the summary. When no QBSS
 beacon is selected, SSID reads `<No QBSS Beacons>`.
 
-Text uses Scanner's DejaVu Sans Mono Bold face at a stable 9 px, with an 8 px
-safety fallback. The width constraints are the CU/AVG/MAX row at two-digit
-utilization and the BSSID/channel footer; only SSID may truncate.
+All text uses Scanner's DejaVu Sans Mono Bold face at 10 px, with measured
+3- or 4-pixel header-field gaps. A 9 px then 8 px safety fallback handles
+unexpected installed font metrics. The width constraints are the
+frequency/STA/SUM header with two three-digit station counts, the CU/AVG/MAX
+row, and the BSSID/channel footer; only SSID may truncate.
 
 The AP selected each second is the QBSS-bearing BSSID with the strongest
 observed RSSI; the latest beacon from that BSSID supplies CU and the individual

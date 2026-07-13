@@ -267,8 +267,16 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
     draw = ImageDraw.Draw(frame)
     font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
     metadata = _select_metadata(draw, state, font)
-    _draw_text_top(draw, 1, 1, metadata, font, (255, 255, 255))
-    _draw_text_top(draw, 2, 17, state["summary"], font, (255, 220, 0))
+    _draw_compact_text(draw, 1, 1, metadata, font, (255, 255, 255), gap=3)
+    _draw_compact_text(
+        draw,
+        2,
+        17,
+        state["summary"],
+        font,
+        (255, 220, 0),
+        gap=4,
+    )
     _draw_left_right(
         draw,
         2,
@@ -301,8 +309,8 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
 
 def _read_display_state(path: Path) -> dict[str, object]:
     defaults = {
-        "metadata": "?G STA -- SUM --",
-        "metadata_candidates": ["?G STA -- SUM --"],
+        "metadata": "STA -- SUM --",
+        "metadata_candidates": ["STA -- SUM --"],
         "summary": "CU --% AVG --% MAX --%",
         "ssid": "--",
         "rssi": "--",
@@ -326,10 +334,10 @@ def _read_display_state(path: Path) -> dict[str, object]:
 
 
 def _select_scanner_font(draw, state, smart_font, image_font_module):
-    """Use a stable 9 px Scanner font, with an 8 px safety fallback."""
+    """Use the 10 px Scanner font, with 9/8 px safety fallbacks."""
     font_path = getattr(smart_font, "path", None)
     candidates = (
-        [image_font_module.truetype(font_path, size) for size in (9, 8)]
+        [image_font_module.truetype(font_path, size) for size in (10, 9, 8)]
         if font_path is not None
         else [smart_font]
     )
@@ -342,16 +350,16 @@ def _select_scanner_font(draw, state, smart_font, image_font_module):
 
 def _font_fits(draw, state: dict[str, object], font) -> bool:
     width = 124
-    if _text_width(draw, str(state["summary"]), font) > width:
+    if _compact_text_width(draw, str(state["summary"]), font, gap=4) > width:
         return False
     if not any(
-        _text_width(draw, candidate, font) <= 126
+        _compact_text_width(draw, candidate, font, gap=3) <= 126
         for candidate in state["metadata_candidates"]
     ):
         return False
     footer_width = (
         _text_width(draw, str(state["bssid"]), font)
-        + _text_width(draw, " ", font)
+        + 4
         + _text_width(draw, str(state["channel"]), font)
     )
     return footer_width <= width
@@ -360,9 +368,35 @@ def _font_fits(draw, state: dict[str, object], font) -> bool:
 def _select_metadata(draw, state: dict[str, object], font) -> str:
     candidates = state["metadata_candidates"]
     for candidate in candidates:
-        if _text_width(draw, candidate, font) <= 126:
+        if _compact_text_width(draw, candidate, font, gap=3) <= 126:
             return candidate
     return str(candidates[-1])
+
+
+def _draw_compact_text(
+    draw,
+    x: int,
+    y: int,
+    text: str,
+    font,
+    color,
+    *,
+    gap: int,
+) -> None:
+    """Draw space-delimited fields with a fixed pixel gap."""
+    current_x = x
+    for token in text.split():
+        _draw_text_top(draw, current_x, y, token, font, color)
+        current_x += _text_width(draw, token, font) + gap
+
+
+def _compact_text_width(draw, text: str, font, *, gap: int) -> int:
+    tokens = text.split()
+    if not tokens:
+        return 0
+    return sum(_text_width(draw, token, font) for token in tokens) + gap * (
+        len(tokens) - 1
+    )
 
 
 def _draw_left_right(

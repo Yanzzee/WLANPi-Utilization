@@ -145,7 +145,7 @@ Log timestamps are unaffected.
 
 ```text
 ┌──────────────────────────────┐
-│ band/frequency  STA n SUM n  │  header row 1
+│ frequency       STA n SUM n  │  header row 1
 │ CU n% AVG n% MAX n%          │  header row 2
 │ ┌──────────────────────────┐ │
 │ │                          │ │
@@ -173,13 +173,15 @@ Station values from 0 through 999 are shown exactly. A larger value is shown as
 `∞`; this is display formatting only. Stats CSV retains the uncapped `SUM`, and
 beacon JSONL retains each raw advertised station count.
 
-FPMS chooses the first form that fits horizontally:
+Band information is not shown. FPMS chooses the first frequency form that fits
+horizontally:
 
-1. band, frequency, `STA`, and `SUM`, such as `5G 5180MHz STA 2 SUM 14`;
-2. for 2.4 GHz only, the shortened `2G` band label;
-3. frequency with `MHz`, `STA`, and `SUM`, with the band omitted.
+1. frequency with `MHz`, `STA`, and `SUM`, such as
+   `5180MHz STA 2 SUM 14`;
+2. frequency without the `MHz` suffix, such as `5180 STA 999 SUM 999`, when
+   three-digit counts and the installed font metrics require the shorter form.
 
-If no frequency is available, the row uses the short band plus `STA` and `SUM`.
+If no frequency is available, the row contains only `STA` and `SUM`.
 
 ### Header row 2: utilization summary
 
@@ -234,11 +236,17 @@ the most recent candidate wins. `STA` comes from that selected beacon; `SUM` is
 computed independently across all BSSIDs observed in the second.
 
 The graph has a black background, dim blue-gray guides/borders, and a green CU
-series. Header/footer text is white except for the yellow CU summary row. Text
-uses FPMS Scanner's DejaVu Sans Mono Bold face at 9 pixels, with an 8-pixel
-safety fallback if required. Horizontal space is the constraint: the longest
-fixed rows are `CU 99% AVG 99% MAX 99%` and a full BSSID beside a three-digit
-channel.
+series. Header/footer text is white except for the yellow CU summary row. All
+text uses FPMS Scanner's DejaVu Sans Mono Bold face at 10 pixels. The renderer
+uses measured 3- or 4-pixel gaps between header fields instead of full
+monospaced space cells; field alignment is unchanged. A 9- then 8-pixel safety
+fallback remains for unexpected installed font metrics.
+
+Horizontal space is the constraint. At expected 10-pixel Scanner metrics, the
+worst-case frequency/`STA`/`SUM` row uses all 126 available pixels, the
+`CU`/`AVG`/`MAX` row uses about 122 of 124 pixels, and a full BSSID beside a
+three-digit channel uses all 124 footer pixels. Vertically, 10-pixel text fits
+at the existing row positions without moving or resizing the 120x64 graph.
 
 ## Secondary use: command line
 

@@ -88,8 +88,11 @@ class LcdDashboard:
         else:
             summary = "CU --% AVG --% MAX --%"
 
+        station_fields = f"STA {bssid_station_count} SUM {station_sum}"
         metadata = (
-            f"{_short_band(self.band)} STA {bssid_station_count} SUM {station_sum}"
+            f"{self.frequency_mhz}MHz {station_fields}"
+            if self.frequency_mhz is not None
+            else station_fields
         )
 
         rssi = "--"
@@ -130,16 +133,14 @@ class LcdDashboard:
             else "--"
         )
         station_fields = f"STA {bssid_station_count} SUM {station_sum}"
-        band = _short_band(self.band)
         if self.frequency_mhz is None:
-            return (f"{band} {station_fields}",)
+            return (station_fields,)
 
         frequency = f"{self.frequency_mhz}MHz"
-        candidates = [f"{band} {frequency} {station_fields}"]
-        if band == "2.4G":
-            candidates.append(f"2G {frequency} {station_fields}")
-        candidates.append(f"{frequency} {station_fields}")
-        return tuple(candidates)
+        return (
+            f"{frequency} {station_fields}",
+            f"{self.frequency_mhz} {station_fields}",
+        )
 
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
@@ -195,10 +196,6 @@ def _whole_percent(value: Optional[float]) -> str:
 
 def _format_station_count(value: int) -> str:
     return "∞" if value > 999 else str(value)
-
-
-def _short_band(band: Optional[str]) -> str:
-    return "?G" if band is None else f"{band}G"
 
 
 def _raw_to_graph_height(raw: int) -> int:

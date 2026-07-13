@@ -28,11 +28,14 @@ def test_lcd_dashboard_writes_128_square_ppm_and_creates_directory(
 
     assert payload.startswith(b"P6\n128 128\n255\n")
     assert len(payload.split(b"\n", 3)[3]) == 128 * 128 * 3
-    assert dashboard.text_lines[0] == "5G STA -- SUM --"
+    assert dashboard.text_lines[0] == "5180MHz STA -- SUM --"
     assert dashboard.text_lines[1] == "CU --% AVG --% MAX --%"
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
-    assert state["metadata"] == "5G STA -- SUM --"
-    assert state["metadata_candidates"][0] == "5G 5180MHz STA -- SUM --"
+    assert state["metadata"] == "5180MHz STA -- SUM --"
+    assert state["metadata_candidates"] == [
+        "5180MHz STA -- SUM --",
+        "5180 STA -- SUM --",
+    ]
     assert state["channel"] == "36"
 
 
@@ -54,7 +57,7 @@ def test_lcd_dashboard_uses_requested_two_row_header_and_footer(
 
     metadata, summary, ssid, rssi, bssid, channel = dashboard.text_lines
 
-    assert metadata == "6G STA 12 SUM 18"
+    assert metadata == "5975MHz STA 12 SUM 18"
     assert summary == "CU 75% AVG 50% MAX 75%"
     assert ssid == "Alpha"
     assert rssi == "-45"
@@ -122,7 +125,7 @@ def test_station_sum_and_bssid_count_support_three_digit_values(
         ]
     )
 
-    assert dashboard.text_lines[0] == "6G STA 999 SUM 999"
+    assert dashboard.text_lines[0] == "STA 999 SUM 999"
 
 
 def test_station_count_above_999_uses_infinity_symbol_in_text() -> None:

@@ -113,13 +113,12 @@ def test_launch_failure_is_reported_without_leaving_session(
     assert "channel_utilization_session" not in g_vars
 
 
-def test_scanner_font_falls_back_to_nine_pixels_for_summary_width() -> None:
+def test_compact_header_spacing_allows_ten_pixel_scanner_font() -> None:
     state = {
-        "metadata": "2.4G STA 999 SUM 999",
+        "metadata": "2484MHz STA 999 SUM 999",
         "metadata_candidates": [
-            "2.4G 2484MHz STA 999 SUM 999",
-            "2G 2484MHz STA 999 SUM 999",
             "2484MHz STA 999 SUM 999",
+            "2484 STA 999 SUM 999",
         ],
         "summary": "CU 99% AVG 99% MAX 99%",
         "ssid": "Example",
@@ -136,16 +135,15 @@ def test_scanner_font_falls_back_to_nine_pixels_for_summary_width() -> None:
         _FakeImageFontModule,
     )
 
-    assert selected.size == 9
+    assert selected.size == 10
 
 
 def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
     state = {
-        "metadata": "2.4G STA 999 SUM 999",
+        "metadata": "2484MHz STA 999 SUM 999",
         "metadata_candidates": [
-            "2.4G 2484MHz STA 999 SUM 999",
-            "2G 2484MHz STA 999 SUM 999",
             "2484MHz STA 999 SUM 999",
+            "2484 STA 999 SUM 999",
         ],
         "summary": "CU 99% AVG 99% MAX 99%",
         "ssid": "Example",
@@ -153,20 +151,19 @@ def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
         "bssid": "aa:bb:cc:dd:ee:ff",
         "channel": "14",
     }
-    font = _FakeFont(size=9, path="scanner.ttf", character_width=5)
+    font = _FakeFont(size=10, path="scanner.ttf", character_width=6.1)
 
     selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
 
-    assert selected == "2484MHz STA 999 SUM 999"
+    assert selected == "2484 STA 999 SUM 999"
 
 
-def test_metadata_shortens_24_band_before_removing_it() -> None:
+def test_metadata_never_includes_band_information() -> None:
     state = {
-        "metadata": "2.4G STA 1 SUM 2",
+        "metadata": "2484MHz STA 1 SUM 2",
         "metadata_candidates": [
-            "2.4G 2484MHz STA 1 SUM 2",
-            "2G 2484MHz STA 1 SUM 2",
             "2484MHz STA 1 SUM 2",
+            "2484 STA 1 SUM 2",
         ],
         "summary": "CU 9% AVG 9% MAX 9%",
         "ssid": "Example",
@@ -174,11 +171,12 @@ def test_metadata_shortens_24_band_before_removing_it() -> None:
         "bssid": "aa:bb:cc:dd:ee:ff",
         "channel": "14",
     }
-    font = _FakeFont(size=9, path="scanner.ttf", character_width=5.4)
+    font = _FakeFont(size=10, path="scanner.ttf", character_width=6)
 
     selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
 
-    assert selected == "2G 2484MHz STA 1 SUM 2"
+    assert selected == "2484MHz STA 1 SUM 2"
+    assert "G" not in selected
 
 
 def test_ssid_truncation_uses_ellipsis_but_keeps_right_field() -> None:
@@ -242,5 +240,5 @@ class _FakeImageFontModule:
         return _FakeFont(
             size=size,
             path=path,
-            character_width=5 if size == 9 else 4,
+            character_width={10: 6, 9: 5, 8: 4}[size],
         )
