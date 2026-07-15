@@ -9,6 +9,8 @@ The application analyzes QBSS information advertised in beacon frames. It does
 not track observed clients, and it keeps AP-advertised QBSS utilization separate
 from optional local radio survey utilization.
 
+![WLANPi Beacon Live CU Screen](docs/images/utilization-cu-screen.png)
+
 ## Getting started: WLAN Pi front-panel app
 
 This is the primary installation and usage path.
