@@ -6,40 +6,14 @@ from typing import Optional
 
 import pytest
 
-from beacon_live.dashboard import RollingStatsWindow
 from beacon_live.dashboard import TerminalDashboard
+from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
-
-
-def test_rolling_window_keeps_only_the_most_recent_120_seconds() -> None:
-    window = RollingStatsWindow()
-
-    for second in range(1000, 1121):
-        window.add(_stats(second))
-
-    assert len(window.rows) == 120
-    assert window.rows[0].second == 1001
-    assert window.rows[-1].second == 1120
-
-
-def test_rolling_window_replaces_an_existing_second() -> None:
-    window = RollingStatsWindow(max_seconds=3)
-    window.extend([_stats(1000), _stats(1001), _stats(1002)])
-
-    window.add(replace(_stats(1002), unique_bssid_count=99))
-
-    assert [row.second for row in window.rows] == [1000, 1001, 1002]
-    assert window.rows[-1].unique_bssid_count == 99
-
-
-def test_rolling_window_rejects_invalid_size() -> None:
-    with pytest.raises(ValueError, match="greater than zero"):
-        RollingStatsWindow(max_seconds=0)
 
 
 def test_dashboard_formats_all_beacon_metrics_without_local_cu() -> None:
     dashboard = TerminalDashboard(include_local_cu=False)
-    dashboard.update([_stats(1000)])
+    dashboard.update(_snapshot(_stats(1000)))
 
     rendered = dashboard.render()
 
@@ -58,10 +32,12 @@ def test_rolling_summary_uses_displayed_values_from_last_120_seconds() -> None:
     dashboard = TerminalDashboard()
     values = [float(index % 101) for index in range(121)]
     dashboard.update(
-        [
-            _stats(1000 + index, selected_qbss_cu_percent=value)
-            for index, value in enumerate(values)
-        ]
+        _snapshot(
+            *[
+                _stats(1000 + index, selected_qbss_cu_percent=value)
+                for index, value in enumerate(values)
+            ]
+        )
     )
 
     expected = values[-120:]
@@ -80,7 +56,7 @@ def test_rolling_summary_uses_displayed_values_from_last_120_seconds() -> None:
 def test_graph_data_uses_exactly_the_displayed_per_second_qbss_cu() -> None:
     dashboard = TerminalDashboard()
     dashboard.update(
-        [
+        _snapshot(
             replace(
                 _stats(1000),
                 selected_qbss_cu_percent=25.0,
@@ -89,7 +65,7 @@ def test_graph_data_uses_exactly_the_displayed_per_second_qbss_cu() -> None:
                 _stats(1001),
                 selected_qbss_cu_percent=None,
             ),
-        ]
+        )
     )
 
     assert dashboard.graph_data == ((1000, 25.0), (1001, None))
@@ -102,7 +78,7 @@ def test_dashboard_formats_local_time() -> None:
     dashboard = TerminalDashboard(
         local_timezone=local_timezone,
     )
-    dashboard.update([_stats(0)])
+    dashboard.update(_snapshot(_stats(0)))
 
     rendered = dashboard.render()
 
@@ -112,7 +88,7 @@ def test_dashboard_formats_local_time() -> None:
 
 def test_dashboard_marks_enabled_but_missing_local_cu_unavailable() -> None:
     dashboard = TerminalDashboard(include_local_cu=True)
-    dashboard.update([_stats(1000, local_cu_percent=None)])
+    dashboard.update(_snapshot(_stats(1000, local_cu_percent=None)))
 
     rendered = dashboard.render()
 
@@ -122,7 +98,7 @@ def test_dashboard_marks_enabled_but_missing_local_cu_unavailable() -> None:
 
 def test_dashboard_formats_available_local_cu() -> None:
     dashboard = TerminalDashboard(include_local_cu=True)
-    dashboard.update([_stats(1000, local_cu_percent=12.5)])
+    dashboard.update(_snapshot(_stats(1000, local_cu_percent=12.5)))
 
     rendered = dashboard.render()
 
@@ -134,10 +110,19 @@ def test_dashboard_refresh_clears_and_redraws_terminal() -> None:
     dashboard = TerminalDashboard()
     output = io.StringIO()
 
-    dashboard.refresh([_stats(1000)], stream=output)
+    dashboard.refresh(_snapshot(_stats(1000)), stream=output)
 
     assert output.getvalue().startswith("\x1b[2J\x1b[H")
     assert "Alpha/aa:aa:aa:aa:aa:aa" in output.getvalue()
+
+
+def test_dashboard_replaces_its_view_from_shared_snapshot() -> None:
+    dashboard = TerminalDashboard()
+    dashboard.update(_snapshot(_stats(1000)))
+
+    dashboard.update(_snapshot(_stats(2000)))
+
+    assert dashboard.graph_data == ((2000, 30.0),)
 
 
 def _stats(
@@ -155,4 +140,17 @@ def _stats(
         selected_qbss_bssid="aa:aa:aa:aa:aa:aa",
         selected_qbss_rssi_dbm=-45,
         local_cu_percent=local_cu_percent,
+    )
+
+
+def _snapshot(*rows: SecondStats) -> MetricsSnapshot:
+    history = tuple(rows[-120:])
+    current = history[-1]
+    return MetricsSnapshot(
+        generated_at=float(current.second + 1),
+        window_seconds=120,
+        bssids=(),
+        selected_bssid=current.selected_qbss_bssid,
+        current=current,
+        history=history,
     )

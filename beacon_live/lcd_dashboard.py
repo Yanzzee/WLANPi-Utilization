@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
-from beacon_live.dashboard import RollingStatsWindow
+from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 
 LCD_WIDTH = 128
@@ -37,21 +37,25 @@ class LcdDashboard:
         self.band = band
         self.channel = channel
         self.frequency_mhz = frequency_mhz
-        self.window = RollingStatsWindow(max_seconds=GRAPH_WIDTH)
+        self.snapshot = MetricsSnapshot.empty(window_seconds=GRAPH_WIDTH)
         self.refresh()
 
-    def update(self, stats_rows: Iterable[SecondStats]) -> None:
-        self.window.extend(stats_rows)
+    def update(self, snapshot: MetricsSnapshot) -> None:
+        self.snapshot = snapshot
 
     @property
     def latest(self) -> Optional[SecondStats]:
-        return self.window.rows[-1] if self.window.rows else None
+        return (
+            self.snapshot.current
+            if self.snapshot.generated_at is not None
+            else None
+        )
 
     @property
     def graph_data(self) -> tuple[tuple[int, Optional[int]], ...]:
         """Return the raw 0-255 QBSS values shown in the 120-pixel plot."""
         values: list[tuple[int, Optional[int]]] = []
-        for stats in self.window.rows:
+        for stats in self.snapshot.history:
             raw = stats.selected_qbss_cu_raw
             if raw is None and stats.selected_qbss_cu_percent is not None:
                 raw = round(stats.selected_qbss_cu_percent * 255 / 100)
@@ -63,7 +67,7 @@ class LcdDashboard:
         latest = self.latest
         values = [
             stats.selected_qbss_cu_percent
-            for stats in self.window.rows
+            for stats in self.snapshot.history
             if stats.selected_qbss_cu_percent is not None
         ]
         current_cu = _whole_percent(
@@ -171,8 +175,9 @@ class LcdDashboard:
 
         return canvas.ppm()
 
-    def refresh(self, stats_rows: Iterable[SecondStats] = ()) -> None:
-        self.update(stats_rows)
+    def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
+        if snapshot is not None:
+            self.update(snapshot)
         metadata, summary, ssid, rssi, bssid, channel = self.text_lines
         state = {
             "metadata": metadata,

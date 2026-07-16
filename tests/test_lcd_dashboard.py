@@ -10,6 +10,7 @@ from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _CU_GRAPH
 from beacon_live.lcd_dashboard import _format_station_count
 from beacon_live.lcd_dashboard import _raw_to_graph_height
+from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 
 
@@ -49,10 +50,10 @@ def test_lcd_dashboard_uses_requested_two_row_header_and_footer(
         frequency_mhz=5975,
     )
     dashboard.update(
-        [
+        _snapshot(
             _stats(0, 25.0, 64, station_count=12, bssid_station_count=7),
             _stats(1, 75.0, 191, station_count=18, bssid_station_count=12),
-        ]
+        )
     )
 
     metadata, summary, ssid, rssi, bssid, channel = dashboard.text_lines
@@ -74,10 +75,12 @@ def test_lcd_graph_keeps_one_pixel_per_second_for_latest_120_seconds(
         channel="36",
     )
     dashboard.refresh(
-        [
-            _stats(second, 50.0, second % 256, station_count=0)
-            for second in range(121)
-        ]
+        _snapshot(
+            *[
+                _stats(second, 50.0, second % 256, station_count=0)
+                for second in range(121)
+            ]
+        )
     )
 
     assert GRAPH_WIDTH == 120
@@ -114,7 +117,7 @@ def test_station_sum_and_bssid_count_support_three_digit_values(
         channel="233",
     )
     dashboard.update(
-        [
+        _snapshot(
             _stats(
                 1000,
                 100.0,
@@ -122,7 +125,7 @@ def test_station_sum_and_bssid_count_support_three_digit_values(
                 station_count=999,
                 bssid_station_count=999,
             )
-        ]
+        )
     )
 
     assert dashboard.text_lines[0] == "STA 999 SUM 999"
@@ -141,10 +144,10 @@ def test_graph_contains_only_cu_bar(tmp_path: Path) -> None:
         channel="36",
     )
     dashboard.refresh(
-        [
+        _snapshot(
             _stats(1000, 80.0, 204, station_count=25),
             _stats(1001, 25.0, 64, station_count=9999),
-        ]
+        )
     )
 
     pixel_data = dashboard.render().split(b"\n", 3)[3]
@@ -163,7 +166,7 @@ def test_no_selected_qbss_beacon_uses_explicit_ssid_message(tmp_path: Path) -> N
         frequency_mhz=5180,
     )
     dashboard.update(
-        [
+        _snapshot(
             SecondStats(
                 second=1000,
                 unique_bssid_count=0,
@@ -174,7 +177,7 @@ def test_no_selected_qbss_beacon_uses_explicit_ssid_message(tmp_path: Path) -> N
                 selected_qbss_rssi_dbm=None,
                 local_cu_percent=None,
             )
-        ]
+        )
     )
 
     assert dashboard.text_lines[2] == "<No QBSS Beacons>"
@@ -208,3 +211,16 @@ def _stats(
 def _pixel(payload: bytes, x: int, y: int) -> tuple[int, int, int]:
     index = (y * 128 + x) * 3
     return tuple(payload[index : index + 3])  # type: ignore[return-value]
+
+
+def _snapshot(*rows: SecondStats) -> MetricsSnapshot:
+    history = tuple(rows[-120:])
+    current = history[-1]
+    return MetricsSnapshot(
+        generated_at=float(current.second + 1),
+        window_seconds=120,
+        bssids=(),
+        selected_bssid=current.selected_qbss_bssid,
+        current=current,
+        history=history,
+    )
