@@ -10,6 +10,9 @@ from typing import Optional, TextIO, Tuple
 
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
+from beacon_live.screen_manager import ScreenManager
+from beacon_live.screens import CU_SCREEN_ID
+from beacon_live.screens import DisplayIdentity
 
 _CLEAR_SCREEN = "\x1b[2J\x1b[H"
 DEFAULT_WINDOW_SECONDS = 120
@@ -36,19 +39,35 @@ class TerminalDashboard:
         include_local_cu: bool = False,
         local_timezone: Optional[tzinfo] = None,
     ) -> None:
-        self.snapshot = MetricsSnapshot.empty(window_seconds=max_seconds)
+        self.screen_manager = ScreenManager(
+            snapshot=MetricsSnapshot.empty(window_seconds=max_seconds)
+        )
         self.include_local_cu = include_local_cu
         self.local_timezone = local_timezone
 
+    @property
+    def snapshot(self) -> MetricsSnapshot:
+        return self.screen_manager.snapshot
+
     def update(self, snapshot: MetricsSnapshot) -> None:
-        self.snapshot = snapshot
+        self.screen_manager.update(snapshot)
+
+    @property
+    def active_screen_id(self) -> str:
+        return self.screen_manager.active_screen_id
+
+    def navigate_up(self, *, now: Optional[float] = None) -> bool:
+        return self.screen_manager.navigate_up(now=now)
+
+    def navigate_down(self, *, now: Optional[float] = None) -> bool:
+        return self.screen_manager.navigate_down(now=now)
 
     @property
     def graph_data(self) -> Tuple[Tuple[int, Optional[float]], ...]:
-        """Return the exact QBSS CU series displayed in per-second rows."""
+        """Return active-screen values on the shared per-second time base."""
         return tuple(
-            (stats.second, stats.selected_qbss_cu_percent)
-            for stats in self.snapshot.history
+            (point.second, point.display_value)
+            for point in self.screen_manager.view.graph_points
         )
 
     @property
@@ -64,6 +83,9 @@ class TerminalDashboard:
         )
 
     def render(self) -> str:
+        if self.active_screen_id != CU_SCREEN_ID:
+            return self._render_metric_screen()
+
         title = (
             "WLANPi Beacon Live | "
             f"rolling {self.snapshot.window_seconds}s | "
@@ -92,6 +114,28 @@ class TerminalDashboard:
             for stats in self.snapshot.history
         )
         return "\n".join(lines)
+
+    def _render_metric_screen(self) -> str:
+        view = self.screen_manager.view
+        title = (
+            "WLANPi Beacon Live | "
+            f"{view.title} | rolling {self.snapshot.window_seconds}s | "
+            f"rows={len(self.snapshot.history)}"
+        )
+        graph = "".join(
+            "·"
+            if point.value is None
+            else _bar_for_value(point.value, view.graph_maximum)
+            for point in view.graph_points
+        )
+        return "\n".join(
+            [
+                title,
+                view.summary,
+                f"{view.graph_label} graph: {graph or '--'}",
+                f"Source: {_format_identity(view.identity)}",
+            ]
+        )
 
     def _format_rolling_summary(self) -> str:
         summary = self.rolling_summary
@@ -178,6 +222,24 @@ def _bar_for_percent(value: float) -> str:
     bounded = min(100.0, max(0.0, value))
     index = min(len(_BAR_LEVELS) - 1, int(bounded / 100 * len(_BAR_LEVELS)))
     return _BAR_LEVELS[index]
+
+
+def _bar_for_value(value: int, maximum: int) -> str:
+    if maximum <= 0:
+        return _BAR_LEVELS[0]
+    return _bar_for_percent(value / maximum * 100)
+
+
+def _format_identity(identity: DisplayIdentity) -> str:
+    if identity.bssid is None:
+        return identity.unavailable_text
+    ssid = identity.ssid or "<hidden>"
+    rssi = (
+        "RSSI unavailable"
+        if identity.rssi_dbm is None
+        else f"{identity.rssi_dbm} dBm"
+    )
+    return _truncate(f"{ssid}/{identity.bssid} ({rssi})", 72)
 
 
 def _truncate(value: str, width: int) -> str:

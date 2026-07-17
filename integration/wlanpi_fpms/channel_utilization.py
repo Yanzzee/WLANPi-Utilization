@@ -11,6 +11,7 @@ import json
 import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -18,6 +19,7 @@ EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live"
 FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = "wlan0"
+NAVIGATION_DEBOUNCE_SECONDS = 0.2
 
 _24_GHZ_CHANNELS = tuple(range(1, 15))
 _5_GHZ_CHANNELS = (
@@ -157,9 +159,11 @@ class ChannelUtilizationApp:
         g_vars: dict[str, object],
         *,
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.g_vars = g_vars
         self.popen = popen
+        self.clock = clock
 
     def launch(self, *, band: str, channel: int, logging: bool) -> None:
         session = self.g_vars.get("channel_utilization_session")
@@ -172,6 +176,7 @@ class ChannelUtilizationApp:
                     logging=logging,
                 ),
                 popen=self.popen,
+                clock=self.clock,
             )
             self.g_vars["channel_utilization_session"] = session
             try:
@@ -185,6 +190,8 @@ class ChannelUtilizationApp:
             _display_error(self.g_vars, "Capture stopped.\nCheck journal.")
 
         self.g_vars["page_exit_handler"] = session.stop
+        self.g_vars["page_up_handler"] = session.navigate_up
+        self.g_vars["page_down_handler"] = session.navigate_down
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
 
@@ -196,14 +203,18 @@ class _DisplaySession:
         command: list[str],
         *,
         popen: Callable[..., subprocess.Popen[bytes]],
+        clock: Callable[[], float],
     ) -> None:
         self.g_vars = g_vars
         self.command = command
         self.popen = popen
+        self.clock = clock
         self.process: Optional[subprocess.Popen[bytes]] = None
         self.stop_event = threading.Event()
         self.thread: Optional[threading.Thread] = None
         self.exit_reported = False
+        self.screen_offset = 0
+        self.last_navigation_ts: Optional[float] = None
 
     @property
     def finished(self) -> bool:
@@ -212,6 +223,8 @@ class _DisplaySession:
     def start(self) -> None:
         FRAME_PATH.parent.mkdir(parents=True, exist_ok=True)
         FRAME_PATH.unlink(missing_ok=True)
+        _screen_control_path(FRAME_PATH).unlink(missing_ok=True)
+        self._write_screen_offset()
         self.process = self.popen(self.command)
         self.thread = threading.Thread(
             target=self._display_frames,
@@ -238,6 +251,34 @@ class _DisplaySession:
             self.thread.join(timeout=2)
         self.g_vars.pop("channel_utilization_session", None)
         self.g_vars.pop("page_exit_handler", None)
+        self.g_vars.pop("page_up_handler", None)
+        self.g_vars.pop("page_down_handler", None)
+
+    def navigate_up(self) -> None:
+        self._navigate(-1)
+
+    def navigate_down(self) -> None:
+        self._navigate(1)
+
+    def _navigate(self, offset: int) -> None:
+        now = self.clock()
+        if (
+            self.last_navigation_ts is not None
+            and now - self.last_navigation_ts < NAVIGATION_DEBOUNCE_SECONDS
+        ):
+            return
+        self.last_navigation_ts = now
+        self.screen_offset += offset
+        self._write_screen_offset()
+
+    def _write_screen_offset(self) -> None:
+        _atomic_write_text(
+            _screen_control_path(FRAME_PATH),
+            json.dumps(
+                {"active_screen_offset": self.screen_offset},
+                separators=(",", ":"),
+            ),
+        )
 
     def _display_frames(self) -> None:
         last_modified_ns: Optional[int] = None
@@ -331,6 +372,20 @@ def _read_display_state(path: Path) -> dict[str, object]:
         candidates = defaults["metadata_candidates"]
     state["metadata_candidates"] = [str(value) for value in candidates]
     return state
+
+
+def _screen_control_path(frame_path: Path) -> Path:
+    return frame_path.with_suffix(".control.json")
+
+
+def _atomic_write_text(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _select_scanner_font(draw, state, smart_font, image_font_module):

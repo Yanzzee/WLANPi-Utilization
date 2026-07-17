@@ -1,3 +1,4 @@
+import json
 import signal
 from pathlib import Path
 from typing import Optional
@@ -87,6 +88,56 @@ def test_left_exit_handler_interrupts_child_and_clears_session(
     assert processes[0].wait_timeout == 5
     assert "channel_utilization_session" not in g_vars
     assert "page_exit_handler" not in g_vars
+    assert "page_up_handler" not in g_vars
+    assert "page_down_handler" not in g_vars
+
+
+def test_up_down_navigation_keeps_one_capture_process_and_debounces(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    processes: list[_FakeProcess] = []
+    now = 10.0
+
+    def fake_popen(command: list[str]) -> _FakeProcess:
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    app = channel_utilization.ChannelUtilizationApp(
+        {},
+        popen=fake_popen,
+        clock=lambda: now,
+    )
+    app.launch(band="5", channel=36, logging=False)
+    session = app.g_vars["channel_utilization_session"]
+    down = app.g_vars["page_down_handler"]
+    up = app.g_vars["page_up_handler"]
+    assert callable(down)
+    assert callable(up)
+
+    down()
+    control_path = frame.with_suffix(".control.json")
+    assert json.loads(control_path.read_text(encoding="utf-8")) == {
+        "active_screen_offset": 1
+    }
+
+    now = 10.1
+    down()
+    assert session.screen_offset == 1
+
+    now = 10.3
+    down()
+    assert session.screen_offset == 2
+    now = 10.6
+    up()
+    assert session.screen_offset == 1
+
+    assert len(processes) == 1
+    assert processes[0].poll() is None
+    session.stop()
 
 
 def test_launch_failure_is_reported_without_leaving_session(

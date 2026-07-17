@@ -77,25 +77,74 @@ def _patch_fpms(path: Path) -> None:
 
 def _patch_buttons(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
+    original = text
     handler_code = (
         "            exit_handler = g_vars.pop('page_exit_handler', None)\n"
         "            if callable(exit_handler):\n"
         "                exit_handler()\n"
     )
-    if handler_code in text:
-        return
+    if handler_code not in text:
+        start = text.find("    def menu_left(self, g_vars, menu):")
+        if start < 0:
+            raise SystemExit(f"FPMS menu_left method not found in {path}")
+        page_branch = text.find(
+            "        if g_vars['display_state'] == 'page':\n",
+            start,
+        )
+        if page_branch < 0:
+            raise SystemExit(f"FPMS page-exit branch not found in {path}")
+        insertion = page_branch + len(
+            "        if g_vars['display_state'] == 'page':\n"
+        )
+        text = text[:insertion] + handler_code + text[insertion:]
 
-    start = text.find("    def menu_left(self, g_vars, menu):")
-    if start < 0:
-        raise SystemExit(f"FPMS menu_left method not found in {path}")
-    page_branch = text.find("        if g_vars['display_state'] == 'page':\n", start)
-    if page_branch < 0:
-        raise SystemExit(f"FPMS page-exit branch not found in {path}")
-    insertion = page_branch + len(
-        "        if g_vars['display_state'] == 'page':\n"
+    text = _insert_page_navigation_handler(
+        text,
+        method_name="menu_up",
+        handler_name="page_up_handler",
+        path=path,
     )
-    text = text[:insertion] + handler_code + text[insertion:]
-    _write_with_backup(path, text)
+    text = _insert_page_navigation_handler(
+        text,
+        method_name="menu_down",
+        handler_name="page_down_handler",
+        path=path,
+    )
+    if text != original:
+        _write_with_backup(path, text)
+
+
+def _insert_page_navigation_handler(
+    text: str,
+    *,
+    method_name: str,
+    handler_name: str,
+    path: Path,
+) -> str:
+    handler_code = (
+        "        if g_vars.get('display_state') == 'page':\n"
+        f"            page_handler = g_vars.get('{handler_name}')\n"
+        "            if callable(page_handler):\n"
+        "                page_handler()\n"
+        "                return\n"
+    )
+    if handler_code in text:
+        return text
+
+    method_start = text.find(f"    def {method_name}(")
+    if method_start < 0:
+        raise SystemExit(f"FPMS {method_name} method not found in {path}")
+    signature_line_end = method_start
+    while True:
+        signature_line_end = text.find("\n", signature_line_end + 1)
+        if signature_line_end < 0:
+            raise SystemExit(
+                f"FPMS {method_name} signature is incomplete in {path}"
+            )
+        if text[method_start:signature_line_end].rstrip().endswith(":"):
+            break
+    insertion = signature_line_end + 1
+    return text[:insertion] + handler_code + text[insertion:]
 
 
 def _write_with_backup(path: Path, text: str) -> None:

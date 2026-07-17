@@ -52,12 +52,13 @@ def test_strongest_rssi_selection_ignores_beacons_without_qbss() -> None:
     assert stats.selected_qbss_bssid == "bb"
 
 
-def test_rssi_tie_prefers_latest_beacon_then_latest_from_selected_bssid() -> None:
+def test_rssi_tie_uses_bssid_fallback_then_latest_within_selected_bssid() -> None:
     stats = aggregate_records(
         [
             _record(1000.1, "Alpha", "aa", 10.0, 1, -45),
             _record(1000.3, "Bravo", "bb", 20.0, 1, -45),
-            _record(1000.8, "Bravo", "bb", 30.0, 1, -60),
+            _record(1000.6, "Bravo", "bb", 30.0, 1, -60),
+            _record(1000.9, "Alpha", "aa", 40.0, 1, -60),
         ]
     )[0]
 

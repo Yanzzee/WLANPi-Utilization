@@ -27,3 +27,4 @@ Features & changes
 9. when logging, periodically check for free disk space and close if nearly full
     add message to end of log that the disk is full
     for long term logging, write separate files periodically
+10. how much can this also be done from hardware instead of using beacons

@@ -109,6 +109,7 @@ class MetricsSnapshot:
     selected_bssid: Optional[str]
     current: SecondStats
     history: tuple[SecondStats, ...]
+    top_station_bssid: Optional[str] = None
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":
@@ -130,6 +131,7 @@ class MetricsSnapshot:
                 local_cu_percent=None,
             ),
             history=(),
+            top_station_bssid=None,
         )
 
     @property

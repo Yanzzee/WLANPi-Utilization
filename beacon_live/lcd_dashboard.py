@@ -9,6 +9,10 @@ from typing import Optional
 
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
+from beacon_live.screen_manager import ScreenManager
+from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import CU_SCREEN_ID
+from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 
 LCD_WIDTH = 128
 LCD_HEIGHT = 128
@@ -20,6 +24,13 @@ GRAPH_HEIGHT = 64
 _BLACK = (0, 0, 0)
 _DIM = (48, 64, 64)
 _CU_GRAPH = (0, 220, 120)
+_ADMISSION_GRAPH = (0, 160, 255)
+_STATION_GRAPH = (255, 190, 0)
+_GRAPH_COLORS = {
+    CU_SCREEN_ID: _CU_GRAPH,
+    ADMISSION_CAPACITY_SCREEN_ID: _ADMISSION_GRAPH,
+    TOTAL_STATION_COUNT_SCREEN_ID: _STATION_GRAPH,
+}
 
 
 class LcdDashboard:
@@ -32,16 +43,41 @@ class LcdDashboard:
         band: Optional[str],
         channel: str,
         frequency_mhz: Optional[int] = None,
+        control_path: Optional[Path] = None,
     ) -> None:
         self.frame_path = frame_path
         self.band = band
         self.channel = channel
         self.frequency_mhz = frequency_mhz
-        self.snapshot = MetricsSnapshot.empty(window_seconds=GRAPH_WIDTH)
+        self.control_path = control_path or frame_path.with_suffix(".control.json")
+        self.screen_manager = ScreenManager(
+            snapshot=MetricsSnapshot.empty(window_seconds=GRAPH_WIDTH)
+        )
         self.refresh()
 
+    @property
+    def snapshot(self) -> MetricsSnapshot:
+        return self.screen_manager.snapshot
+
     def update(self, snapshot: MetricsSnapshot) -> None:
-        self.snapshot = snapshot
+        self.screen_manager.update(snapshot)
+
+    @property
+    def active_screen_id(self) -> str:
+        return self.screen_manager.active_screen_id
+
+    @property
+    def active_screen_index(self) -> int:
+        return self.screen_manager.active_index
+
+    def set_active_screen(self, index: int) -> bool:
+        return self.screen_manager.set_active_index(index)
+
+    def navigate_up(self, *, now: Optional[float] = None) -> bool:
+        return self.screen_manager.navigate_up(now=now)
+
+    def navigate_down(self, *, now: Optional[float] = None) -> bool:
+        return self.screen_manager.navigate_down(now=now)
 
     @property
     def latest(self) -> Optional[SecondStats]:
@@ -53,69 +89,34 @@ class LcdDashboard:
 
     @property
     def graph_data(self) -> tuple[tuple[int, Optional[int]], ...]:
-        """Return the raw 0-255 QBSS values shown in the 120-pixel plot."""
-        values: list[tuple[int, Optional[int]]] = []
-        for stats in self.snapshot.history:
-            raw = stats.selected_qbss_cu_raw
-            if raw is None and stats.selected_qbss_cu_percent is not None:
-                raw = round(stats.selected_qbss_cu_percent * 255 / 100)
-            values.append((stats.second, raw))
-        return tuple(values)
+        """Return the active screen's values on the shared graph time base."""
+        return tuple(
+            (point.second, point.value)
+            for point in self.screen_manager.view.graph_points
+        )
 
     @property
     def text_lines(self) -> tuple[str, str, str, str, str, str]:
-        latest = self.latest
-        values = [
-            stats.selected_qbss_cu_percent
-            for stats in self.snapshot.history
-            if stats.selected_qbss_cu_percent is not None
-        ]
-        current_cu = _whole_percent(
-            latest.selected_qbss_cu_percent if latest is not None else None
-        )
-        station_sum = (
-            _format_station_count(latest.qbss_station_count_sum)
-            if latest
-            else "--"
-        )
-        bssid_station_count = (
-            _format_station_count(latest.selected_qbss_station_count)
-            if latest is not None
-            and latest.selected_qbss_station_count is not None
-            else "--"
-        )
-        if values:
-            summary = (
-                f"CU {current_cu}% AVG {round(sum(values) / len(values))}% "
-                f"MAX {round(max(values))}%"
-            )
-        else:
-            summary = "CU --% AVG --% MAX --%"
-
-        station_fields = f"STA {bssid_station_count} SUM {station_sum}"
+        view = self.screen_manager.view
+        metric_fields = " ".join(view.metadata_tokens)
         metadata = (
-            f"{self.frequency_mhz}MHz {station_fields}"
+            f"{self.frequency_mhz}MHz {metric_fields}"
             if self.frequency_mhz is not None
-            else station_fields
+            else metric_fields
         )
 
-        rssi = "--"
-        ssid = "<No QBSS Beacons>"
-        bssid = "--"
-        if latest is not None and latest.selected_qbss_bssid is not None:
-            selected_rssi = (
-                latest.selected_qbss_strongest_rssi_dbm
-                if latest.selected_qbss_strongest_rssi_dbm is not None
-                else latest.selected_qbss_rssi_dbm
-            )
-            if selected_rssi is not None:
-                rssi = str(selected_rssi)
-            ssid = latest.selected_qbss_ssid or "<HIDDEN>"
-            bssid = latest.selected_qbss_bssid or "--"
+        identity = view.identity
+        rssi = "--" if identity.rssi_dbm is None else str(identity.rssi_dbm)
+        ssid = (
+            identity.ssid or "<HIDDEN>"
+            if identity.bssid is not None
+            else identity.unavailable_text
+        )
+        bssid = identity.bssid or "--"
 
         return (
             metadata,
-            summary,
+            view.summary,
             ssid,
             rssi,
             bssid,
@@ -124,26 +125,14 @@ class LcdDashboard:
 
     @property
     def metadata_candidates(self) -> tuple[str, ...]:
-        latest = self.latest
-        station_sum = (
-            _format_station_count(latest.qbss_station_count_sum)
-            if latest
-            else "--"
-        )
-        bssid_station_count = (
-            _format_station_count(latest.selected_qbss_station_count)
-            if latest is not None
-            and latest.selected_qbss_station_count is not None
-            else "--"
-        )
-        station_fields = f"STA {bssid_station_count} SUM {station_sum}"
+        metric_fields = " ".join(self.screen_manager.view.metadata_tokens)
         if self.frequency_mhz is None:
-            return (station_fields,)
+            return (metric_fields,)
 
         frequency = f"{self.frequency_mhz}MHz"
         return (
-            f"{frequency} {station_fields}",
-            f"{self.frequency_mhz} {station_fields}",
+            f"{frequency} {metric_fields}",
+            f"{self.frequency_mhz} {metric_fields}",
         )
 
     def render(self) -> bytes:
@@ -159,18 +148,20 @@ class LcdDashboard:
             _DIM,
         )
 
-        cu_data = self.graph_data[-GRAPH_WIDTH:]
-        start_x = GRAPH_X + GRAPH_WIDTH - len(cu_data)
+        view = self.screen_manager.view
+        graph_data = self.graph_data[-GRAPH_WIDTH:]
+        start_x = GRAPH_X + GRAPH_WIDTH - len(graph_data)
         baseline = GRAPH_Y + GRAPH_HEIGHT - 1
-        for offset, (_, raw) in enumerate(cu_data):
-            if raw is None:
+        graph_color = _GRAPH_COLORS[view.screen_id]
+        for offset, (_, value) in enumerate(graph_data):
+            if value is None:
                 continue
-            height = _raw_to_graph_height(raw)
+            height = _value_to_graph_height(value, view.graph_maximum)
             canvas.vertical_line(
                 start_x + offset,
                 baseline - height + 1,
                 baseline,
-                _CU_GRAPH,
+                graph_color,
             )
 
         return canvas.ppm()
@@ -178,8 +169,14 @@ class LcdDashboard:
     def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
         if snapshot is not None:
             self.update(snapshot)
+        self._sync_requested_screen()
+        view = self.screen_manager.view
         metadata, summary, ssid, rssi, bssid, channel = self.text_lines
         state = {
+            "screen_id": view.screen_id,
+            "screen_title": view.title,
+            "screen_index": self.screen_manager.active_index,
+            "screen_count": self.screen_manager.screen_count,
             "metadata": metadata,
             "metadata_candidates": self.metadata_candidates,
             "summary": summary,
@@ -194,6 +191,14 @@ class LcdDashboard:
         )
         _atomic_write(self.frame_path, self.render())
 
+    def _sync_requested_screen(self) -> None:
+        try:
+            payload = json.loads(self.control_path.read_text(encoding="utf-8"))
+            requested_offset = int(payload["active_screen_offset"])
+        except (KeyError, OSError, TypeError, ValueError, UnicodeError):
+            return
+        self.set_active_screen(requested_offset)
+
 
 def _whole_percent(value: Optional[float]) -> str:
     return "--" if value is None else str(round(value))
@@ -207,6 +212,15 @@ def _raw_to_graph_height(raw: int) -> int:
     """Map raw QBSS 0-255 to 64 equal four-integer display buckets."""
     bounded = min(255, max(0, raw))
     return bounded // 4 + 1
+
+
+def _value_to_graph_height(value: int, maximum: int) -> int:
+    if maximum == 255:
+        return _raw_to_graph_height(value)
+    if maximum <= 0:
+        return 1
+    bounded = min(maximum, max(0, value))
+    return round(bounded / maximum * (GRAPH_HEIGHT - 1)) + 1
 
 
 def _frame_state_path(frame_path: Path) -> Path:

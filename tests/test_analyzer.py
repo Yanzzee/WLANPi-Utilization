@@ -4,6 +4,7 @@ from typing import Optional
 import pytest
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.analyzer import select_bssid
 from beacon_live.models import BeaconRecord
 
 
@@ -97,6 +98,18 @@ def test_near_equal_rssi_uses_latest_station_count_as_tie_breaker() -> None:
 
     assert analyzer.snapshot.selected_bssid == "bb"
     assert analyzer.snapshot.current.selected_qbss_station_count == 12
+
+
+def test_selection_does_not_use_beacon_timing_as_a_tie_breaker() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(1100.0, bssid="aa", station_count=5, rssi_dbm=-50)
+    )
+    analyzer.ingest(
+        _record(1000.0, bssid="bb", station_count=5, rssi_dbm=-50)
+    )
+
+    assert select_bssid(analyzer.snapshot.bssids, None) == "bb"
 
 
 def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:

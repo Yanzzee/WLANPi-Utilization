@@ -69,7 +69,6 @@ def select_bssid(
         key=lambda state: (
             state.peak_rssi_dbm is not None,
             state.peak_rssi_dbm if state.peak_rssi_dbm is not None else -200,
-            state.last_seen_ts,
             state.bssid,
         ),
     ).bssid
@@ -310,6 +309,7 @@ class Analyzer:
             selected_bssid=self._current_selected_bssid,
             current=current,
             history=history,
+            top_station_bssid=_top_station_bssid(states),
         )
 
     def _states_at(
@@ -392,6 +392,26 @@ class Analyzer:
 
 def _station_count_key(state: BssidState) -> int:
     return state.latest_station_count if state.latest_station_count is not None else -1
+
+
+def _top_station_bssid(states: tuple[BssidState, ...]) -> Optional[str]:
+    candidates = tuple(
+        state for state in states if state.latest_station_count is not None
+    )
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda state: (
+            -(state.latest_station_count or 0),
+            -(
+                state.peak_rssi_dbm
+                if state.peak_rssi_dbm is not None
+                else -200
+            ),
+            state.bssid,
+        ),
+    ).bssid
 
 
 def _stats_from_states(

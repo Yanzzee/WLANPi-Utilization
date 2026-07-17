@@ -9,6 +9,7 @@ import pytest
 from beacon_live.dashboard import TerminalDashboard
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
+from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 
 
 def test_dashboard_formats_all_beacon_metrics_without_local_cu() -> None:
@@ -123,6 +124,24 @@ def test_dashboard_replaces_its_view_from_shared_snapshot() -> None:
     dashboard.update(_snapshot(_stats(2000)))
 
     assert dashboard.graph_data == ((2000, 30.0),)
+
+
+def test_terminal_dashboard_uses_shared_screen_registry() -> None:
+    dashboard = TerminalDashboard()
+    snapshot = _snapshot(_stats(1000), _stats(1001))
+    dashboard.update(snapshot)
+
+    dashboard.navigate_down(now=1.0)
+    admission = dashboard.render()
+    dashboard.navigate_down(now=1.3)
+    station_total = dashboard.render()
+
+    assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert "Admission Capacity" in admission
+    assert "ADC --" in admission
+    assert "Total Station Count" in station_total
+    assert "SUM 12" in station_total
+    assert dashboard.snapshot is snapshot
 
 
 def _stats(

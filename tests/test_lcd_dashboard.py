@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
+from beacon_live.analyzer import Analyzer
 from beacon_live.lcd_dashboard import GRAPH_HEIGHT
 from beacon_live.lcd_dashboard import GRAPH_WIDTH
 from beacon_live.lcd_dashboard import GRAPH_X
@@ -10,8 +11,11 @@ from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _CU_GRAPH
 from beacon_live.lcd_dashboard import _format_station_count
 from beacon_live.lcd_dashboard import _raw_to_graph_height
+from beacon_live.models import BeaconRecord
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
+from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 
 
 def test_lcd_dashboard_writes_128_square_ppm_and_creates_directory(
@@ -183,6 +187,53 @@ def test_no_selected_qbss_beacon_uses_explicit_ssid_message(tmp_path: Path) -> N
     assert dashboard.text_lines[2] == "<No QBSS Beacons>"
 
 
+def test_lcd_navigation_renders_admission_and_total_station_screens(
+    tmp_path: Path,
+) -> None:
+    dashboard = LcdDashboard(
+        tmp_path / "display.ppm",
+        band="5",
+        channel="36",
+        frequency_mhz=5180,
+    )
+    snapshot = _phase_two_snapshot()
+    dashboard.update(snapshot)
+
+    assert dashboard.navigate_down(now=1.0)
+    assert dashboard.active_screen_id == ADMISSION_CAPACITY_SCREEN_ID
+    assert dashboard.text_lines[1] == "ADC 200 CU 50%"
+    assert dashboard.text_lines[2] == "Alpha"
+    assert [second for second, _ in dashboard.graph_data] == [1000, 1001]
+
+    assert dashboard.navigate_down(now=1.3)
+    assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert dashboard.text_lines[0] == "5180MHz BSS 2 TOP 10"
+    assert dashboard.text_lines[1] == "SUM 15 AVG 9 MAX 15"
+    assert dashboard.text_lines[2] == "Bravo"
+    assert dashboard.graph_data == ((1000, 3), (1001, 15))
+    assert dashboard.snapshot is snapshot
+
+
+def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
+    tmp_path: Path,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    control = frame.with_suffix(".control.json")
+    dashboard = LcdDashboard(frame, band="5", channel="36")
+    snapshot = _phase_two_snapshot()
+    control.write_text('{"active_screen_offset":2}', encoding="utf-8")
+
+    dashboard.refresh(snapshot)
+
+    assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert dashboard.snapshot is snapshot
+    assert [row.second for row in dashboard.snapshot.history] == [1000, 1001]
+    state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
+    assert state["screen_id"] == TOTAL_STATION_COUNT_SCREEN_ID
+    assert state["screen_index"] == 2
+    assert state["screen_count"] == 3
+
+
 def _stats(
     second: int,
     percent: float,
@@ -211,6 +262,37 @@ def _stats(
 def _pixel(payload: bytes, x: int, y: int) -> tuple[int, int, int]:
     index = (y * 128 + x) * 3
     return tuple(payload[index : index + 3])  # type: ignore[return-value]
+
+
+def _phase_two_snapshot() -> MetricsSnapshot:
+    analyzer = Analyzer()
+    analyzer.ingest(_phase_two_record(1000.1, "Alpha", "aa", 64, 3, 100, -40))
+    analyzer.advance(1001, None)
+    analyzer.ingest(_phase_two_record(1001.1, "Alpha", "aa", 128, 5, 200, -40))
+    analyzer.ingest(_phase_two_record(1001.2, "Bravo", "bb", 32, 10, 300, -60))
+    analyzer.advance(1002, None)
+    return analyzer.snapshot
+
+
+def _phase_two_record(
+    timestamp: float,
+    ssid: str,
+    bssid: str,
+    cu_raw: int,
+    station_count: int,
+    admission_capacity: int,
+    rssi_dbm: int,
+) -> BeaconRecord:
+    return BeaconRecord(
+        timestamp=timestamp,
+        ssid=ssid,
+        bssid=bssid,
+        qbss_cu_raw=cu_raw,
+        qbss_cu_percent=cu_raw / 255 * 100,
+        qbss_station_count=station_count,
+        qbss_admission_capacity=admission_capacity,
+        rssi_dbm=rssi_dbm,
+    )
 
 
 def _snapshot(*rows: SecondStats) -> MetricsSnapshot:
