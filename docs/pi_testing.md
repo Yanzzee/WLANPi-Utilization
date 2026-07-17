@@ -238,8 +238,9 @@ Apps
 PSC channels are marked in the `6 GHz All` list. Selecting `Display` or
 `Display + Log` starts live beacon capture immediately. Press left while the
 graph is open to send SIGINT to the capture process, terminate TShark, flush and
-close any enabled logs, and return to the FPMS menu. No other control-stick or
-button action is used by this first version.
+close any enabled logs, and return to the FPMS menu. Use up/down to navigate the
+shared Utilization, Admission, Stations, and Retries views without restarting
+capture or graph history.
 
 `Utilization` appears after the existing entries at the bottom of Apps.
 
@@ -275,17 +276,24 @@ The screen does not show a clock or exit hint; log timestamps are unchanged.
 Missing CU values are graph gaps and do not enter the summary. When no QBSS
 beacon is selected, SSID reads `<No QBSS Beacons>`.
 
+The Retries view graphs one independent percentage per second. Its denominator
+contains only retry-eligible unicast management/data frames, excluding beacons,
+group-addressed frames, control/extension frames, and frames without a readable
+Retry bit. Each retry transmission is counted, even when several are retries of
+the same original frame. Its footer shows the highest-retry-percentage BSSID,
+keeps the prior footer on a tie, and falls back to the strongest beacon RSSI when
+no retries occur. A nonzero rate below 1% displays as `<1%`.
+
 All text uses Scanner's DejaVu Sans Mono Bold face at 10 px, with measured
 3- or 4-pixel header-field gaps. A 9 px then 8 px safety fallback handles
 unexpected installed font metrics. The width constraints are the
 frequency/STA/SUM header with two three-digit station counts, the CU/AVG/MAX
 row, and the BSSID/channel footer; only SSID may truncate.
 
-The AP selected each second is the QBSS-bearing BSSID with the strongest
-observed RSSI; the latest beacon from that BSSID supplies CU and the individual
-`STA` station count. The `SUM` station count is computed independently across
-all observed BSSIDs. This is beacon-only analysis. It does not track observed
-clients.
+CU and admission-capacity selection use the shared QBSS BSSID rules and the
+latest authoritative beacon. Station totals use the latest beacons from all
+observed BSSIDs. Retry analysis shares the same capture pipeline but also uses
+eligible non-beacon frames. It does not track observed clients.
 
 ### On-Device Acceptance Check
 
@@ -293,7 +301,8 @@ After installation:
 
 1. Open a Display channel and leave it open long enough to observe one new
    graph column each second.
-2. Press left and confirm FPMS returns to the selected channel menu.
+2. Use up/down and confirm all four screens retain their history, then press
+   left and confirm FPMS returns to the selected channel menu.
 3. Open the same channel with Display + Log, wait several seconds, press left,
    and confirm both timestamped files exist:
 

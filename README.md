@@ -117,8 +117,9 @@ raw valid-beacon JSONL records under `/var/log/wlanpi-beacon-live`.
 
 Press the control stick left while the display is open to stop capture and
 return to the menu. FPMS sends SIGINT to the foreground application, which
-stops TShark and flushes and closes enabled logs. No other stick direction or
-button controls Utilization in version 1.0.
+stops TShark and flushes and closes enabled logs. Use up/down to move through
+the Utilization, Admission, Stations, and Retries screens. Navigation changes
+only the active screen; capture, analysis, and graph history continue.
 
 ### Exact FPMS launch commands
 
@@ -218,6 +219,21 @@ and are excluded from `AVG` and `MAX`.
   or stats CSV. Valid raw beacons from that cycle are still eligible for JSONL
   logging.
 
+On the Retries screen, each graph column is an independent one-second sample:
+received frames with the Retry bit set divided by retry-eligible frames received
+in that second. The denominator includes retry-capable unicast management and
+data frames. Beacons, probe requests, Action No Ack, group-addressed traffic,
+control/extension frames, and frames without a readable Retry bit are excluded.
+Every received retry transmission is counted, including multiple retries of the
+same original frame. A nonzero value below 1% is displayed as `<1%` rather than
+being rounded to `0%`.
+
+The Retries footer shows the BSSID with the highest retry percentage for the
+current second. A tie keeps the previously displayed retry BSSID. If no retries
+occurred, the footer shows the strongest beacon BSSID by RSSI. Frames can be
+associated with that BSSID through the BSSID, transmitter, receiver, source, or
+destination MAC-address fields.
+
 ### Footer
 
 The first footer row left-aligns the selected SSID and right-aligns its strongest
@@ -231,11 +247,11 @@ beacon whose SSID is actually empty or hidden.
 
 ### Selection, colors, and text
 
-For each second, analysis considers only QBSS-bearing beacons. It chooses the
-BSSID with the strongest observed RSSI and uses the most recent QBSS beacon from
-that BSSID. An RSSI tie prefers the later beacon. If every candidate lacks RSSI,
-the most recent candidate wins. `STA` comes from that selected beacon; `SUM` is
-computed independently across all BSSIDs observed in the second.
+CU and admission-capacity selection considers QBSS-bearing beacons using the
+shared RSSI hysteresis and station-count rules. The newest beacon in the rolling
+window is authoritative for the selected BSSID. Station totals are computed
+independently from the latest beacons of all observed BSSIDs. Retry analysis uses
+the same capture pipeline but also consumes eligible non-beacon frames.
 
 The graph has a black background, dim blue-gray guides/borders, and a green CU
 series. Header/footer text is white except for the yellow CU summary row. All

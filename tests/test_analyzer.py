@@ -160,44 +160,49 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
         snapshot.selected_bssid = "bb"  # type: ignore[misc]
 
 
-def test_retry_percentage_uses_all_readable_frames_and_tracks_top_bssid() -> None:
+def test_retry_percentage_uses_eligible_frames_and_tracks_top_bssid() -> None:
     analyzer = Analyzer()
     analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -35, retry=False))
     analyzer.ingest(_frame(1000.1, "aa", retry=True))
-    analyzer.ingest(_beacon_frame(1000.2, "bb", "Bravo", -60, retry=False))
-    analyzer.ingest(_frame(1000.3, "bb", retry=True))
+    analyzer.ingest(_frame(1000.2, "aa", retry=False))
+    analyzer.ingest(_beacon_frame(1000.3, "bb", "Bravo", -60, retry=False))
     analyzer.ingest(_frame(1000.4, "bb", retry=True))
+    analyzer.ingest(_frame(1000.5, "bb", retry=True))
     analyzer.advance(1001, None)
 
     snapshot = analyzer.snapshot
     alpha = snapshot.state_for("aa")
     bravo = snapshot.state_for("bb")
 
-    assert snapshot.current.received_frame_count == 5
-    assert snapshot.current.retry_observed_frame_count == 5
+    assert snapshot.current.received_frame_count == 6
+    assert snapshot.current.retry_observed_frame_count == 6
+    assert snapshot.current.retry_eligible_frame_count == 4
     assert snapshot.current.retry_frame_count == 3
-    assert snapshot.current.retry_percent == pytest.approx(60.0)
+    assert snapshot.current.retry_percent == pytest.approx(75.0)
     assert alpha is not None
     assert alpha.window_retry_percent == pytest.approx(50.0)
     assert bravo is not None
-    assert bravo.window_retry_percent == pytest.approx(2 / 3 * 100)
+    assert bravo.window_retry_percent == pytest.approx(100.0)
     assert snapshot.top_retry_bssid == "bb"
     assert snapshot.current.top_retry_bssid == "bb"
     assert snapshot.selected_bssid == "aa"
 
 
-def test_retry_window_expires_old_frames_without_resetting_history() -> None:
+def test_retry_samples_use_independent_one_second_windows() -> None:
     analyzer = Analyzer(window_seconds=2)
     analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
     analyzer.ingest(_frame(1000.1, "aa", retry=True))
+    analyzer.ingest(_frame(1000.2, "aa", retry=False))
     analyzer.advance(1001, None)
 
     assert analyzer.snapshot.current.retry_percent == pytest.approx(50.0)
 
+    analyzer.ingest(_beacon_frame(1002.0, "aa", "Alpha", -40, retry=False))
     analyzer.ingest(_frame(1002.1, "aa", retry=False))
     analyzer.advance(1003, None)
 
-    assert analyzer.snapshot.current.received_frame_count == 1
+    assert analyzer.snapshot.current.received_frame_count == 2
+    assert analyzer.snapshot.current.retry_eligible_frame_count == 1
     assert analyzer.snapshot.current.retry_percent == 0.0
     assert analyzer.snapshot.top_retry_bssid == "aa"
     retry_state = analyzer.snapshot.retry_state_for("aa")
@@ -233,23 +238,73 @@ def test_missing_retry_flag_degrades_to_unavailable() -> None:
 
     assert analyzer.snapshot.current.received_frame_count == 1
     assert analyzer.snapshot.current.retry_observed_frame_count == 0
+    assert analyzer.snapshot.current.retry_eligible_frame_count == 0
     assert analyzer.snapshot.current.retry_percent is None
 
 
-def test_retry_percentage_denominator_is_total_received_frames() -> None:
+def test_retry_percentage_excludes_frames_that_cannot_be_retried() -> None:
     analyzer = Analyzer()
     analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
-    analyzer.ingest(_frame(1000.1, "aa", retry=True))
-    analyzer.ingest(_frame(1000.2, "aa", retry=None))
+    analyzer.ingest(
+        _frame(
+            1000.1,
+            "aa",
+            retry=True,
+            receiver_address="ff:ff:ff:ff:ff:ff",
+        )
+    )
+    analyzer.ingest(
+        _frame(1000.2, "aa", retry=True, frame_type=1)
+    )
+    analyzer.ingest(_frame(1000.3, "aa", retry=True))
+    analyzer.ingest(_frame(1000.4, "aa", retry=False))
+    analyzer.ingest(_frame(1000.5, "aa", retry=None))
     analyzer.advance(1001, None)
 
     snapshot = analyzer.snapshot
     retry_state = snapshot.retry_state_for("aa")
-    assert snapshot.current.received_frame_count == 3
-    assert snapshot.current.retry_observed_frame_count == 2
-    assert snapshot.current.retry_percent == pytest.approx(1 / 3 * 100)
+    assert snapshot.current.received_frame_count == 6
+    assert snapshot.current.retry_observed_frame_count == 5
+    assert snapshot.current.retry_eligible_frame_count == 2
+    assert snapshot.current.retry_percent == pytest.approx(50.0)
     assert retry_state is not None
-    assert retry_state.window_retry_percent == pytest.approx(1 / 3 * 100)
+    assert retry_state.retry_eligible_frame_count == 2
+    assert retry_state.window_retry_percent == pytest.approx(50.0)
+
+
+def test_each_retry_copy_of_the_same_frame_is_counted() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_frame(1000.1, "aa", retry=False))
+    analyzer.ingest(_frame(1000.2, "aa", retry=True))
+    analyzer.ingest(_frame(1000.3, "aa", retry=True))
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.current.retry_eligible_frame_count == 3
+    assert analyzer.snapshot.current.retry_frame_count == 2
+    assert analyzer.snapshot.current.retry_percent == pytest.approx(2 / 3 * 100)
+
+
+def test_frames_associate_when_bssid_appears_in_any_mac_address_field() -> None:
+    analyzer = Analyzer()
+    bssid = "aa:bb:cc:dd:ee:ff"
+    analyzer.ingest(_beacon_frame(1000.0, bssid, "Alpha", -40, retry=False))
+    analyzer.ingest(
+        _address_frame(1000.1, retry=True, transmitter_address=bssid)
+    )
+    analyzer.ingest(
+        _address_frame(1000.2, retry=False, receiver_address=bssid)
+    )
+    analyzer.ingest(_address_frame(1000.3, retry=True, source_address=bssid))
+    analyzer.ingest(
+        _address_frame(1000.4, retry=False, destination_address=bssid)
+    )
+    analyzer.advance(1001, None)
+
+    retry_state = analyzer.snapshot.retry_state_for(bssid)
+    assert retry_state is not None
+    assert retry_state.retry_eligible_frame_count == 4
+    assert retry_state.window_retry_frame_count == 2
+    assert retry_state.window_retry_percent == pytest.approx(50.0)
 
 
 def test_top_retry_bssid_can_be_derived_before_its_beacon_is_seen() -> None:
@@ -274,14 +329,43 @@ def test_top_retry_bssid_can_be_derived_before_its_beacon_is_seen() -> None:
     assert retry_state.rssi_dbm is None
 
 
-def test_top_retry_bssid_tie_does_not_use_frame_timing() -> None:
+def test_top_retry_bssid_tie_keeps_the_previously_displayed_bssid() -> None:
     analyzer = Analyzer()
-    analyzer.ingest(_frame(1000.0, "aa", retry=True))
-    analyzer.ingest(_frame(1000.1, "aa", retry=False))
-    analyzer.ingest(_frame(1000.8, "bb", retry=True))
-    analyzer.ingest(_frame(1000.9, "bb", retry=False))
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
+    analyzer.ingest(_beacon_frame(1000.1, "bb", "Bravo", -35, retry=False))
+    analyzer.ingest(_frame(1000.2, "aa", retry=True))
+    analyzer.ingest(_frame(1000.3, "bb", retry=True))
+    analyzer.ingest(_frame(1000.4, "bb", retry=False))
     analyzer.advance(1001, None)
 
+    assert analyzer.snapshot.top_retry_bssid == "aa"
+
+    analyzer.ingest(
+        _frame(1001.1, "aa", retry=True), publish_snapshot=False
+    )
+    analyzer.ingest(
+        _frame(1001.2, "aa", retry=False), publish_snapshot=False
+    )
+    analyzer.ingest(
+        _frame(1001.8, "bb", retry=True), publish_snapshot=False
+    )
+    analyzer.ingest(
+        _frame(1001.9, "bb", retry=False), publish_snapshot=False
+    )
+    analyzer.advance(1002, None)
+
+    assert analyzer.snapshot.top_retry_bssid == "aa"
+
+
+def test_no_retries_selects_the_strongest_beacon_for_footer() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -35, retry=False))
+    analyzer.ingest(_beacon_frame(1000.1, "bb", "Bravo", -60, retry=False))
+    analyzer.ingest(_frame(1000.2, "aa", retry=False))
+    analyzer.ingest(_frame(1000.3, "bb", retry=False))
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.current.retry_percent == 0.0
     assert analyzer.snapshot.top_retry_bssid == "aa"
 
 
@@ -308,13 +392,42 @@ def _record(
     )
 
 
-def _frame(timestamp: float, bssid: str, *, retry: Optional[bool]) -> FrameRecord:
+def _frame(
+    timestamp: float,
+    bssid: str,
+    *,
+    retry: Optional[bool],
+    frame_type: int = 2,
+    receiver_address: Optional[str] = None,
+) -> FrameRecord:
     return FrameRecord(
         timestamp=timestamp,
         bssid=bssid,
+        frame_type=frame_type,
+        frame_subtype=0,
+        retry_flag=retry,
+        receiver_address=receiver_address,
+    )
+
+
+def _address_frame(
+    timestamp: float,
+    *,
+    retry: bool,
+    transmitter_address: Optional[str] = None,
+    receiver_address: Optional[str] = None,
+    source_address: Optional[str] = None,
+    destination_address: Optional[str] = None,
+) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
         frame_type=2,
         frame_subtype=0,
         retry_flag=retry,
+        transmitter_address=transmitter_address,
+        receiver_address=receiver_address,
+        source_address=source_address,
+        destination_address=destination_address,
     )
 
 

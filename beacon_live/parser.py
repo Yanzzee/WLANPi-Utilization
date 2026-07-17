@@ -25,6 +25,10 @@ TSHARK_FRAME_FIELD_NAMES = (
     "wlan.fc.subtype",
     "wlan.fc.retry",
     "wlan.bssid",
+    "wlan.ta",
+    "wlan.ra",
+    "wlan.sa",
+    "wlan.da",
     "wlan.ssid",
     "wlan.qbss.cu",
     "wlan.qbss.scount",
@@ -35,6 +39,7 @@ TSHARK_FRAME_FIELD_NAMES = (
 )
 
 EXPECTED_TSHARK_FRAME_FIELD_COUNT = len(TSHARK_FRAME_FIELD_NAMES)
+LEGACY_TSHARK_FRAME_FIELD_COUNT = EXPECTED_TSHARK_FRAME_FIELD_COUNT - 4
 
 
 def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
@@ -114,23 +119,47 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
         return None
 
     fields = line.split("\t")
-    if len(fields) != EXPECTED_TSHARK_FRAME_FIELD_COUNT:
+    if len(fields) not in (
+        LEGACY_TSHARK_FRAME_FIELD_COUNT,
+        EXPECTED_TSHARK_FRAME_FIELD_COUNT,
+    ):
         return None
 
-    (
-        timestamp_text,
-        frame_type_text,
-        frame_subtype_text,
-        retry_text,
-        bssid_text,
-        ssid_text,
-        cu_text,
-        scount_text,
-        adc_text,
-        rssi_text,
-        frame_length_text,
-        beacon_interval_text,
-    ) = fields
+    if len(fields) == EXPECTED_TSHARK_FRAME_FIELD_COUNT:
+        (
+            timestamp_text,
+            frame_type_text,
+            frame_subtype_text,
+            retry_text,
+            bssid_text,
+            transmitter_text,
+            receiver_text,
+            source_text,
+            destination_text,
+            ssid_text,
+            cu_text,
+            scount_text,
+            adc_text,
+            rssi_text,
+            frame_length_text,
+            beacon_interval_text,
+        ) = fields
+    else:
+        (
+            timestamp_text,
+            frame_type_text,
+            frame_subtype_text,
+            retry_text,
+            bssid_text,
+            ssid_text,
+            cu_text,
+            scount_text,
+            adc_text,
+            rssi_text,
+            frame_length_text,
+            beacon_interval_text,
+        ) = fields
+        transmitter_text = receiver_text = source_text = destination_text = ""
 
     try:
         timestamp = float(timestamp_text)
@@ -174,7 +203,7 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
     )
     return FrameRecord(
         timestamp=timestamp,
-        bssid=bssid_text.strip() or None,
+        bssid=_parse_optional_mac(bssid_text),
         ssid=ssid_text if ssid_text != "" else None,
         rssi_dbm=rssi_dbm,
         frame_type=frame_type,
@@ -186,6 +215,10 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
         qbss_cu_percent=qbss_cu_percent,
         qbss_station_count=qbss_station_count,
         qbss_admission_capacity=qbss_admission_capacity,
+        transmitter_address=_parse_optional_mac(transmitter_text),
+        receiver_address=_parse_optional_mac(receiver_text),
+        source_address=_parse_optional_mac(source_text),
+        destination_address=_parse_optional_mac(destination_text),
     )
 
 
@@ -212,6 +245,11 @@ def _parse_optional_bool(value: str) -> Union[bool, None, _Malformed]:
     if text in {"0", "false"}:
         return False
     return _MALFORMED
+
+
+def _parse_optional_mac(value: str) -> Optional[str]:
+    text = value.strip()
+    return text.lower() if text else None
 
 
 def _parse_optional_int(

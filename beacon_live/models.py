@@ -38,6 +38,10 @@ class FrameRecord:
     qbss_cu_percent: Optional[float] = None
     qbss_station_count: Optional[int] = None
     qbss_admission_capacity: Optional[int] = None
+    transmitter_address: Optional[str] = None
+    receiver_address: Optional[str] = None
+    source_address: Optional[str] = None
+    destination_address: Optional[str] = None
 
     @property
     def is_management_frame(self) -> bool:
@@ -46,6 +50,39 @@ class FrameRecord:
     @property
     def is_beacon(self) -> bool:
         return self.is_management_frame and self.frame_subtype == 8
+
+    @property
+    def retry_eligible(self) -> bool:
+        """Whether this received MPDU can contribute to a retry ratio."""
+        if self.retry_flag is None:
+            return False
+        if self.frame_type == 0:
+            # Unicast management exchanges can be retried. Probe requests,
+            # beacons, Action No Ack, and reserved subtypes cannot.
+            if self.frame_subtype not in {0, 1, 2, 3, 5, 9, 10, 11, 12, 13}:
+                return False
+        elif self.frame_type != 2:
+            # Control and extension frames do not use the retry semantics
+            # measured by this screen.
+            return False
+
+        receiver = self.receiver_address or self.destination_address
+        return receiver is None or not _is_group_address(receiver)
+
+    @property
+    def mac_addresses(self) -> tuple[str, ...]:
+        """Return every available BSSID/TA/RA/SA/DA address once."""
+        addresses: list[str] = []
+        for address in (
+            self.bssid,
+            self.transmitter_address,
+            self.receiver_address,
+            self.source_address,
+            self.destination_address,
+        ):
+            if address is not None and address not in addresses:
+                addresses.append(address)
+        return tuple(addresses)
 
     def beacon_record(self) -> Optional[BeaconRecord]:
         """Return the beacon projection used by existing Phase 1/2 metrics."""
@@ -92,6 +129,7 @@ class SecondStats:
     selected_qbss_admission_capacity: Optional[int] = None
     received_frame_count: int = 0
     retry_observed_frame_count: int = 0
+    retry_eligible_frame_count: int = 0
     retry_frame_count: int = 0
     retry_percent: Optional[float] = None
     selected_beacon_rate_percent: Optional[float] = None
@@ -161,13 +199,14 @@ class BssidState:
 
 @dataclass(frozen=True)
 class RetryBssidState:
-    """Rolling retry metrics for one BSSID, derived from the shared frames."""
+    """One-second retry metrics for one BSSID from the shared frame stream."""
 
     bssid: str
     ssid: Optional[str]
     rssi_dbm: Optional[int]
     window_frame_count: int
     window_retry_observed_frame_count: int
+    retry_eligible_frame_count: int
     window_retry_frame_count: int
     window_retry_percent: Optional[float]
 
@@ -239,3 +278,11 @@ class MetricsSnapshot:
             (state for state in self.retry_bssids if state.bssid == bssid),
             None,
         )
+
+
+def _is_group_address(address: str) -> bool:
+    try:
+        first_octet = int(address.split(":", 1)[0], 16)
+    except ValueError:
+        return False
+    return bool(first_octet & 1)

@@ -82,9 +82,32 @@ TShark beacon fields:
 Additional fields when available:
 
 - wlan_radio.signal_dbm
-- Retry bit
+- wlan.fc.type
+- wlan.fc.subtype
+- wlan.fc.retry
+- wlan.ta
+- wlan.ra
+- wlan.sa
+- wlan.da
 - AP Name (vendor-specific)
 - Beacon interval
+
+## Retry data rules
+
+- Retry graph samples are independent one-second ratios retained in the shared
+  two-minute history.
+- The denominator contains only frames eligible for Retry-bit retransmission:
+  unicast data frames and retry-capable unicast management frames.
+- Exclude beacons, probe requests, Action No Ack, group-addressed frames,
+  control frames, extension frames, and frames without a readable Retry bit.
+- Count every captured frame with the Retry bit set, including multiple retry
+  transmissions of the same original frame.
+- Display nonzero retry percentages below 1% as `<1%`, not `0%`.
+- Associate a frame with a known BSSID when that BSSID appears in `wlan.bssid`,
+  `wlan.ta`, `wlan.ra`, `wlan.sa`, or `wlan.da`.
+- Select the retry footer BSSID by highest one-second retry percentage. Keep the
+  currently displayed BSSID when the highest percentages tie. When no retries
+  occurred, show the strongest-RSSI beacon BSSID.
 
 Local survey source:
 

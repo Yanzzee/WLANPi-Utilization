@@ -293,12 +293,12 @@ def test_lcd_retry_screen_renders_shared_retry_history_and_top_bssid(
     assert dashboard.active_screen_id == RETRY_SCREEN_ID
     assert dashboard.metric_color == _RETRY_GRAPH
     assert dashboard.text_lines[0] == "5180MHz Retries"
-    assert dashboard.text_lines[1] == "RET 43% AVG 51% MAX 60%"
+    assert dashboard.text_lines[1] == "RET 50% AVG 65% MAX 80%"
     assert dashboard.text_lines[2] == "Bravo"
     assert dashboard.text_lines[3] == "-60"
     assert dashboard.text_lines[4] == "bb"
     assert [value for _, value in dashboard.graph_data] == pytest.approx(
-        [60.0, 3 / 7 * 100]
+        [80.0, 50.0]
     )
 
     pixel_data = dashboard.render().split(b"\n", 3)[3]
@@ -406,12 +406,14 @@ def _retry_snapshot() -> MetricsSnapshot:
     analyzer = Analyzer()
     analyzer.ingest(_retry_beacon(1000.0, "aa", "Alpha", -35))
     analyzer.ingest(_retry_frame(1000.1, "aa", True))
-    analyzer.ingest(_retry_beacon(1000.2, "bb", "Bravo", -60))
-    analyzer.ingest(_retry_frame(1000.3, "bb", True))
+    analyzer.ingest(_retry_frame(1000.2, "aa", False))
+    analyzer.ingest(_retry_beacon(1000.3, "bb", "Bravo", -60))
     analyzer.ingest(_retry_frame(1000.4, "bb", True))
+    analyzer.ingest(_retry_frame(1000.5, "bb", True))
+    analyzer.ingest(_retry_frame(1000.6, "bb", True))
     analyzer.advance(1001, None)
     analyzer.ingest(_retry_frame(1001.1, "aa", False))
-    analyzer.ingest(_retry_frame(1001.2, "bb", False))
+    analyzer.ingest(_retry_frame(1001.2, "bb", True))
     analyzer.advance(1002, None)
     return analyzer.snapshot
 

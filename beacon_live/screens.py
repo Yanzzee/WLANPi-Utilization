@@ -186,11 +186,11 @@ class RetryScreen:
             title="Retry Percentage",
             metadata_tokens=("Retries",),
             summary=(
-                f"RET {_whole_percent(snapshot.current.retry_percent)}% "
-                f"AVG {_whole_percent(_mean(values))}% "
-                f"MAX {_whole_percent(max(values) if values else None)}%"
+                f"RET {_retry_percent(snapshot.current.retry_percent)}% "
+                f"AVG {_retry_percent(_mean(values))}% "
+                f"MAX {_retry_percent(max(values) if values else None)}%"
             ),
-            graph_label="Rolling retry percentage",
+            graph_label="One-second retry percentage",
             graph_points=graph_points,
             graph_maximum=100,
             identity=_identity_from_retry_state(
@@ -316,3 +316,11 @@ def _station_count(value: Optional[int]) -> str:
 
 def _whole_percent(value: Optional[float]) -> str:
     return "--" if value is None else str(round(value))
+
+
+def _retry_percent(value: Optional[float]) -> str:
+    if value is None:
+        return "--"
+    if 0 < value < 1:
+        return "<1"
+    return str(round(value))

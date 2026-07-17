@@ -106,6 +106,8 @@ class Analyzer:
         self._latest_local_cu_percent: Optional[float] = None
         self._current_selected_bssid: Optional[str] = None
         self._history_selected_bssid: Optional[str] = None
+        self._current_retry_bssid: Optional[str] = None
+        self._history_retry_bssid: Optional[str] = None
         self._snapshot = MetricsSnapshot.empty(window_seconds=window_seconds)
 
     @property
@@ -237,21 +239,27 @@ class Analyzer:
             upper_exclusive=float(second + 1),
             frames=frames,
         )
-        retry_states = _retry_states_from_frames(frames, states)
+        second_frames = _frames_for_second(frames, second)
+        retry_states = _retry_states_from_frames(second_frames, states)
         selected_bssid = select_bssid(
             states,
             self._history_selected_bssid,
             hysteresis_db=self.hysteresis_db,
         )
         self._history_selected_bssid = selected_bssid
+        self._history_retry_bssid = select_retry_bssid(
+            retry_states,
+            states,
+            self._history_retry_bssid,
+        )
         self._ready_stats.append(
             _stats_from_states(
                 second,
                 states,
                 selected_bssid,
                 self._local_cu_by_second.get(second),
-                frames,
-                retry_states,
+                second_frames,
+                self._history_retry_bssid,
             )
         )
         self._completed_seconds.add(second)
@@ -321,19 +329,25 @@ class Analyzer:
             upper_exclusive=upper_exclusive,
             frames=frames,
         )
-        retry_states = _retry_states_from_frames(frames, states)
+        second_frames = _frames_for_second(frames, current_second)
+        retry_states = _retry_states_from_frames(second_frames, states)
         self._current_selected_bssid = select_bssid(
             states,
             self._current_selected_bssid,
             hysteresis_db=self.hysteresis_db,
+        )
+        self._current_retry_bssid = select_retry_bssid(
+            retry_states,
+            states,
+            self._current_retry_bssid,
         )
         current = _stats_from_states(
             current_second,
             states,
             self._current_selected_bssid,
             self._latest_local_cu_percent,
-            frames,
-            retry_states,
+            second_frames,
+            self._current_retry_bssid,
         )
         history = tuple(
             self._history_by_second[second]
@@ -347,7 +361,7 @@ class Analyzer:
             current=current,
             history=history,
             top_station_bssid=_top_station_bssid(states),
-            top_retry_bssid=_top_retry_bssid(retry_states),
+            top_retry_bssid=self._current_retry_bssid,
             retry_bssids=retry_states,
         )
 
@@ -359,11 +373,9 @@ class Analyzer:
         frames: tuple[FrameRecord, ...],
     ) -> tuple[BssidState, ...]:
         cutoff = reference_timestamp - self.window_seconds
-        frames_by_bssid: dict[str, list[FrameRecord]] = {}
-        for frame in frames:
-            if frame.bssid is not None:
-                frames_by_bssid.setdefault(frame.bssid, []).append(frame)
-        states: list[BssidState] = []
+        window_entries_by_bssid: dict[
+            str, tuple[tuple[float, int, BeaconRecord], ...]
+        ] = {}
         for bssid, entries in self._records_by_bssid.items():
             window_entries = tuple(
                 entry
@@ -371,8 +383,14 @@ class Analyzer:
                 if entry[0] >= cutoff
                 and (upper_exclusive is None or entry[0] < upper_exclusive)
             )
-            if not window_entries:
-                continue
+            if window_entries:
+                window_entries_by_bssid[bssid] = window_entries
+        frames_by_bssid = _frames_by_bssid(
+            frames,
+            tuple(window_entries_by_bssid),
+        )
+        states: list[BssidState] = []
+        for bssid, window_entries in window_entries_by_bssid.items():
             latest = window_entries[-1][2]
             rssi_values = tuple(
                 entry[2].rssi_dbm
@@ -385,8 +403,11 @@ class Analyzer:
                 for frame in bssid_frames
                 if frame.retry_flag is not None
             )
+            retry_eligible_frames = tuple(
+                frame for frame in bssid_frames if frame.retry_eligible
+            )
             retry_frame_count = sum(
-                frame.retry_flag is True for frame in retry_observations
+                frame.retry_flag is True for frame in retry_eligible_frames
             )
             states.append(
                 BssidState(
@@ -415,8 +436,7 @@ class Analyzer:
                     window_retry_frame_count=retry_frame_count,
                     window_retry_percent=_percentage(
                         retry_frame_count,
-                        len(bssid_frames),
-                        available=bool(retry_observations),
+                        len(retry_eligible_frames),
                     ),
                     window_beacon_rate_percent=_beacon_rate_percent(
                         beacon_count=len(window_entries),
@@ -517,26 +537,81 @@ def _top_station_bssid(states: tuple[BssidState, ...]) -> Optional[str]:
     ).bssid
 
 
-def _top_retry_bssid(
-    states: tuple[RetryBssidState, ...],
+def select_retry_bssid(
+    retry_states: tuple[RetryBssidState, ...],
+    beacon_states: tuple[BssidState, ...],
+    current_bssid: Optional[str],
 ) -> Optional[str]:
+    """Select the retry footer source without using frame timing."""
     candidates = tuple(
-        state for state in states if state.window_retry_percent is not None
+        state
+        for state in retry_states
+        if state.window_retry_frame_count > 0
+        and state.window_retry_percent is not None
     )
     if not candidates:
-        return None
-    return min(
+        return _strongest_signal_bssid(beacon_states, current_bssid)
+
+    highest = max(
         candidates,
         key=lambda state: (
-            -(
-                state.window_retry_percent
-                if state.window_retry_percent is not None
-                else -1.0
-            ),
-            -state.window_retry_observed_frame_count,
+            state.window_retry_frame_count
+            / state.retry_eligible_frame_count
+        ),
+    )
+    finalists = tuple(
+        state
+        for state in candidates
+        if (
+            state.window_retry_frame_count
+            * highest.retry_eligible_frame_count
+            == highest.window_retry_frame_count
+            * state.retry_eligible_frame_count
+        )
+    )
+    if current_bssid is not None and any(
+        state.bssid == current_bssid for state in finalists
+    ):
+        return current_bssid
+
+    return min(
+        finalists,
+        key=lambda state: (
+            -(state.rssi_dbm if state.rssi_dbm is not None else -200),
             state.bssid,
         ),
     ).bssid
+
+
+def _strongest_signal_bssid(
+    states: tuple[BssidState, ...],
+    current_bssid: Optional[str],
+) -> Optional[str]:
+    if not states:
+        return None
+    with_rssi = tuple(
+        state for state in states if state.peak_rssi_dbm is not None
+    )
+    if not with_rssi:
+        if current_bssid is not None and any(
+            state.bssid == current_bssid for state in states
+        ):
+            return current_bssid
+        return min(state.bssid for state in states)
+
+    strongest_rssi = max(
+        state.peak_rssi_dbm
+        for state in with_rssi
+        if state.peak_rssi_dbm is not None
+    )
+    finalists = tuple(
+        state for state in with_rssi if state.peak_rssi_dbm == strongest_rssi
+    )
+    if current_bssid is not None and any(
+        state.bssid == current_bssid for state in finalists
+    ):
+        return current_bssid
+    return min(state.bssid for state in finalists)
 
 
 def _stats_from_states(
@@ -545,7 +620,7 @@ def _stats_from_states(
     selected_bssid: Optional[str],
     local_cu_percent: Optional[float],
     frames: tuple[FrameRecord, ...],
-    retry_states: tuple[RetryBssidState, ...],
+    retry_bssid: Optional[str],
 ) -> SecondStats:
     selected = next(
         (state for state in states if state.bssid == selected_bssid),
@@ -554,8 +629,11 @@ def _stats_from_states(
     retry_observations = tuple(
         frame for frame in frames if frame.retry_flag is not None
     )
+    retry_eligible_frames = tuple(
+        frame for frame in frames if frame.retry_eligible
+    )
     retry_frame_count = sum(
-        frame.retry_flag is True for frame in retry_observations
+        frame.retry_flag is True for frame in retry_eligible_frames
     )
     return SecondStats(
         second=second,
@@ -586,18 +664,18 @@ def _stats_from_states(
         ),
         received_frame_count=len(frames),
         retry_observed_frame_count=len(retry_observations),
+        retry_eligible_frame_count=len(retry_eligible_frames),
         retry_frame_count=retry_frame_count,
         retry_percent=_percentage(
             retry_frame_count,
-            len(frames),
-            available=bool(retry_observations),
+            len(retry_eligible_frames),
         ),
         selected_beacon_rate_percent=(
             selected.window_beacon_rate_percent
             if selected is not None
             else None
         ),
-        top_retry_bssid=_top_retry_bssid(retry_states),
+        top_retry_bssid=retry_bssid,
     )
 
 
@@ -605,19 +683,20 @@ def _retry_states_from_frames(
     frames: tuple[FrameRecord, ...],
     beacon_states: tuple[BssidState, ...],
 ) -> tuple[RetryBssidState, ...]:
-    frames_by_bssid: dict[str, list[FrameRecord]] = {}
-    for frame in frames:
-        if frame.bssid is not None:
-            frames_by_bssid.setdefault(frame.bssid, []).append(frame)
     beacon_by_bssid = {state.bssid: state for state in beacon_states}
+    frames_by_bssid = _frames_by_bssid(frames, tuple(beacon_by_bssid))
 
     states: list[RetryBssidState] = []
-    for bssid, bssid_frames in frames_by_bssid.items():
+    for bssid in sorted(set(beacon_by_bssid) | set(frames_by_bssid)):
+        bssid_frames = frames_by_bssid.get(bssid, [])
         retry_observations = tuple(
             frame for frame in bssid_frames if frame.retry_flag is not None
         )
+        retry_eligible_frames = tuple(
+            frame for frame in bssid_frames if frame.retry_eligible
+        )
         retry_frame_count = sum(
-            frame.retry_flag is True for frame in retry_observations
+            frame.retry_flag is True for frame in retry_eligible_frames
         )
         beacon_state = beacon_by_bssid.get(bssid)
         states.append(
@@ -631,24 +710,60 @@ def _retry_states_from_frames(
                 ),
                 window_frame_count=len(bssid_frames),
                 window_retry_observed_frame_count=len(retry_observations),
+                retry_eligible_frame_count=len(retry_eligible_frames),
                 window_retry_frame_count=retry_frame_count,
                 window_retry_percent=_percentage(
                     retry_frame_count,
-                    len(bssid_frames),
-                    available=bool(retry_observations),
+                    len(retry_eligible_frames),
                 ),
             )
         )
     return tuple(sorted(states, key=lambda state: state.bssid))
 
 
-def _percentage(
-    numerator: int,
-    denominator: int,
-    *,
-    available: bool = True,
-) -> Optional[float]:
-    if not available or denominator <= 0:
+def _frames_for_second(
+    frames: tuple[FrameRecord, ...],
+    second: int,
+) -> tuple[FrameRecord, ...]:
+    return tuple(
+        frame
+        for frame in frames
+        if second <= frame.timestamp < second + 1
+    )
+
+
+def _frames_by_bssid(
+    frames: tuple[FrameRecord, ...],
+    known_bssids: tuple[str, ...],
+) -> dict[str, list[FrameRecord]]:
+    grouped: dict[str, list[FrameRecord]] = {}
+    known_by_address = {
+        _canonical_address(bssid): bssid for bssid in known_bssids
+    }
+    for frame in frames:
+        bssid = _associated_bssid(frame, known_by_address)
+        if bssid is not None:
+            grouped.setdefault(bssid, []).append(frame)
+    return grouped
+
+
+def _associated_bssid(
+    frame: FrameRecord,
+    known_by_address: dict[str, str],
+) -> Optional[str]:
+    for address in frame.mac_addresses:
+        known_bssid = known_by_address.get(_canonical_address(address))
+        if known_bssid is not None:
+            return known_bssid
+    return frame.bssid
+
+
+def _canonical_address(address: str) -> str:
+    return address.strip().lower()
+
+
+def _percentage(numerator: int, denominator: int) -> Optional[float]:
+    if denominator <= 0:
         return None
     return numerator / denominator * 100
 

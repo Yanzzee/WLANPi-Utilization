@@ -87,6 +87,10 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         "wlan.fc.subtype",
         "wlan.fc.retry",
         "wlan.bssid",
+        "wlan.ta",
+        "wlan.ra",
+        "wlan.sa",
+        "wlan.da",
         "wlan.ssid",
         "wlan.qbss.cu",
         "wlan.qbss.scount",
@@ -187,9 +191,10 @@ def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
     )
     assert stats_rows[0]["unique_bssid_count"] == "1"
     assert stats_rows[0]["selected_qbss_cu_percent"] == "25.10"
-    assert stats_rows[0]["received_frame_count"] == "2"
+    assert stats_rows[0]["received_frame_count"] == "1"
+    assert stats_rows[0]["retry_eligible_frame_count"] == "0"
     assert stats_rows[0]["retry_frame_count"] == "0"
-    assert stats_rows[0]["retry_percent"] == "0.00"
+    assert stats_rows[0]["retry_percent"] == ""
     assert stats_rows[0]["local_cu_percent"] == ""
 
     beacons = [
@@ -341,8 +346,8 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
 class _FakeTsharkProcess:
     def __init__(self) -> None:
         self.stdout = io.StringIO(
-            "1000.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\tAlpha\t128\t2\t0\t-45\t256\t100\n"
-            "1001.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\tAlpha\t64\t3\t0\t-44\t256\t100\n"
+            "1000.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\tAlpha\t128\t2\t0\t-45\t256\t100\n"
+            "1001.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\tAlpha\t64\t3\t0\t-44\t256\t100\n"
         )
         self.stderr = io.StringIO("")
 

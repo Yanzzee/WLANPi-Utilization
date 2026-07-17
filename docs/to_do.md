@@ -44,3 +44,5 @@ Features & changes
 16. change the channel screen label to "Utilization"
 17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? 
         consider how to tie what metric is used to select the displayed BSSID, likely color
+18. additional graph/screen - noise
+        from adapter

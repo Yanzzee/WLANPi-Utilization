@@ -83,6 +83,10 @@ Suggested fields:
 * frame_type
 * subtype
 * retry_flag
+* transmitter address (TA)
+* receiver address (RA)
+* source address (SA)
+* destination address (DA)
 * frame_len
 * seq_ctrl if available
 * beacon_interval if available
@@ -295,25 +299,41 @@ Display styling
 
 Screen 5: Retry percentage
 
-Show retries as a percentage of total frames received on the channel.
+Show retries as a percentage of retry-eligible frames received on the channel.
 
 Recommended behavior:
 
 * normalize all received 802.11 frame headers through the existing single
   capture and analyzer pipeline
-* compute retry percentage as Retry-bit frames divided by total received frames
-  in the rolling window; expose the metric as unavailable when no Retry bits can
-  be read
+* bucket retry metrics into independent one-second samples; `RET` and each graph
+  column are the retry percentage for that second, while the graph retains the
+  latest two minutes of those samples
+* compute each sample as frames with the Retry bit set divided by all
+  retry-eligible frames received in that second
+* treat unicast data frames and retry-capable unicast management frames as
+  eligible; exclude beacons, probe requests, Action No Ack, group-addressed
+  frames, control frames, extension frames, and frames without a readable Retry
+  bit
+* count every received retry transmission independently, including multiple
+  retry transmissions of the same original frame; do not deduplicate retries
 * keep beacon contents authoritative only for beacon-derived fields, while
-  allowing all frame types to contribute to retry counts
+  allowing eligible non-beacon frames to contribute to retry counts
+* associate a frame with a known BSSID when the BSSID occurs in `wlan.bssid`,
+  transmitter address (`wlan.ta`), receiver address (`wlan.ra`), source address
+  (`wlan.sa`), or destination address (`wlan.da`)
 * show frequency and `Retries` on the top line
 * show `RET`, `AVG`, and `MAX` percentages on the second line
-* graph the rolling two-minute retry percentage on a fixed 0–100% scale
+* render a nonzero percentage below 1% as `<1%` so whole-number display
+  rounding does not make measurable retry traffic look like zero
+* graph the two-minute history of one-second retry percentages on a fixed
+  0–100% scale
 * display the beacon-derived SSID and RSSI for the BSSID with the highest
-  per-BSSID retry rate; choose retry-rate ties by frame sample count and then
-  BSSID, never timing
+  one-second retry percentage
+* if multiple BSSIDs tie for the highest retry percentage, keep displaying the
+  previous retry-screen BSSID; do not use frame timing as a tie-breaker
+* if no retries occurred in the second, display the strongest-RSSI beacon BSSID
 * retain beacon interval and expose the selected strongest-signal BSSID's
-  observed beacon rate as a percentage of expected when available
+  observed beacon rate as a percentage of expected when available (separate graph)
 * preserve a gap/unavailable value when capture input lacks retry or beacon
   interval fields
 

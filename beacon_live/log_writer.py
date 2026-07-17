@@ -27,6 +27,7 @@ STATS_CSV_FIELDS = [
     "selected_qbss_rssi_dbm",
     "received_frame_count",
     "retry_observed_frame_count",
+    "retry_eligible_frame_count",
     "retry_frame_count",
     "retry_percent",
     "selected_beacon_rate_percent",
@@ -173,6 +174,7 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
         "selected_qbss_rssi_dbm": _optional_value(stats.selected_qbss_rssi_dbm),
         "received_frame_count": stats.received_frame_count,
         "retry_observed_frame_count": stats.retry_observed_frame_count,
+        "retry_eligible_frame_count": stats.retry_eligible_frame_count,
         "retry_frame_count": stats.retry_frame_count,
         "retry_percent": _format_optional_float(stats.retry_percent),
         "selected_beacon_rate_percent": _format_optional_float(

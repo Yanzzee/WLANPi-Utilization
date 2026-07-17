@@ -171,6 +171,7 @@ def test_launch_failure_is_reported_without_leaving_session(
         ("2484MHz Admission", "ADC 99% AVG 99% MIN 99%"),
         ("2484MHz Stations", "SUM 999 MAX 999 TOP 999"),
         ("2484MHz Retries", "RET 99% AVG 99% MAX 99%"),
+        ("2484MHz Retries", "RET <1% AVG <1% MAX <1%"),
     ],
 )
 def test_all_screen_text_allows_ten_pixel_scanner_font(

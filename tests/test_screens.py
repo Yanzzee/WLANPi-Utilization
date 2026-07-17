@@ -14,6 +14,7 @@ from beacon_live.screens import RetryScreen
 from beacon_live.screens import STATION_GRAPH_MAXIMUM
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 from beacon_live.screens import TotalStationCountScreen
+from beacon_live.screens import _retry_percent
 
 
 def test_screen_navigation_wraps_and_debounces_without_changing_snapshot() -> None:
@@ -128,14 +129,20 @@ def test_retry_screen_uses_shared_history_and_highest_retry_bssid() -> None:
 
     assert view.title == "Retry Percentage"
     assert view.metadata_tokens == ("Retries",)
-    assert view.summary == "RET 43% AVG 51% MAX 60%"
+    assert view.summary == "RET 50% AVG 65% MAX 80%"
+    assert view.graph_label == "One-second retry percentage"
     assert view.graph_maximum == 100
     assert view.identity.ssid == "Bravo"
     assert view.identity.bssid == "bb"
     assert [point.second for point in view.graph_points] == [1000, 1001]
     assert [point.value for point in view.graph_points] == pytest.approx(
-        [60.0, 3 / 7 * 100]
+        [80.0, 50.0]
     )
+
+
+def test_retry_screen_distinguishes_sub_one_percent_from_zero() -> None:
+    assert _retry_percent(0.0) == "0"
+    assert _retry_percent(0.4) == "<1"
 
 
 def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:
@@ -211,12 +218,14 @@ def _retry_analyzer_with_history() -> Analyzer:
     analyzer = Analyzer()
     analyzer.ingest(_retry_beacon(1000.0, "aa", "Alpha", -35))
     analyzer.ingest(_retry_frame(1000.1, "aa", True))
-    analyzer.ingest(_retry_beacon(1000.2, "bb", "Bravo", -60))
-    analyzer.ingest(_retry_frame(1000.3, "bb", True))
+    analyzer.ingest(_retry_frame(1000.2, "aa", False))
+    analyzer.ingest(_retry_beacon(1000.3, "bb", "Bravo", -60))
     analyzer.ingest(_retry_frame(1000.4, "bb", True))
+    analyzer.ingest(_retry_frame(1000.5, "bb", True))
+    analyzer.ingest(_retry_frame(1000.6, "bb", True))
     analyzer.advance(1001, None)
     analyzer.ingest(_retry_frame(1001.1, "aa", False))
-    analyzer.ingest(_retry_frame(1001.2, "bb", False))
+    analyzer.ingest(_retry_frame(1001.2, "bb", True))
     analyzer.advance(1002, None)
     return analyzer
 
