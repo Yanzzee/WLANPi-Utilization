@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
+import pytest
+
 from beacon_live.analyzer import Analyzer
 from beacon_live.lcd_dashboard import GRAPH_HEIGHT
 from beacon_live.lcd_dashboard import GRAPH_WIDTH
@@ -9,10 +11,12 @@ from beacon_live.lcd_dashboard import GRAPH_X
 from beacon_live.lcd_dashboard import GRAPH_Y
 from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _CU_GRAPH
+from beacon_live.lcd_dashboard import _OVERFLOW_GRAPH
 from beacon_live.lcd_dashboard import _format_station_count
 from beacon_live.lcd_dashboard import _raw_to_graph_height
 from beacon_live.models import BeaconRecord
 from beacon_live.models import MetricsSnapshot
+from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.models import SecondStats
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
@@ -201,9 +205,12 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
 
     assert dashboard.navigate_down(now=1.0)
     assert dashboard.active_screen_id == ADMISSION_CAPACITY_SCREEN_ID
-    assert dashboard.text_lines[1] == "ADC 200 CU 50%"
+    assert dashboard.text_lines[1] == "ADC 80% AVG 45% MIN 10%"
     assert dashboard.text_lines[2] == "Alpha"
     assert [second for second, _ in dashboard.graph_data] == [1000, 1001]
+    assert [value for _, value in dashboard.graph_data] == pytest.approx(
+        [10.0, 80.0], abs=0.01
+    )
 
     assert dashboard.navigate_down(now=1.3)
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
@@ -212,6 +219,32 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.text_lines[2] == "Bravo"
     assert dashboard.graph_data == ((1000, 3), (1001, 15))
     assert dashboard.snapshot is snapshot
+
+
+def test_total_station_graph_truncates_over_100_and_colors_overflow_red(
+    tmp_path: Path,
+) -> None:
+    dashboard = LcdDashboard(
+        tmp_path / "display.ppm",
+        band="5",
+        channel="36",
+    )
+    dashboard.update(
+        _snapshot(
+            _stats(1000, 25.0, 64, station_count=80),
+            _stats(1001, 50.0, 128, station_count=150),
+        )
+    )
+    dashboard.set_active_screen(2)
+
+    pixel_data = dashboard.render().split(b"\n", 3)[3]
+    latest_x = GRAPH_X + GRAPH_WIDTH - 1
+
+    assert dashboard.graph_data == ((1000, 80), (1001, 150))
+    assert _pixel(pixel_data, latest_x, GRAPH_Y) == _OVERFLOW_GRAPH
+    assert _pixel(pixel_data, latest_x, GRAPH_Y + GRAPH_HEIGHT - 1) == (
+        _OVERFLOW_GRAPH
+    )
 
 
 def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
@@ -241,6 +274,7 @@ def _stats(
     *,
     station_count: int = 12,
     bssid_station_count: Optional[int] = None,
+    admission_capacity: Optional[int] = None,
 ) -> SecondStats:
     return SecondStats(
         second=second,
@@ -256,6 +290,7 @@ def _stats(
             station_count if bssid_station_count is None else bssid_station_count
         ),
         selected_qbss_strongest_rssi_dbm=-45,
+        selected_qbss_admission_capacity=admission_capacity,
     )
 
 
@@ -266,10 +301,40 @@ def _pixel(payload: bytes, x: int, y: int) -> tuple[int, int, int]:
 
 def _phase_two_snapshot() -> MetricsSnapshot:
     analyzer = Analyzer()
-    analyzer.ingest(_phase_two_record(1000.1, "Alpha", "aa", 64, 3, 100, -40))
+    analyzer.ingest(
+        _phase_two_record(
+            1000.1,
+            "Alpha",
+            "aa",
+            64,
+            3,
+            round(QBSS_ADMISSION_CAPACITY_MAX * 0.10),
+            -40,
+        )
+    )
     analyzer.advance(1001, None)
-    analyzer.ingest(_phase_two_record(1001.1, "Alpha", "aa", 128, 5, 200, -40))
-    analyzer.ingest(_phase_two_record(1001.2, "Bravo", "bb", 32, 10, 300, -60))
+    analyzer.ingest(
+        _phase_two_record(
+            1001.1,
+            "Alpha",
+            "aa",
+            128,
+            5,
+            round(QBSS_ADMISSION_CAPACITY_MAX * 0.80),
+            -40,
+        )
+    )
+    analyzer.ingest(
+        _phase_two_record(
+            1001.2,
+            "Bravo",
+            "bb",
+            32,
+            10,
+            round(QBSS_ADMISSION_CAPACITY_MAX * 0.75),
+            -60,
+        )
+    )
     analyzer.advance(1002, None)
     return analyzer.snapshot
 

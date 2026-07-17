@@ -404,11 +404,6 @@ def _top_station_bssid(states: tuple[BssidState, ...]) -> Optional[str]:
         candidates,
         key=lambda state: (
             -(state.latest_station_count or 0),
-            -(
-                state.peak_rssi_dbm
-                if state.peak_rssi_dbm is not None
-                else -200
-            ),
             state.bssid,
         ),
     ).bssid
@@ -447,5 +442,8 @@ def _stats_from_states(
         ),
         selected_qbss_strongest_rssi_dbm=(
             selected.peak_rssi_dbm if selected is not None else None
+        ),
+        selected_qbss_admission_capacity=(
+            selected.latest_admission_capacity if selected is not None else None
         ),
     )

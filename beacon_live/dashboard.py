@@ -224,7 +224,7 @@ def _bar_for_percent(value: float) -> str:
     return _BAR_LEVELS[index]
 
 
-def _bar_for_value(value: int, maximum: int) -> str:
+def _bar_for_value(value: float, maximum: float) -> str:
     if maximum <= 0:
         return _BAR_LEVELS[0]
     return _bar_for_percent(value / maximum * 100)

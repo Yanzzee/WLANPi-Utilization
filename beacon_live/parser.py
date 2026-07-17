@@ -3,6 +3,7 @@
 from typing import Iterable, Iterator, Optional, Union
 
 from beacon_live.models import BeaconRecord
+from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 
 TSHARK_FIELD_NAMES = (
     "frame.time_epoch",
@@ -52,7 +53,11 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
     if qbss_station_count is _MALFORMED:
         return None
 
-    qbss_admission_capacity = _parse_optional_int(adc_text, minimum=0)
+    qbss_admission_capacity = _parse_optional_int(
+        adc_text,
+        minimum=0,
+        maximum=QBSS_ADMISSION_CAPACITY_MAX,
+    )
     if qbss_admission_capacity is _MALFORMED:
         return None
 

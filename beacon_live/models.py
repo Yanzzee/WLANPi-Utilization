@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+QBSS_ADMISSION_CAPACITY_MAX = 65535
+
+
 @dataclass(frozen=True)
 class BeaconRecord:
     timestamp: float
@@ -41,6 +44,7 @@ class SecondStats:
     selected_qbss_cu_raw: Optional[int] = None
     selected_qbss_station_count: Optional[int] = None
     selected_qbss_strongest_rssi_dbm: Optional[int] = None
+    selected_qbss_admission_capacity: Optional[int] = None
 
 
 @dataclass(frozen=True)

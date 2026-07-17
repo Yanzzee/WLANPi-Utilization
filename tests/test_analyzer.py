@@ -112,6 +112,19 @@ def test_selection_does_not_use_beacon_timing_as_a_tie_breaker() -> None:
     assert select_bssid(analyzer.snapshot.bssids, None) == "bb"
 
 
+def test_top_station_bssid_does_not_use_rssi_as_a_tie_breaker() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(1000.1, bssid="aa", station_count=10, rssi_dbm=-80)
+    )
+    analyzer.ingest(
+        _record(1000.2, bssid="bb", station_count=10, rssi_dbm=-30)
+    )
+
+    assert analyzer.snapshot.selected_bssid == "bb"
+    assert analyzer.snapshot.top_station_bssid == "aa"
+
+
 def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
     analyzer = Analyzer()
     analyzer.ingest(
@@ -122,6 +135,7 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
             cu_percent=25.0,
             cu_raw=64,
             station_count=7,
+            admission_capacity=32768,
             rssi_dbm=-45,
         )
     )
@@ -134,10 +148,12 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
     assert snapshot.selected.latest_beacon_record.ssid == "Alpha"
     assert snapshot.current.selected_qbss_cu_raw == 64
     assert snapshot.current.selected_qbss_station_count == 7
+    assert snapshot.current.selected_qbss_admission_capacity == 32768
     assert snapshot.current.local_cu_percent == 12.5
     assert len(snapshot.history) == 1
     assert snapshot.history[0].selected_qbss_bssid == "aa"
     assert snapshot.history[0].selected_qbss_cu_percent == 25.0
+    assert snapshot.history[0].selected_qbss_admission_capacity == 32768
 
     with pytest.raises(FrozenInstanceError):
         snapshot.selected_bssid = "bb"  # type: ignore[misc]
@@ -151,6 +167,7 @@ def _record(
     cu_percent: Optional[float] = 20.0,
     cu_raw: Optional[int] = None,
     station_count: Optional[int] = 1,
+    admission_capacity: Optional[int] = 0,
     rssi_dbm: Optional[int] = -50,
 ) -> BeaconRecord:
     return BeaconRecord(
@@ -160,6 +177,6 @@ def _record(
         qbss_cu_raw=cu_raw,
         qbss_cu_percent=cu_percent,
         qbss_station_count=station_count,
-        qbss_admission_capacity=0,
+        qbss_admission_capacity=admission_capacity,
         rssi_dbm=rssi_dbm,
     )

@@ -7,6 +7,7 @@ from typing import Optional, Protocol, Sequence
 
 from beacon_live.models import BssidState
 from beacon_live.models import MetricsSnapshot
+from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 
 CU_SCREEN_ID = "cu"
 ADMISSION_CAPACITY_SCREEN_ID = "admission_capacity"
@@ -24,7 +25,7 @@ class DisplayIdentity:
 @dataclass(frozen=True)
 class GraphPoint:
     second: int
-    value: Optional[int]
+    value: Optional[float]
     display_value: Optional[float]
 
 
@@ -36,7 +37,7 @@ class ScreenView:
     summary: str
     graph_label: str
     graph_points: tuple[GraphPoint, ...]
-    graph_maximum: int
+    graph_maximum: float
     identity: DisplayIdentity
 
 
@@ -81,22 +82,27 @@ class AdmissionCapacityScreen:
     screen_id: str = ADMISSION_CAPACITY_SCREEN_ID
 
     def render(self, snapshot: MetricsSnapshot) -> ScreenView:
-        selected = snapshot.selected
-        admission_capacity = (
-            selected.latest_admission_capacity if selected is not None else None
+        graph_points = _admission_capacity_graph_points(snapshot)
+        values = tuple(
+            point.display_value
+            for point in graph_points
+            if point.display_value is not None
         )
-        current_cu = snapshot.current.selected_qbss_cu_percent
+        current = _admission_capacity_percent(
+            snapshot.current.selected_qbss_admission_capacity
+        )
         return ScreenView(
             screen_id=self.screen_id,
             title="Admission Capacity",
             metadata_tokens=_selected_station_metadata(snapshot),
             summary=(
-                f"ADC {_optional_int(admission_capacity)} "
-                f"CU {_whole_percent(current_cu)}%"
+                f"ADC {_whole_percent(current)}% "
+                f"AVG {_whole_percent(_mean(values))}% "
+                f"MIN {_whole_percent(min(values) if values else None)}%"
             ),
-            graph_label="Selected QBSS CU",
-            graph_points=_cu_graph_points(snapshot),
-            graph_maximum=255,
+            graph_label="Selected ADC",
+            graph_points=graph_points,
+            graph_maximum=100,
             identity=_selected_identity(snapshot),
         )
 
@@ -144,7 +150,7 @@ class TotalStationCountScreen:
             ),
             graph_label="Total QBSS station count",
             graph_points=graph_points,
-            graph_maximum=max(1, max(values) if values else 1),
+            graph_maximum=100,
             identity=_identity_from_state(
                 top_station_state,
                 unavailable_text="<No Station Counts>",
@@ -173,6 +179,30 @@ def _cu_graph_points(snapshot: MetricsSnapshot) -> tuple[GraphPoint, ...]:
             )
         )
     return tuple(points)
+
+
+def _admission_capacity_graph_points(
+    snapshot: MetricsSnapshot,
+) -> tuple[GraphPoint, ...]:
+    points: list[GraphPoint] = []
+    for stats in snapshot.history:
+        percent = _admission_capacity_percent(
+            stats.selected_qbss_admission_capacity
+        )
+        points.append(
+            GraphPoint(
+                second=stats.second,
+                value=percent,
+                display_value=percent,
+            )
+        )
+    return tuple(points)
+
+
+def _admission_capacity_percent(value: Optional[int]) -> Optional[float]:
+    if value is None:
+        return None
+    return value / QBSS_ADMISSION_CAPACITY_MAX * 100
 
 
 def _selected_station_metadata(snapshot: MetricsSnapshot) -> tuple[str, ...]:
@@ -233,10 +263,6 @@ def _identity_from_state(
 
 def _mean(values: Sequence[float]) -> Optional[float]:
     return sum(values) / len(values) if values else None
-
-
-def _optional_int(value: Optional[int]) -> str:
-    return "--" if value is None else str(value)
 
 
 def _station_count(value: Optional[int]) -> str:

@@ -240,8 +240,10 @@ Show admission capacity instead for the selected BSSID.
 Recommended behavior:
 
 * use the same selected BSSID logic as CU
-* display admission capacity from the latest beacon in the window
-* show a two-minute graph of CU for the selected BSSID(s)
+* display admission capacity as a percentage of the maximum 16-bit ADC value
+  from the latest beacon in the window
+* show ADC, average ADC, and minimum ADC percentages without CU values
+* show a two-minute graph of ADC percentage for the selected BSSID(s)
 * indicate when the selected BSSID changed with a vertical line in the graph
 * keep the same graph time base as the CU screen
 
@@ -272,7 +274,11 @@ Recommended behavior:
 * make the total station count the primary value
 * optionally swap the CU/SUM layout if that improves readability
 * display the SSID/BSSID with the highest station count
-* graph the two-minute trend
+* graph the two-minute trend on a fixed 0–100 scale
+* truncate graph bars above 100 at the graph ceiling and distinguish them as
+  overflow bars
+* label the active BSSID count as `BSS` and the highest advertised station
+  count as `TOP`
 
 Screen 5: Retry percentage
 

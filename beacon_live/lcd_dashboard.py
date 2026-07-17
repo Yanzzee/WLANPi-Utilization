@@ -26,6 +26,7 @@ _DIM = (48, 64, 64)
 _CU_GRAPH = (0, 220, 120)
 _ADMISSION_GRAPH = (0, 160, 255)
 _STATION_GRAPH = (255, 190, 0)
+_OVERFLOW_GRAPH = (255, 0, 0)
 _GRAPH_COLORS = {
     CU_SCREEN_ID: _CU_GRAPH,
     ADMISSION_CAPACITY_SCREEN_ID: _ADMISSION_GRAPH,
@@ -88,7 +89,7 @@ class LcdDashboard:
         )
 
     @property
-    def graph_data(self) -> tuple[tuple[int, Optional[int]], ...]:
+    def graph_data(self) -> tuple[tuple[int, Optional[float]], ...]:
         """Return the active screen's values on the shared graph time base."""
         return tuple(
             (point.second, point.value)
@@ -157,11 +158,17 @@ class LcdDashboard:
             if value is None:
                 continue
             height = _value_to_graph_height(value, view.graph_maximum)
+            bar_color = (
+                _OVERFLOW_GRAPH
+                if view.screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+                and value > view.graph_maximum
+                else graph_color
+            )
             canvas.vertical_line(
                 start_x + offset,
                 baseline - height + 1,
                 baseline,
-                graph_color,
+                bar_color,
             )
 
         return canvas.ppm()
@@ -214,9 +221,9 @@ def _raw_to_graph_height(raw: int) -> int:
     return bounded // 4 + 1
 
 
-def _value_to_graph_height(value: int, maximum: int) -> int:
+def _value_to_graph_height(value: float, maximum: float) -> int:
     if maximum == 255:
-        return _raw_to_graph_height(value)
+        return _raw_to_graph_height(round(value))
     if maximum <= 0:
         return 1
     bounded = min(maximum, max(0, value))
