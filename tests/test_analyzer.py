@@ -135,7 +135,7 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
             cu_percent=25.0,
             cu_raw=64,
             station_count=7,
-            admission_capacity=32768,
+            admission_capacity=25000,
             rssi_dbm=-45,
         )
     )
@@ -148,12 +148,12 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
     assert snapshot.selected.latest_beacon_record.ssid == "Alpha"
     assert snapshot.current.selected_qbss_cu_raw == 64
     assert snapshot.current.selected_qbss_station_count == 7
-    assert snapshot.current.selected_qbss_admission_capacity == 32768
+    assert snapshot.current.selected_qbss_admission_capacity == 25000
     assert snapshot.current.local_cu_percent == 12.5
     assert len(snapshot.history) == 1
     assert snapshot.history[0].selected_qbss_bssid == "aa"
     assert snapshot.history[0].selected_qbss_cu_percent == 25.0
-    assert snapshot.history[0].selected_qbss_admission_capacity == 32768
+    assert snapshot.history[0].selected_qbss_admission_capacity == 25000
 
     with pytest.raises(FrozenInstanceError):
         snapshot.selected_bssid = "bb"  # type: ignore[misc]

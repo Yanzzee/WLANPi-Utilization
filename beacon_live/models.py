@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-QBSS_ADMISSION_CAPACITY_MAX = 65535
+# Available Admission Capacity uses 32-microsecond units: 31,250 is 100%.
+QBSS_ADMISSION_CAPACITY_MAX = 31_250
 
 
 @dataclass(frozen=True)

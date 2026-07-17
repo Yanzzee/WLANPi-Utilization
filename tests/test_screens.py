@@ -49,6 +49,27 @@ def test_admission_capacity_uses_selected_bssid_and_shared_adc_history() -> None
     )
 
 
+def test_admission_capacity_31250_is_100_percent() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.1,
+            ssid="Alpha",
+            bssid="aa",
+            cu_raw=64,
+            station_count=3,
+            admission_capacity=QBSS_ADMISSION_CAPACITY_MAX,
+            rssi_dbm=-40,
+        )
+    )
+    analyzer.advance(1001, None)
+
+    view = AdmissionCapacityScreen().render(analyzer.snapshot)
+
+    assert view.summary == "ADC 100% AVG 100% MIN 100%"
+    assert [point.value for point in view.graph_points] == [100.0]
+
+
 def test_total_station_count_uses_shared_history_and_highest_station_bssid() -> None:
     snapshot = _analyzer_with_history().snapshot
 
@@ -56,7 +77,7 @@ def test_total_station_count_uses_shared_history_and_highest_station_bssid() -> 
 
     assert view.title == "Total Station Count"
     assert view.summary == "SUM 15 AVG 9 MAX 15"
-    assert view.metadata_tokens == ("BSS", "2", "TOP", "10")
+    assert view.metadata_tokens == ("TOP STA", "10")
     assert view.graph_maximum == 100
     assert snapshot.selected_bssid == "aa"
     assert view.identity.ssid == "Bravo"
@@ -74,7 +95,7 @@ def test_total_station_graph_keeps_fixed_scale_above_100() -> None:
             bssid="aa",
             cu_raw=64,
             station_count=150,
-            admission_capacity=32768,
+            admission_capacity=15625,
             rssi_dbm=-40,
         )
     )
@@ -100,7 +121,7 @@ def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:
             bssid="aa",
             cu_raw=191,
             station_count=6,
-            admission_capacity=49151,
+            admission_capacity=23438,
             rssi_dbm=-40,
         )
     )

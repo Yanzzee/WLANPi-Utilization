@@ -21,6 +21,9 @@ LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = "wlan0"
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
 
+_WHITE = (255, 255, 255)
+_DEFAULT_METRIC_COLOR = (0, 220, 120)
+
 _24_GHZ_CHANNELS = tuple(range(1, 15))
 _5_GHZ_CHANNELS = (
     36,
@@ -308,15 +311,16 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
     draw = ImageDraw.Draw(frame)
     font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
     metadata = _select_metadata(draw, state, font)
-    _draw_compact_text(draw, 1, 3, metadata, font, (255, 255, 255), gap=3)
-    _draw_compact_text(
+    _draw_compact_text(draw, 1, 3, metadata, font, _WHITE, gap=3)
+    _draw_metric_summary(
         draw,
         2,
         17,
         state["summary"],
         font,
-        (255, 220, 0),
-        gap=4,
+        state["metric_color"],
+        metric_token_count=state["summary_metric_token_count"],
+        gap=3,
     )
     _draw_left_right(
         draw,
@@ -325,7 +329,7 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         state["ssid"],
         state["rssi"],
         font,
-        (255, 255, 255),
+        _WHITE,
         truncate_left=True,
     )
     _draw_left_right(
@@ -335,7 +339,7 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         state["bssid"],
         state["channel"],
         font,
-        (255, 255, 255),
+        _WHITE,
         truncate_left=False,
     )
     g_vars["drawing_in_progress"] = True
@@ -353,6 +357,8 @@ def _read_display_state(path: Path) -> dict[str, object]:
         "metadata": "STA -- SUM --",
         "metadata_candidates": ["STA -- SUM --"],
         "summary": "CU --% AVG --% MAX --%",
+        "summary_metric_token_count": 2,
+        "metric_color": _DEFAULT_METRIC_COLOR,
         "ssid": "--",
         "rssi": "--",
         "bssid": "--",
@@ -362,16 +368,47 @@ def _read_display_state(path: Path) -> dict[str, object]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeError):
         return defaults
+    string_keys = tuple(
+        key
+        for key in defaults
+        if key
+        not in {
+            "metadata_candidates",
+            "summary_metric_token_count",
+            "metric_color",
+        }
+    )
     state: dict[str, object] = {
         key: str(payload.get(key, default))
         for key, default in defaults.items()
-        if key != "metadata_candidates"
+        if key in string_keys
     }
     candidates = payload.get("metadata_candidates", defaults["metadata_candidates"])
     if not isinstance(candidates, list):
         candidates = defaults["metadata_candidates"]
     state["metadata_candidates"] = [str(value) for value in candidates]
+    state["summary_metric_token_count"] = _read_metric_token_count(
+        payload.get("summary_metric_token_count")
+    )
+    state["metric_color"] = _read_metric_color(payload.get("metric_color"))
     return state
+
+
+def _read_metric_token_count(value: object) -> int:
+    return value if isinstance(value, int) and value >= 0 else 2
+
+
+def _read_metric_color(value: object) -> tuple[int, int, int]:
+    if (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(
+            isinstance(component, int) and 0 <= component <= 255
+            for component in value
+        )
+    ):
+        return tuple(value)  # type: ignore[return-value]
+    return _DEFAULT_METRIC_COLOR
 
 
 def _screen_control_path(frame_path: Path) -> Path:
@@ -405,7 +442,7 @@ def _select_scanner_font(draw, state, smart_font, image_font_module):
 
 def _font_fits(draw, state: dict[str, object], font) -> bool:
     width = 124
-    if _compact_text_width(draw, str(state["summary"]), font, gap=4) > width:
+    if _compact_text_width(draw, str(state["summary"]), font, gap=3) > width:
         return False
     if not any(
         _compact_text_width(draw, candidate, font, gap=3) <= 126
@@ -442,6 +479,41 @@ def _draw_compact_text(
     current_x = x
     for token in text.split():
         _draw_text_top(draw, current_x, y, token, font, color)
+        current_x += _text_width(draw, token, font) + gap
+
+
+def _draw_metric_summary(
+    draw,
+    x: int,
+    y: int,
+    text: object,
+    font,
+    metric_color: object,
+    *,
+    metric_token_count: object,
+    gap: int,
+) -> None:
+    """Draw the graph-associated metric in color and secondary fields white."""
+    color = (
+        metric_color
+        if isinstance(metric_color, tuple) and len(metric_color) == 3
+        else _DEFAULT_METRIC_COLOR
+    )
+    colored_tokens = (
+        metric_token_count
+        if isinstance(metric_token_count, int) and metric_token_count >= 0
+        else 2
+    )
+    current_x = x
+    for index, token in enumerate(str(text).split()):
+        _draw_text_top(
+            draw,
+            current_x,
+            y,
+            token,
+            font,
+            color if index < colored_tokens else _WHITE,
+        )
         current_x += _text_width(draw, token, font) + gap
 
 

@@ -136,6 +136,11 @@ class LcdDashboard:
             f"{self.frequency_mhz} {metric_fields}",
         )
 
+    @property
+    def metric_color(self) -> tuple[int, int, int]:
+        """Color shared by the active screen's graph and primary value."""
+        return _GRAPH_COLORS[self.active_screen_id]
+
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
 
@@ -187,6 +192,8 @@ class LcdDashboard:
             "metadata": metadata,
             "metadata_candidates": self.metadata_candidates,
             "summary": summary,
+            "summary_metric_token_count": 2,
+            "metric_color": self.metric_color,
             "ssid": ssid,
             "rssi": rssi,
             "bssid": bssid,

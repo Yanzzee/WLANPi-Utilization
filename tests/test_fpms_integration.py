@@ -164,19 +164,19 @@ def test_launch_failure_is_reported_without_leaving_session(
     assert "channel_utilization_session" not in g_vars
 
 
-def test_compact_header_spacing_allows_ten_pixel_scanner_font() -> None:
-    state = {
-        "metadata": "2484MHz STA 999 SUM 999",
-        "metadata_candidates": [
-            "2484MHz STA 999 SUM 999",
-            "2484 STA 999 SUM 999",
-        ],
-        "summary": "CU 99% AVG 99% MAX 99%",
-        "ssid": "Example",
-        "rssi": "-45",
-        "bssid": "aa:bb:cc:dd:ee:ff",
-        "channel": "233",
-    }
+@pytest.mark.parametrize(
+    ("metadata", "summary"),
+    [
+        ("2484MHz STA 999 SUM 999", "CU 99% AVG 99% MAX 99%"),
+        ("2484MHz STA 999 SUM 999", "ADC 99% AVG 99% MIN 99%"),
+        ("2484MHz TOP STA 999", "SUM 999 AVG 999 MAX 999"),
+    ],
+)
+def test_all_screen_text_allows_ten_pixel_scanner_font(
+    metadata: str,
+    summary: str,
+) -> None:
+    state = _font_state(metadata=metadata, summary=summary)
     smart_font = _FakeFont(size=10, path="scanner.ttf", character_width=6)
 
     selected = channel_utilization._select_scanner_font(
@@ -187,6 +187,55 @@ def test_compact_header_spacing_allows_ten_pixel_scanner_font() -> None:
     )
 
     assert selected.size == 10
+
+
+def test_three_digit_percentage_uses_nine_pixel_font_fallback() -> None:
+    state = _font_state(
+        metadata="2484MHz STA 999 SUM 999",
+        summary="ADC 100% AVG 100% MIN 100%",
+    )
+
+    selected = channel_utilization._select_scanner_font(
+        _FakeDraw(),
+        state,
+        _FakeFont(size=10, path="scanner.ttf", character_width=6),
+        _FakeImageFontModule,
+    )
+
+    assert selected.size == 9
+
+
+def test_metric_summary_colors_only_graph_associated_value() -> None:
+    draw = _FakeDraw()
+    metric_color = (0, 160, 255)
+
+    channel_utilization._draw_metric_summary(
+        draw,
+        2,
+        17,
+        "ADC 80% AVG 45% MIN 10%",
+        _FakeFont(size=10, path="scanner.ttf", character_width=6),
+        metric_color,
+        metric_token_count=2,
+        gap=3,
+    )
+
+    assert [call[0] for call in draw.text_calls] == [
+        "ADC",
+        "80%",
+        "AVG",
+        "45%",
+        "MIN",
+        "10%",
+    ]
+    assert [call[1] for call in draw.text_calls] == [
+        metric_color,
+        metric_color,
+        (255, 255, 255),
+        (255, 255, 255),
+        (255, 255, 255),
+        (255, 255, 255),
+    ]
 
 
 def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
@@ -242,6 +291,18 @@ def test_ssid_truncation_uses_ellipsis_but_keeps_right_field() -> None:
     assert len(value) * 5 <= 40
 
 
+def _font_state(*, metadata: str, summary: str) -> dict[str, object]:
+    return {
+        "metadata": metadata,
+        "metadata_candidates": [metadata],
+        "summary": summary,
+        "ssid": "Example",
+        "rssi": "-45",
+        "bssid": "aa:bb:cc:dd:ee:ff",
+        "channel": "233",
+    }
+
+
 class _FakeProcess:
     def __init__(self, command: list[str]) -> None:
         self.command = command
@@ -275,6 +336,9 @@ class _FakeFont:
 
 
 class _FakeDraw:
+    def __init__(self) -> None:
+        self.text_calls: list[tuple[str, tuple[int, int, int]]] = []
+
     def textbbox(
         self,
         position: tuple[int, int],
@@ -283,6 +347,16 @@ class _FakeDraw:
         font: _FakeFont,
     ) -> tuple[int, int, int, int]:
         return (0, 0, len(text) * font.character_width, font.size)
+
+    def text(
+        self,
+        position: tuple[float, float],
+        text: str,
+        *,
+        font: _FakeFont,
+        fill: tuple[int, int, int],
+    ) -> None:
+        self.text_calls.append((text, fill))
 
 
 class _FakeImageFontModule:

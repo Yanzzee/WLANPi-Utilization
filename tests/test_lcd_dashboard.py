@@ -10,8 +10,10 @@ from beacon_live.lcd_dashboard import GRAPH_WIDTH
 from beacon_live.lcd_dashboard import GRAPH_X
 from beacon_live.lcd_dashboard import GRAPH_Y
 from beacon_live.lcd_dashboard import LcdDashboard
+from beacon_live.lcd_dashboard import _ADMISSION_GRAPH
 from beacon_live.lcd_dashboard import _CU_GRAPH
 from beacon_live.lcd_dashboard import _OVERFLOW_GRAPH
+from beacon_live.lcd_dashboard import _STATION_GRAPH
 from beacon_live.lcd_dashboard import _format_station_count
 from beacon_live.lcd_dashboard import _raw_to_graph_height
 from beacon_live.models import BeaconRecord
@@ -45,6 +47,8 @@ def test_lcd_dashboard_writes_128_square_ppm_and_creates_directory(
         "5180MHz STA -- SUM --",
         "5180 STA -- SUM --",
     ]
+    assert state["metric_color"] == list(_CU_GRAPH)
+    assert state["summary_metric_token_count"] == 2
     assert state["channel"] == "36"
 
 
@@ -205,19 +209,28 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
 
     assert dashboard.navigate_down(now=1.0)
     assert dashboard.active_screen_id == ADMISSION_CAPACITY_SCREEN_ID
+    assert dashboard.metric_color == _ADMISSION_GRAPH
     assert dashboard.text_lines[1] == "ADC 80% AVG 45% MIN 10%"
     assert dashboard.text_lines[2] == "Alpha"
     assert [second for second, _ in dashboard.graph_data] == [1000, 1001]
     assert [value for _, value in dashboard.graph_data] == pytest.approx(
         [10.0, 80.0], abs=0.01
     )
+    admission_pixels = dashboard.render().split(b"\n", 3)[3]
+    latest_x = GRAPH_X + GRAPH_WIDTH - 1
+    baseline = GRAPH_Y + GRAPH_HEIGHT - 1
+    assert _pixel(admission_pixels, latest_x, baseline) == _ADMISSION_GRAPH
 
     assert dashboard.navigate_down(now=1.3)
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
-    assert dashboard.text_lines[0] == "5180MHz BSS 2 TOP 10"
+    assert dashboard.metric_color == _STATION_GRAPH
+    assert dashboard.text_lines[0] == "5180MHz TOP STA 10"
     assert dashboard.text_lines[1] == "SUM 15 AVG 9 MAX 15"
     assert dashboard.text_lines[2] == "Bravo"
     assert dashboard.graph_data == ((1000, 3), (1001, 15))
+    station_pixels = dashboard.render().split(b"\n", 3)[3]
+    assert _pixel(station_pixels, latest_x, baseline) == _STATION_GRAPH
+    assert len({_CU_GRAPH, _ADMISSION_GRAPH, _STATION_GRAPH}) == 3
     assert dashboard.snapshot is snapshot
 
 

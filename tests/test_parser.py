@@ -40,6 +40,15 @@ def test_parse_legacy_row_without_rssi_keeps_replay_compatibility() -> None:
     assert record.rssi_dbm is None
 
 
+def test_parse_admission_capacity_accepts_31250_as_maximum() -> None:
+    record = parse_tshark_row(
+        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\t12\t31250"
+    )
+
+    assert record is not None
+    assert record.qbss_admission_capacity == 31250
+
+
 @pytest.mark.parametrize(
     "row",
     [
@@ -49,7 +58,7 @@ def test_parse_legacy_row_without_rssi_keeps_replay_compatibility() -> None:
         "1700000000.125\tLabNet\t\t128\t12\t42",
         "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t300\t12\t42",
         "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\tbad\t42",
-        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\t12\t65536",
+        "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\t12\t31251",
         "1700000000.125\tLabNet\taa:bb:cc:dd:ee:ff\t128\t12\t42\tbad",
     ],
 )

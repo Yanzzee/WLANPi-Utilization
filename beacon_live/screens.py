@@ -138,9 +138,7 @@ class TotalStationCountScreen:
             screen_id=self.screen_id,
             title="Total Station Count",
             metadata_tokens=(
-                "BSS",
-                str(snapshot.current.unique_bssid_count),
-                "TOP",
+                "TOP STA",
                 _station_count(top_station_count),
             ),
             summary=(

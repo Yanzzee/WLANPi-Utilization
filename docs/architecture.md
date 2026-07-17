@@ -240,7 +240,7 @@ Show admission capacity instead for the selected BSSID.
 Recommended behavior:
 
 * use the same selected BSSID logic as CU
-* display admission capacity as a percentage of the maximum 16-bit ADC value
+* display admission capacity as a percentage of the maximum ADC value, 31,250,
   from the latest beacon in the window
 * show ADC, average ADC, and minimum ADC percentages without CU values
 * show a two-minute graph of ADC percentage for the selected BSSID(s)
@@ -277,8 +277,16 @@ Recommended behavior:
 * graph the two-minute trend on a fixed 0–100 scale
 * truncate graph bars above 100 at the graph ceiling and distinguish them as
   overflow bars
-* label the active BSSID count as `BSS` and the highest advertised station
-  count as `TOP`
+* label the highest advertised station count as `TOP STA`; do not show a BSSID
+  count on this screen
+* ensure `TOP STA` and the footer SSID/BSSID describe the same BSSID
+
+Display styling
+
+* use the same Scanner font for all screens and prefer size 10
+* color the current graph-associated metric to match its graph
+* render all secondary summary fields, metadata, and footer text in white
+* use a distinct graph/primary-metric color for each screen
 
 Screen 5: Retry percentage
 
