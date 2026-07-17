@@ -1,9 +1,10 @@
-"""Compatibility helpers for finite per-second beacon aggregation."""
+"""Compatibility helpers for finite per-second frame aggregation."""
 
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Union
 
 from beacon_live.analyzer import Analyzer
 from beacon_live.models import BeaconRecord
+from beacon_live.models import FrameRecord
 from beacon_live.models import SecondStats
 
 
@@ -12,7 +13,7 @@ class Aggregator(Analyzer):
 
 
 def aggregate_records(
-    records: Iterable[BeaconRecord],
+    records: Iterable[Union[BeaconRecord, FrameRecord]],
     *,
     local_cu_by_second: Optional[dict[int, Optional[float]]] = None,
 ) -> list[SecondStats]:

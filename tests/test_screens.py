@@ -2,12 +2,15 @@ import pytest
 
 from beacon_live.analyzer import Analyzer
 from beacon_live.models import BeaconRecord
+from beacon_live.models import FrameRecord
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import AdmissionCapacityScreen
 from beacon_live.screens import CU_SCREEN_ID
 from beacon_live.screens import CuScreen
+from beacon_live.screens import RETRY_SCREEN_ID
+from beacon_live.screens import RetryScreen
 from beacon_live.screens import STATION_GRAPH_MAXIMUM
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 from beacon_live.screens import TotalStationCountScreen
@@ -26,9 +29,11 @@ def test_screen_navigation_wraps_and_debounces_without_changing_snapshot() -> No
     assert manager.navigate_down(now=10.3)
     assert manager.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert manager.navigate_down(now=10.6)
+    assert manager.active_screen_id == RETRY_SCREEN_ID
+    assert manager.navigate_down(now=10.9)
     assert manager.active_screen_id == CU_SCREEN_ID
-    assert manager.navigate_up(now=10.9)
-    assert manager.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert manager.navigate_up(now=11.2)
+    assert manager.active_screen_id == RETRY_SCREEN_ID
 
     assert manager.snapshot is snapshot
     assert manager.snapshot.history is snapshot.history
@@ -110,10 +115,27 @@ def test_total_station_graph_keeps_fixed_64_count_scale() -> None:
     assert [point.value for point in view.graph_points] == [65]
 
 
-def test_cu_screen_uses_channel_top_line_label() -> None:
+def test_cu_screen_uses_utilization_top_line_label() -> None:
     view = CuScreen().render(_analyzer_with_history().snapshot)
 
-    assert view.metadata_tokens == ("Channel",)
+    assert view.metadata_tokens == ("Utilization",)
+
+
+def test_retry_screen_uses_shared_history_and_highest_retry_bssid() -> None:
+    snapshot = _retry_analyzer_with_history().snapshot
+
+    view = RetryScreen().render(snapshot)
+
+    assert view.title == "Retry Percentage"
+    assert view.metadata_tokens == ("Retries",)
+    assert view.summary == "RET 43% AVG 51% MAX 60%"
+    assert view.graph_maximum == 100
+    assert view.identity.ssid == "Bravo"
+    assert view.identity.bssid == "bb"
+    assert [point.second for point in view.graph_points] == [1000, 1001]
+    assert [point.value for point in view.graph_points] == pytest.approx(
+        [60.0, 3 / 7 * 100]
+    )
 
 
 def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:
@@ -183,6 +205,52 @@ def _analyzer_with_history() -> Analyzer:
     )
     analyzer.advance(1002, None)
     return analyzer
+
+
+def _retry_analyzer_with_history() -> Analyzer:
+    analyzer = Analyzer()
+    analyzer.ingest(_retry_beacon(1000.0, "aa", "Alpha", -35))
+    analyzer.ingest(_retry_frame(1000.1, "aa", True))
+    analyzer.ingest(_retry_beacon(1000.2, "bb", "Bravo", -60))
+    analyzer.ingest(_retry_frame(1000.3, "bb", True))
+    analyzer.ingest(_retry_frame(1000.4, "bb", True))
+    analyzer.advance(1001, None)
+    analyzer.ingest(_retry_frame(1001.1, "aa", False))
+    analyzer.ingest(_retry_frame(1001.2, "bb", False))
+    analyzer.advance(1002, None)
+    return analyzer
+
+
+def _retry_beacon(
+    timestamp: float,
+    bssid: str,
+    ssid: str,
+    rssi_dbm: int,
+) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        ssid=ssid,
+        rssi_dbm=rssi_dbm,
+        frame_type=0,
+        frame_subtype=8,
+        retry_flag=False,
+        beacon_interval_tu=100,
+        qbss_cu_raw=64,
+        qbss_cu_percent=64 / 255 * 100,
+        qbss_station_count=3,
+        qbss_admission_capacity=10_000,
+    )
+
+
+def _retry_frame(timestamp: float, bssid: str, retry: bool) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        frame_type=2,
+        frame_subtype=0,
+        retry_flag=retry,
+    )
 
 
 def _record(

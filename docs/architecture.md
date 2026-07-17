@@ -229,7 +229,7 @@ Show channel utilization for the selected BSSID.
 Recommended behavior:
 
 * display the selected BSSID identity
-* show `Channel` on the top line in the CU graph color; do not show `STA` or
+* show `Utilization` on the top line in the CU graph color; do not show `STA` or
   `SUM` on that line
 * display CU from the latest beacon of that BSSID
 * show a two-minute graph of CU for the selected BSSID(s)
@@ -299,11 +299,23 @@ Show retries as a percentage of total frames received on the channel.
 
 Recommended behavior:
 
-* compute retry percentage from the rolling window
-* ensure the capture path retains enough header information to read the Retry bit
-* display the SSID/BSSID with the highest retry rate
-* include beacon rate of the strongest signal as a percentage of expected
-* graph the two-minute trend
+* normalize all received 802.11 frame headers through the existing single
+  capture and analyzer pipeline
+* compute retry percentage as Retry-bit frames divided by total received frames
+  in the rolling window; expose the metric as unavailable when no Retry bits can
+  be read
+* keep beacon contents authoritative only for beacon-derived fields, while
+  allowing all frame types to contribute to retry counts
+* show frequency and `Retries` on the top line
+* show `RET`, `AVG`, and `MAX` percentages on the second line
+* graph the rolling two-minute retry percentage on a fixed 0–100% scale
+* display the beacon-derived SSID and RSSI for the BSSID with the highest
+  per-BSSID retry rate; choose retry-rate ties by frame sample count and then
+  BSSID, never timing
+* retain beacon interval and expose the selected strongest-signal BSSID's
+  observed beacon rate as a percentage of expected when available
+* preserve a gap/unavailable value when capture input lacks retry or beacon
+  interval fields
 
 
 ⸻

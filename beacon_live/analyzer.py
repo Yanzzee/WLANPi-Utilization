@@ -1,14 +1,16 @@
-"""Single-pass rolling beacon analysis and immutable snapshot publication."""
+"""Single-pass rolling frame analysis and immutable snapshot publication."""
 
 from __future__ import annotations
 
 from bisect import insort
 from dataclasses import replace
-from typing import Optional
+from typing import Optional, Union
 
 from beacon_live.models import BeaconRecord
 from beacon_live.models import BssidState
+from beacon_live.models import FrameRecord
 from beacon_live.models import MetricsSnapshot
+from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
 
 DEFAULT_WINDOW_SECONDS = 120
@@ -75,7 +77,7 @@ def select_bssid(
 
 
 class Analyzer:
-    """Ingest each beacon once and maintain one shared rolling analysis state."""
+    """Ingest each normalized frame once and publish one shared snapshot."""
 
     def __init__(
         self,
@@ -93,6 +95,7 @@ class Analyzer:
         self._records_by_bssid: dict[
             str, list[tuple[float, int, BeaconRecord]]
         ] = {}
+        self._frames: list[tuple[float, int, FrameRecord]] = []
         self._pending_seconds: set[int] = set()
         self._completed_seconds: set[int] = set()
         self._ready_stats: list[SecondStats] = []
@@ -113,8 +116,13 @@ class Analyzer:
     def set_local_cu_percent(self, second: int, percent: Optional[float]) -> None:
         self._local_cu_by_second[second] = percent
 
-    def ingest(self, record: BeaconRecord) -> None:
-        """Analyze one normalized beacon record exactly once."""
+    def ingest(
+        self,
+        record: Union[BeaconRecord, FrameRecord],
+        *,
+        publish_snapshot: bool = True,
+    ) -> None:
+        """Analyze one record, optionally deferring immutable publication."""
         record_second = int(record.timestamp)
         self._finalize_pending_before(record_second)
 
@@ -122,8 +130,20 @@ class Analyzer:
             return
 
         self._sequence += 1
-        entries = self._records_by_bssid.setdefault(record.bssid, [])
-        insort(entries, (record.timestamp, self._sequence, record))
+        beacon = record if isinstance(record, BeaconRecord) else record.beacon_record()
+        if isinstance(record, FrameRecord):
+            frame_entry = (record.timestamp, self._sequence, record)
+            if not self._frames or frame_entry[:2] >= self._frames[-1][:2]:
+                self._frames.append(frame_entry)
+            else:
+                insort(self._frames, frame_entry)
+        if beacon is not None:
+            entries = self._records_by_bssid.setdefault(beacon.bssid, [])
+            beacon_entry = (beacon.timestamp, self._sequence, beacon)
+            if not entries or beacon_entry[:2] >= entries[-1][:2]:
+                entries.append(beacon_entry)
+            else:
+                insort(entries, beacon_entry)
         if record_second not in self._completed_seconds:
             self._pending_seconds.add(record_second)
 
@@ -133,18 +153,19 @@ class Analyzer:
         ):
             self._reference_timestamp = record.timestamp
 
-        self._expire_records(self._reference_timestamp)
-        self._refresh_current_snapshot(
-            reference_timestamp=self._reference_timestamp,
-            current_second=int(self._reference_timestamp),
-            upper_exclusive=None,
-        )
+        if publish_snapshot:
+            self._expire_records(self._reference_timestamp)
+            self._refresh_current_snapshot(
+                reference_timestamp=self._reference_timestamp,
+                current_second=int(self._reference_timestamp),
+                upper_exclusive=None,
+            )
 
-    def add_pending(self, record: BeaconRecord) -> None:
+    def add_pending(self, record: Union[BeaconRecord, FrameRecord]) -> None:
         """Compatibility wrapper for callers that publish on another cadence."""
         self.ingest(record)
 
-    def add(self, record: BeaconRecord) -> list[SecondStats]:
+    def add(self, record: Union[BeaconRecord, FrameRecord]) -> list[SecondStats]:
         """Ingest one record and return newly completed per-second samples."""
         self.ingest(record)
         return self._publish_ready()
@@ -207,10 +228,16 @@ class Analyzer:
             self._pending_seconds.discard(second)
             return
 
-        states = self._states_at(
+        frames = self._frames_at(
             reference_timestamp=float(second + 1),
             upper_exclusive=float(second + 1),
         )
+        states = self._states_at(
+            reference_timestamp=float(second + 1),
+            upper_exclusive=float(second + 1),
+            frames=frames,
+        )
+        retry_states = _retry_states_from_frames(frames, states)
         selected_bssid = select_bssid(
             states,
             self._history_selected_bssid,
@@ -223,6 +250,8 @@ class Analyzer:
                 states,
                 selected_bssid,
                 self._local_cu_by_second.get(second),
+                frames,
+                retry_states,
             )
         )
         self._completed_seconds.add(second)
@@ -283,10 +312,16 @@ class Analyzer:
         current_second: int,
         upper_exclusive: Optional[float],
     ) -> None:
-        states = self._states_at(
+        frames = self._frames_at(
             reference_timestamp=reference_timestamp,
             upper_exclusive=upper_exclusive,
         )
+        states = self._states_at(
+            reference_timestamp=reference_timestamp,
+            upper_exclusive=upper_exclusive,
+            frames=frames,
+        )
+        retry_states = _retry_states_from_frames(frames, states)
         self._current_selected_bssid = select_bssid(
             states,
             self._current_selected_bssid,
@@ -297,6 +332,8 @@ class Analyzer:
             states,
             self._current_selected_bssid,
             self._latest_local_cu_percent,
+            frames,
+            retry_states,
         )
         history = tuple(
             self._history_by_second[second]
@@ -310,6 +347,8 @@ class Analyzer:
             current=current,
             history=history,
             top_station_bssid=_top_station_bssid(states),
+            top_retry_bssid=_top_retry_bssid(retry_states),
+            retry_bssids=retry_states,
         )
 
     def _states_at(
@@ -317,8 +356,13 @@ class Analyzer:
         *,
         reference_timestamp: float,
         upper_exclusive: Optional[float],
+        frames: tuple[FrameRecord, ...],
     ) -> tuple[BssidState, ...]:
         cutoff = reference_timestamp - self.window_seconds
+        frames_by_bssid: dict[str, list[FrameRecord]] = {}
+        for frame in frames:
+            if frame.bssid is not None:
+                frames_by_bssid.setdefault(frame.bssid, []).append(frame)
         states: list[BssidState] = []
         for bssid, entries in self._records_by_bssid.items():
             window_entries = tuple(
@@ -335,11 +379,26 @@ class Analyzer:
                 for entry in window_entries
                 if entry[2].rssi_dbm is not None
             )
+            bssid_frames = tuple(frames_by_bssid.get(bssid, ()))
+            retry_observations = tuple(
+                frame
+                for frame in bssid_frames
+                if frame.retry_flag is not None
+            )
+            retry_frame_count = sum(
+                frame.retry_flag is True for frame in retry_observations
+            )
             states.append(
                 BssidState(
                     bssid=bssid,
                     ssid=latest.ssid,
-                    last_seen_ts=latest.timestamp,
+                    last_seen_ts=max(
+                        latest.timestamp,
+                        max(
+                            (frame.timestamp for frame in bssid_frames),
+                            default=latest.timestamp,
+                        ),
+                    ),
                     latest_beacon_ts=latest.timestamp,
                     latest_beacon_record=latest,
                     window_beacon_count=len(window_entries),
@@ -351,12 +410,61 @@ class Analyzer:
                     ),
                     latest_rssi_dbm=latest.rssi_dbm,
                     peak_rssi_dbm=max(rssi_values) if rssi_values else None,
+                    window_frame_count=len(bssid_frames),
+                    window_retry_observed_frame_count=len(retry_observations),
+                    window_retry_frame_count=retry_frame_count,
+                    window_retry_percent=_percentage(
+                        retry_frame_count,
+                        len(bssid_frames),
+                        available=bool(retry_observations),
+                    ),
+                    window_beacon_rate_percent=_beacon_rate_percent(
+                        beacon_count=len(window_entries),
+                        beacon_interval_tu=latest.beacon_interval_tu,
+                        reference_timestamp=reference_timestamp,
+                        window_seconds=self.window_seconds,
+                        observation_start_timestamp=(
+                            min(
+                                window_entries[0][0],
+                                min(
+                                    (
+                                        frame.timestamp
+                                        for frame in bssid_frames
+                                    ),
+                                    default=window_entries[0][0],
+                                ),
+                            )
+                        ),
+                    ),
                 )
             )
         return tuple(sorted(states, key=lambda state: state.bssid))
 
+    def _frames_at(
+        self,
+        *,
+        reference_timestamp: float,
+        upper_exclusive: Optional[float],
+    ) -> tuple[FrameRecord, ...]:
+        cutoff = reference_timestamp - self.window_seconds
+        return tuple(
+            entry[2]
+            for entry in self._frames
+            if entry[0] >= cutoff
+            and (upper_exclusive is None or entry[0] < upper_exclusive)
+        )
+
     def _expire_records(self, reference_timestamp: float) -> None:
         cutoff = reference_timestamp - self.window_seconds
+        first_retained_frame = 0
+        while (
+            first_retained_frame < len(self._frames)
+            and self._frames[first_retained_frame][0] < cutoff
+        ):
+            first_retained_frame += 1
+        if first_retained_frame:
+            del self._frames[:first_retained_frame]
+
         for bssid in tuple(self._records_by_bssid):
             entries = self._records_by_bssid[bssid]
             first_retained = 0
@@ -409,15 +517,45 @@ def _top_station_bssid(states: tuple[BssidState, ...]) -> Optional[str]:
     ).bssid
 
 
+def _top_retry_bssid(
+    states: tuple[RetryBssidState, ...],
+) -> Optional[str]:
+    candidates = tuple(
+        state for state in states if state.window_retry_percent is not None
+    )
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda state: (
+            -(
+                state.window_retry_percent
+                if state.window_retry_percent is not None
+                else -1.0
+            ),
+            -state.window_retry_observed_frame_count,
+            state.bssid,
+        ),
+    ).bssid
+
+
 def _stats_from_states(
     second: int,
     states: tuple[BssidState, ...],
     selected_bssid: Optional[str],
     local_cu_percent: Optional[float],
+    frames: tuple[FrameRecord, ...],
+    retry_states: tuple[RetryBssidState, ...],
 ) -> SecondStats:
     selected = next(
         (state for state in states if state.bssid == selected_bssid),
         None,
+    )
+    retry_observations = tuple(
+        frame for frame in frames if frame.retry_flag is not None
+    )
+    retry_frame_count = sum(
+        frame.retry_flag is True for frame in retry_observations
     )
     return SecondStats(
         second=second,
@@ -446,4 +584,94 @@ def _stats_from_states(
         selected_qbss_admission_capacity=(
             selected.latest_admission_capacity if selected is not None else None
         ),
+        received_frame_count=len(frames),
+        retry_observed_frame_count=len(retry_observations),
+        retry_frame_count=retry_frame_count,
+        retry_percent=_percentage(
+            retry_frame_count,
+            len(frames),
+            available=bool(retry_observations),
+        ),
+        selected_beacon_rate_percent=(
+            selected.window_beacon_rate_percent
+            if selected is not None
+            else None
+        ),
+        top_retry_bssid=_top_retry_bssid(retry_states),
     )
+
+
+def _retry_states_from_frames(
+    frames: tuple[FrameRecord, ...],
+    beacon_states: tuple[BssidState, ...],
+) -> tuple[RetryBssidState, ...]:
+    frames_by_bssid: dict[str, list[FrameRecord]] = {}
+    for frame in frames:
+        if frame.bssid is not None:
+            frames_by_bssid.setdefault(frame.bssid, []).append(frame)
+    beacon_by_bssid = {state.bssid: state for state in beacon_states}
+
+    states: list[RetryBssidState] = []
+    for bssid, bssid_frames in frames_by_bssid.items():
+        retry_observations = tuple(
+            frame for frame in bssid_frames if frame.retry_flag is not None
+        )
+        retry_frame_count = sum(
+            frame.retry_flag is True for frame in retry_observations
+        )
+        beacon_state = beacon_by_bssid.get(bssid)
+        states.append(
+            RetryBssidState(
+                bssid=bssid,
+                ssid=beacon_state.ssid if beacon_state is not None else None,
+                rssi_dbm=(
+                    beacon_state.peak_rssi_dbm
+                    if beacon_state is not None
+                    else None
+                ),
+                window_frame_count=len(bssid_frames),
+                window_retry_observed_frame_count=len(retry_observations),
+                window_retry_frame_count=retry_frame_count,
+                window_retry_percent=_percentage(
+                    retry_frame_count,
+                    len(bssid_frames),
+                    available=bool(retry_observations),
+                ),
+            )
+        )
+    return tuple(sorted(states, key=lambda state: state.bssid))
+
+
+def _percentage(
+    numerator: int,
+    denominator: int,
+    *,
+    available: bool = True,
+) -> Optional[float]:
+    if not available or denominator <= 0:
+        return None
+    return numerator / denominator * 100
+
+
+def _beacon_rate_percent(
+    *,
+    beacon_count: int,
+    beacon_interval_tu: Optional[int],
+    reference_timestamp: float,
+    window_seconds: int,
+    observation_start_timestamp: Optional[float],
+) -> Optional[float]:
+    if beacon_interval_tu is None or observation_start_timestamp is None:
+        return None
+    observation_start = max(
+        reference_timestamp - window_seconds,
+        observation_start_timestamp,
+    )
+    duration_seconds = reference_timestamp - observation_start
+    interval_seconds = beacon_interval_tu * 0.001024
+    if duration_seconds <= 0 or interval_seconds <= 0:
+        return None
+    expected_beacons = duration_seconds / interval_seconds
+    if expected_beacons <= 0:
+        return None
+    return min(100.0, beacon_count / expected_beacons * 100)

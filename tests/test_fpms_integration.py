@@ -167,9 +167,10 @@ def test_launch_failure_is_reported_without_leaving_session(
 @pytest.mark.parametrize(
     ("metadata", "summary"),
     [
-        ("2484MHz Channel", "CU 99% AVG 99% MAX 99%"),
+        ("2484MHz Utilization", "CU 99% AVG 99% MAX 99%"),
         ("2484MHz Admission", "ADC 99% AVG 99% MIN 99%"),
         ("2484MHz Stations", "SUM 999 MAX 999 TOP 999"),
+        ("2484MHz Retries", "RET 99% AVG 99% MAX 99%"),
     ],
 )
 def test_all_screen_text_allows_ten_pixel_scanner_font(
@@ -274,12 +275,12 @@ def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
     assert selected == "2484 Admission"
 
 
-def test_metadata_never_includes_band_information() -> None:
+def test_utilization_metadata_never_includes_band_information() -> None:
     state = {
-        "metadata": "2484MHz Channel",
+        "metadata": "2484MHz Utilization",
         "metadata_candidates": [
-            "2484MHz Channel",
-            "2484 Channel",
+            "2484MHz Utilization",
+            "2484 Utilization",
         ],
         "summary": "CU 9% AVG 9% MAX 9%",
         "ssid": "Example",
@@ -291,7 +292,7 @@ def test_metadata_never_includes_band_information() -> None:
 
     selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
 
-    assert selected == "2484MHz Channel"
+    assert selected == "2484MHz Utilization"
     assert "G" not in selected
 
 

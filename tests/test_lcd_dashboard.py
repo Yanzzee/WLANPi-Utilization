@@ -13,15 +13,18 @@ from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _ADMISSION_GRAPH
 from beacon_live.lcd_dashboard import _CU_GRAPH
 from beacon_live.lcd_dashboard import _OVERFLOW_GRAPH
+from beacon_live.lcd_dashboard import _RETRY_GRAPH
 from beacon_live.lcd_dashboard import _STATION_GRAPH
 from beacon_live.lcd_dashboard import _format_station_count
 from beacon_live.lcd_dashboard import _raw_to_graph_height
 from beacon_live.lcd_dashboard import _value_to_graph_height
 from beacon_live.models import BeaconRecord
+from beacon_live.models import FrameRecord
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.models import SecondStats
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import RETRY_SCREEN_ID
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 
 
@@ -40,13 +43,13 @@ def test_lcd_dashboard_writes_128_square_ppm_and_creates_directory(
 
     assert payload.startswith(b"P6\n128 128\n255\n")
     assert len(payload.split(b"\n", 3)[3]) == 128 * 128 * 3
-    assert dashboard.text_lines[0] == "5180MHz Channel"
+    assert dashboard.text_lines[0] == "5180MHz Utilization"
     assert dashboard.text_lines[1] == "CU --% AVG --% MAX --%"
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
-    assert state["metadata"] == "5180MHz Channel"
+    assert state["metadata"] == "5180MHz Utilization"
     assert state["metadata_candidates"] == [
-        "5180MHz Channel",
-        "5180 Channel",
+        "5180MHz Utilization",
+        "5180 Utilization",
     ]
     assert state["metadata_metric_token_count"] == 1
     assert state["metric_color"] == list(_CU_GRAPH)
@@ -72,7 +75,7 @@ def test_lcd_dashboard_uses_requested_two_row_header_and_footer(
 
     metadata, summary, ssid, rssi, bssid, channel = dashboard.text_lines
 
-    assert metadata == "5975MHz Channel"
+    assert metadata == "5975MHz Utilization"
     assert summary == "CU 75% AVG 50% MAX 75%"
     assert ssid == "Alpha"
     assert rssi == "-45"
@@ -274,6 +277,39 @@ def test_total_station_graph_truncates_over_64_and_colors_overflow_red(
     )
 
 
+def test_lcd_retry_screen_renders_shared_retry_history_and_top_bssid(
+    tmp_path: Path,
+) -> None:
+    dashboard = LcdDashboard(
+        tmp_path / "display.ppm",
+        band="5",
+        channel="36",
+        frequency_mhz=5180,
+    )
+    snapshot = _retry_snapshot()
+    dashboard.update(snapshot)
+    dashboard.set_active_screen(3)
+
+    assert dashboard.active_screen_id == RETRY_SCREEN_ID
+    assert dashboard.metric_color == _RETRY_GRAPH
+    assert dashboard.text_lines[0] == "5180MHz Retries"
+    assert dashboard.text_lines[1] == "RET 43% AVG 51% MAX 60%"
+    assert dashboard.text_lines[2] == "Bravo"
+    assert dashboard.text_lines[3] == "-60"
+    assert dashboard.text_lines[4] == "bb"
+    assert [value for _, value in dashboard.graph_data] == pytest.approx(
+        [60.0, 3 / 7 * 100]
+    )
+
+    pixel_data = dashboard.render().split(b"\n", 3)[3]
+    latest_x = GRAPH_X + GRAPH_WIDTH - 1
+    assert _pixel(
+        pixel_data,
+        latest_x,
+        GRAPH_Y + GRAPH_HEIGHT - 1,
+    ) == _RETRY_GRAPH
+
+
 def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     tmp_path: Path,
 ) -> None:
@@ -291,7 +327,7 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
     assert state["screen_id"] == TOTAL_STATION_COUNT_SCREEN_ID
     assert state["screen_index"] == 2
-    assert state["screen_count"] == 3
+    assert state["screen_count"] == 4
 
 
 def _stats(
@@ -364,6 +400,52 @@ def _phase_two_snapshot() -> MetricsSnapshot:
     )
     analyzer.advance(1002, None)
     return analyzer.snapshot
+
+
+def _retry_snapshot() -> MetricsSnapshot:
+    analyzer = Analyzer()
+    analyzer.ingest(_retry_beacon(1000.0, "aa", "Alpha", -35))
+    analyzer.ingest(_retry_frame(1000.1, "aa", True))
+    analyzer.ingest(_retry_beacon(1000.2, "bb", "Bravo", -60))
+    analyzer.ingest(_retry_frame(1000.3, "bb", True))
+    analyzer.ingest(_retry_frame(1000.4, "bb", True))
+    analyzer.advance(1001, None)
+    analyzer.ingest(_retry_frame(1001.1, "aa", False))
+    analyzer.ingest(_retry_frame(1001.2, "bb", False))
+    analyzer.advance(1002, None)
+    return analyzer.snapshot
+
+
+def _retry_beacon(
+    timestamp: float,
+    bssid: str,
+    ssid: str,
+    rssi_dbm: int,
+) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        ssid=ssid,
+        rssi_dbm=rssi_dbm,
+        frame_type=0,
+        frame_subtype=8,
+        retry_flag=False,
+        beacon_interval_tu=100,
+        qbss_cu_raw=64,
+        qbss_cu_percent=64 / 255 * 100,
+        qbss_station_count=3,
+        qbss_admission_capacity=10_000,
+    )
+
+
+def _retry_frame(timestamp: float, bssid: str, retry: bool) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        frame_type=2,
+        frame_subtype=0,
+        retry_flag=retry,
+    )
 
 
 def _phase_two_record(

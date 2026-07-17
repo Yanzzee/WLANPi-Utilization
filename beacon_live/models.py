@@ -18,6 +18,50 @@ class BeaconRecord:
     qbss_station_count: Optional[int]
     qbss_admission_capacity: Optional[int]
     rssi_dbm: Optional[int] = None
+    beacon_interval_tu: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class FrameRecord:
+    """Minimal normalized 802.11 frame used by the shared live analyzer."""
+
+    timestamp: float
+    bssid: Optional[str] = None
+    ssid: Optional[str] = None
+    rssi_dbm: Optional[int] = None
+    frame_type: Optional[int] = None
+    frame_subtype: Optional[int] = None
+    retry_flag: Optional[bool] = None
+    frame_length: Optional[int] = None
+    beacon_interval_tu: Optional[int] = None
+    qbss_cu_raw: Optional[int] = None
+    qbss_cu_percent: Optional[float] = None
+    qbss_station_count: Optional[int] = None
+    qbss_admission_capacity: Optional[int] = None
+
+    @property
+    def is_management_frame(self) -> bool:
+        return self.frame_type == 0
+
+    @property
+    def is_beacon(self) -> bool:
+        return self.is_management_frame and self.frame_subtype == 8
+
+    def beacon_record(self) -> Optional[BeaconRecord]:
+        """Return the beacon projection used by existing Phase 1/2 metrics."""
+        if not self.is_beacon or self.bssid is None:
+            return None
+        return BeaconRecord(
+            timestamp=self.timestamp,
+            ssid=self.ssid,
+            bssid=self.bssid,
+            qbss_cu_raw=self.qbss_cu_raw,
+            qbss_cu_percent=self.qbss_cu_percent,
+            qbss_station_count=self.qbss_station_count,
+            qbss_admission_capacity=self.qbss_admission_capacity,
+            rssi_dbm=self.rssi_dbm,
+            beacon_interval_tu=self.beacon_interval_tu,
+        )
 
 
 @dataclass(frozen=True)
@@ -46,6 +90,12 @@ class SecondStats:
     selected_qbss_station_count: Optional[int] = None
     selected_qbss_strongest_rssi_dbm: Optional[int] = None
     selected_qbss_admission_capacity: Optional[int] = None
+    received_frame_count: int = 0
+    retry_observed_frame_count: int = 0
+    retry_frame_count: int = 0
+    retry_percent: Optional[float] = None
+    selected_beacon_rate_percent: Optional[float] = None
+    top_retry_bssid: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +114,11 @@ class BssidState:
     latest_admission_capacity: Optional[int]
     latest_rssi_dbm: Optional[int]
     peak_rssi_dbm: Optional[int]
+    window_frame_count: int = 0
+    window_retry_observed_frame_count: int = 0
+    window_retry_frame_count: int = 0
+    window_retry_percent: Optional[float] = None
+    window_beacon_rate_percent: Optional[float] = None
 
     @property
     def qbss_present(self) -> bool:
@@ -105,6 +160,19 @@ class BssidState:
 
 
 @dataclass(frozen=True)
+class RetryBssidState:
+    """Rolling retry metrics for one BSSID, derived from the shared frames."""
+
+    bssid: str
+    ssid: Optional[str]
+    rssi_dbm: Optional[int]
+    window_frame_count: int
+    window_retry_observed_frame_count: int
+    window_retry_frame_count: int
+    window_retry_percent: Optional[float]
+
+
+@dataclass(frozen=True)
 class MetricsSnapshot:
     """Read-only analyzer state shared by every display renderer."""
 
@@ -115,6 +183,8 @@ class MetricsSnapshot:
     current: SecondStats
     history: tuple[SecondStats, ...]
     top_station_bssid: Optional[str] = None
+    top_retry_bssid: Optional[str] = None
+    retry_bssids: tuple[RetryBssidState, ...] = ()
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":
@@ -137,6 +207,8 @@ class MetricsSnapshot:
             ),
             history=(),
             top_station_bssid=None,
+            top_retry_bssid=None,
+            retry_bssids=(),
         )
 
     @property
@@ -161,3 +233,9 @@ class MetricsSnapshot:
     def state_for(self, bssid: str) -> Optional[BssidState]:
         """Look up one immutable BSSID state without exposing mutable storage."""
         return next((state for state in self.bssids if state.bssid == bssid), None)
+
+    def retry_state_for(self, bssid: str) -> Optional[RetryBssidState]:
+        return next(
+            (state for state in self.retry_bssids if state.bssid == bssid),
+            None,
+        )

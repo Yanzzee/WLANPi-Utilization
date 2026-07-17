@@ -12,6 +12,7 @@ from beacon_live.models import SecondStats
 from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import CU_SCREEN_ID
+from beacon_live.screens import RETRY_SCREEN_ID
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 
 LCD_WIDTH = 128
@@ -26,11 +27,13 @@ _DIM = (48, 64, 64)
 _CU_GRAPH = (0, 220, 120)
 _ADMISSION_GRAPH = (0, 160, 255)
 _STATION_GRAPH = (255, 190, 0)
+_RETRY_GRAPH = (210, 90, 255)
 _OVERFLOW_GRAPH = (255, 0, 0)
 _GRAPH_COLORS = {
     CU_SCREEN_ID: _CU_GRAPH,
     ADMISSION_CAPACITY_SCREEN_ID: _ADMISSION_GRAPH,
     TOTAL_STATION_COUNT_SCREEN_ID: _STATION_GRAPH,
+    RETRY_SCREEN_ID: _RETRY_GRAPH,
 }
 
 

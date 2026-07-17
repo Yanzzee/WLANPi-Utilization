@@ -10,12 +10,13 @@ Features & changes
     identify the number of discreet radios (identify & deduplicate SSIDs on same radio)
     identify number of unique APs if possible
     list the BSSIDs by station count (separate screen?)
+    include the number (#) of BSSIDs that are likely from the same radio prepended to the SSID on row 3
 4. DONE     additional graph/screen - total station count
     swap values for CU and SUM in display
     list the SSID/BSSID with highest station count
-5. additional graph/screen - % retries
+5. DONE additional graph/screen - % retries
     retries as a percentage of total frames received
-    include beacon rate of strongest signal as a percentage of expected
+    include beacon rate of strongest signal as a percentage of expected (separate screen?)
     list the SSID/BSSID with highest retry rates
 6. Navigation - enable scrolling between screens with up/down on control stick
     disable other buttons while the display application is running
@@ -27,7 +28,7 @@ Features & changes
 9. when logging, periodically check for free disk space and close if nearly full
     add message to end of log that the disk is full
     for long term logging, write separate files periodically
-10. how much can this also be done from hardware instead of using beacons
+10. how much can metrics also be found from hardware instead of just using beacons
 11. screenshot on device
         * when a button is pressed, take the current rendered screen image
         * write it to a PNG file on disk
@@ -38,4 +39,8 @@ Features & changes
         find likely radios in classroom
         scan beacons for those radios
         record and show analytics from the study
-14. return to standard mode when application quits instead of monitor mode
+14. return to standard mode when application quits instead of monitor mode? what is default?
+15. optimize code for processor utilization and/or use multithreading for multiple cores
+16. change the channel screen label to "Utilization"
+17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? 
+        consider how to tie what metric is used to select the displayed BSSID, likely color

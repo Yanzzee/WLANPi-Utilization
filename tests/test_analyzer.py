@@ -6,6 +6,7 @@ import pytest
 from beacon_live.analyzer import Analyzer
 from beacon_live.analyzer import select_bssid
 from beacon_live.models import BeaconRecord
+from beacon_live.models import FrameRecord
 
 
 def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:
@@ -159,6 +160,131 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
         snapshot.selected_bssid = "bb"  # type: ignore[misc]
 
 
+def test_retry_percentage_uses_all_readable_frames_and_tracks_top_bssid() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -35, retry=False))
+    analyzer.ingest(_frame(1000.1, "aa", retry=True))
+    analyzer.ingest(_beacon_frame(1000.2, "bb", "Bravo", -60, retry=False))
+    analyzer.ingest(_frame(1000.3, "bb", retry=True))
+    analyzer.ingest(_frame(1000.4, "bb", retry=True))
+    analyzer.advance(1001, None)
+
+    snapshot = analyzer.snapshot
+    alpha = snapshot.state_for("aa")
+    bravo = snapshot.state_for("bb")
+
+    assert snapshot.current.received_frame_count == 5
+    assert snapshot.current.retry_observed_frame_count == 5
+    assert snapshot.current.retry_frame_count == 3
+    assert snapshot.current.retry_percent == pytest.approx(60.0)
+    assert alpha is not None
+    assert alpha.window_retry_percent == pytest.approx(50.0)
+    assert bravo is not None
+    assert bravo.window_retry_percent == pytest.approx(2 / 3 * 100)
+    assert snapshot.top_retry_bssid == "bb"
+    assert snapshot.current.top_retry_bssid == "bb"
+    assert snapshot.selected_bssid == "aa"
+
+
+def test_retry_window_expires_old_frames_without_resetting_history() -> None:
+    analyzer = Analyzer(window_seconds=2)
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
+    analyzer.ingest(_frame(1000.1, "aa", retry=True))
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.current.retry_percent == pytest.approx(50.0)
+
+    analyzer.ingest(_frame(1002.1, "aa", retry=False))
+    analyzer.advance(1003, None)
+
+    assert analyzer.snapshot.current.received_frame_count == 1
+    assert analyzer.snapshot.current.retry_percent == 0.0
+    assert analyzer.snapshot.top_retry_bssid == "aa"
+    retry_state = analyzer.snapshot.retry_state_for("aa")
+    assert retry_state is not None
+    assert retry_state.window_retry_percent == 0.0
+    assert [row.second for row in analyzer.snapshot.history] == [1002]
+
+
+def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:
+    analyzer = Analyzer()
+    for index in range(5):
+        analyzer.ingest(
+            _beacon_frame(
+                1000.0 + index * 0.1024,
+                "aa",
+                "Alpha",
+                -40,
+                retry=False,
+                beacon_interval_tu=100,
+            )
+        )
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.current.selected_beacon_rate_percent == pytest.approx(
+        51.2
+    )
+
+
+def test_missing_retry_flag_degrades_to_unavailable() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=None))
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.current.received_frame_count == 1
+    assert analyzer.snapshot.current.retry_observed_frame_count == 0
+    assert analyzer.snapshot.current.retry_percent is None
+
+
+def test_retry_percentage_denominator_is_total_received_frames() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
+    analyzer.ingest(_frame(1000.1, "aa", retry=True))
+    analyzer.ingest(_frame(1000.2, "aa", retry=None))
+    analyzer.advance(1001, None)
+
+    snapshot = analyzer.snapshot
+    retry_state = snapshot.retry_state_for("aa")
+    assert snapshot.current.received_frame_count == 3
+    assert snapshot.current.retry_observed_frame_count == 2
+    assert snapshot.current.retry_percent == pytest.approx(1 / 3 * 100)
+    assert retry_state is not None
+    assert retry_state.window_retry_percent == pytest.approx(1 / 3 * 100)
+
+
+def test_top_retry_bssid_can_be_derived_before_its_beacon_is_seen() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.1,
+            bssid="cc",
+            rssi_dbm=-55,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=True,
+        )
+    )
+    analyzer.advance(1001, None)
+
+    retry_state = analyzer.snapshot.retry_state_for("cc")
+    assert analyzer.snapshot.top_retry_bssid == "cc"
+    assert retry_state is not None
+    assert retry_state.ssid is None
+    assert retry_state.rssi_dbm is None
+
+
+def test_top_retry_bssid_tie_does_not_use_frame_timing() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_frame(1000.0, "aa", retry=True))
+    analyzer.ingest(_frame(1000.1, "aa", retry=False))
+    analyzer.ingest(_frame(1000.8, "bb", retry=True))
+    analyzer.ingest(_frame(1000.9, "bb", retry=False))
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.top_retry_bssid == "aa"
+
+
 def _record(
     timestamp: float,
     *,
@@ -179,4 +305,39 @@ def _record(
         qbss_station_count=station_count,
         qbss_admission_capacity=admission_capacity,
         rssi_dbm=rssi_dbm,
+    )
+
+
+def _frame(timestamp: float, bssid: str, *, retry: Optional[bool]) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        frame_type=2,
+        frame_subtype=0,
+        retry_flag=retry,
+    )
+
+
+def _beacon_frame(
+    timestamp: float,
+    bssid: str,
+    ssid: str,
+    rssi_dbm: int,
+    *,
+    retry: Optional[bool],
+    beacon_interval_tu: int = 100,
+) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        ssid=ssid,
+        rssi_dbm=rssi_dbm,
+        frame_type=0,
+        frame_subtype=8,
+        retry_flag=retry,
+        beacon_interval_tu=beacon_interval_tu,
+        qbss_cu_raw=64,
+        qbss_cu_percent=64 / 255 * 100,
+        qbss_station_count=3,
+        qbss_admission_capacity=10_000,
     )

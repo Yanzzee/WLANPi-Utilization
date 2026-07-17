@@ -75,19 +75,25 @@ def test_frequency_to_band_resolves_log_metadata() -> None:
     assert frequency_to_band(5975) == "6"
 
 
-def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:
+def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
     command = build_tshark_command("wlan9")
 
     assert command[:4] == ["tshark", "-l", "-i", "wlan9"]
-    assert "wlan.fc.type_subtype == 8" in command
+    assert "wlan" in command
+    assert "wlan.fc.type_subtype == 8" not in command
     assert _field_args(command) == [
         "frame.time_epoch",
-        "wlan.ssid",
+        "wlan.fc.type",
+        "wlan.fc.subtype",
+        "wlan.fc.retry",
         "wlan.bssid",
+        "wlan.ssid",
         "wlan.qbss.cu",
         "wlan.qbss.scount",
         "wlan.qbss.adc",
         "radiotap.dbm_antsignal",
+        "frame.len",
+        "wlan.fixed.beacon",
     ]
 
 
@@ -130,7 +136,7 @@ def test_configure_monitor_interface_stops_on_failed_command() -> None:
     ]
 
 
-def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
+def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -181,6 +187,9 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     )
     assert stats_rows[0]["unique_bssid_count"] == "1"
     assert stats_rows[0]["selected_qbss_cu_percent"] == "25.10"
+    assert stats_rows[0]["received_frame_count"] == "2"
+    assert stats_rows[0]["retry_frame_count"] == "0"
+    assert stats_rows[0]["retry_percent"] == "0.00"
     assert stats_rows[0]["local_cu_percent"] == ""
 
     beacons = [
@@ -332,8 +341,8 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
 class _FakeTsharkProcess:
     def __init__(self) -> None:
         self.stdout = io.StringIO(
-            "1000.100\tAlpha\taa:aa:aa:aa:aa:aa\t128\t2\t0\t-45\n"
-            "1001.100\tAlpha\taa:aa:aa:aa:aa:aa\t64\t3\t0\t-44\n"
+            "1000.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\tAlpha\t128\t2\t0\t-45\t256\t100\n"
+            "1001.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\tAlpha\t64\t3\t0\t-44\t256\t100\n"
         )
         self.stderr = io.StringIO("")
 

@@ -1,4 +1,4 @@
-"""Minimal live WLAN beacon capture loop."""
+"""Minimal live WLAN frame capture loop."""
 
 from __future__ import annotations
 
@@ -18,13 +18,13 @@ from beacon_live.log_writer import LogMetadata
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
-from beacon_live.parser import parse_tshark_row
-from beacon_live.parser import TSHARK_FIELD_NAMES
+from beacon_live.parser import parse_tshark_frame_row
+from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.survey import SurveyCuResult
 from beacon_live.survey import compute_local_cu_result_from_samples
 from beacon_live.survey import parse_survey_dump
 
-TSHARK_BEACON_FIELDS = list(TSHARK_FIELD_NAMES)
+TSHARK_CAPTURE_FIELDS = list(TSHARK_FRAME_FIELD_NAMES)
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
 LIVE_WARMUP_CYCLES = 1
@@ -189,7 +189,7 @@ def build_tshark_command(iface: str) -> list[str]:
         "-i",
         iface,
         "-Y",
-        "wlan.fc.type_subtype == 8",
+        "wlan",
         "-T",
         "fields",
         "-E",
@@ -197,7 +197,7 @@ def build_tshark_command(iface: str) -> list[str]:
         "-E",
         "occurrence=f",
     ]
-    for field in TSHARK_BEACON_FIELDS:
+    for field in TSHARK_CAPTURE_FIELDS:
         command.extend(["-e", field])
     return command
 
@@ -362,10 +362,15 @@ def run_live(
                 line = _read_tshark_line(key.fileobj)
                 if line == "":
                     return _handle_tshark_exit(process)
-                record = parse_tshark_row(line)
-                if record is not None:
-                    log_writer.write_beacon(record)
-                    analyzer.ingest(record)
+                frame = parse_tshark_frame_row(line)
+                if frame is not None:
+                    beacon = frame.beacon_record()
+                    if beacon is not None:
+                        log_writer.write_beacon(beacon)
+                    # Live publication already happens once per refresh cycle.
+                    # Deferring here avoids rebuilding the rolling snapshot for
+                    # every frame on a busy channel.
+                    analyzer.ingest(frame, publish_snapshot=False)
 
             if time.monotonic() >= next_survey_poll:
                 if local_cu:

@@ -8,10 +8,12 @@ from typing import Optional, Protocol, Sequence
 from beacon_live.models import BssidState
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
+from beacon_live.models import RetryBssidState
 
 CU_SCREEN_ID = "cu"
 ADMISSION_CAPACITY_SCREEN_ID = "admission_capacity"
 TOTAL_STATION_COUNT_SCREEN_ID = "total_station_count"
+RETRY_SCREEN_ID = "retry"
 STATION_GRAPH_MAXIMUM = 64
 
 
@@ -71,7 +73,7 @@ class CuScreen:
         return ScreenView(
             screen_id=self.screen_id,
             title="Channel Utilization",
-            metadata_tokens=("Channel",),
+            metadata_tokens=("Utilization",),
             summary=summary,
             graph_label="Selected QBSS CU",
             graph_points=graph_points,
@@ -156,10 +158,53 @@ class TotalStationCountScreen:
         )
 
 
+@dataclass(frozen=True)
+class RetryScreen:
+    screen_id: str = RETRY_SCREEN_ID
+
+    def render(self, snapshot: MetricsSnapshot) -> ScreenView:
+        graph_points = tuple(
+            GraphPoint(
+                second=stats.second,
+                value=stats.retry_percent,
+                display_value=stats.retry_percent,
+            )
+            for stats in snapshot.history
+        )
+        values = tuple(
+            point.display_value
+            for point in graph_points
+            if point.display_value is not None
+        )
+        top_retry_state = (
+            snapshot.retry_state_for(snapshot.top_retry_bssid)
+            if snapshot.top_retry_bssid is not None
+            else None
+        )
+        return ScreenView(
+            screen_id=self.screen_id,
+            title="Retry Percentage",
+            metadata_tokens=("Retries",),
+            summary=(
+                f"RET {_whole_percent(snapshot.current.retry_percent)}% "
+                f"AVG {_whole_percent(_mean(values))}% "
+                f"MAX {_whole_percent(max(values) if values else None)}%"
+            ),
+            graph_label="Rolling retry percentage",
+            graph_points=graph_points,
+            graph_maximum=100,
+            identity=_identity_from_retry_state(
+                top_retry_state,
+                unavailable_text="<No Retry Data>",
+            ),
+        )
+
+
 DEFAULT_SCREENS: tuple[ScreenDefinition, ...] = (
     CuScreen(),
     AdmissionCapacityScreen(),
     TotalStationCountScreen(),
+    RetryScreen(),
 )
 
 
@@ -240,6 +285,21 @@ def _identity_from_state(
             if state.peak_rssi_dbm is not None
             else state.latest_rssi_dbm
         ),
+        unavailable_text=unavailable_text,
+    )
+
+
+def _identity_from_retry_state(
+    state: Optional[RetryBssidState],
+    *,
+    unavailable_text: str,
+) -> DisplayIdentity:
+    if state is None:
+        return DisplayIdentity(None, None, None, unavailable_text)
+    return DisplayIdentity(
+        ssid=state.ssid,
+        bssid=state.bssid,
+        rssi_dbm=state.rssi_dbm,
         unavailable_text=unavailable_text,
     )
 
