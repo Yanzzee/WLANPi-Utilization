@@ -7,6 +7,8 @@ import pytest
 
 from beacon_live.cli import main
 from beacon_live.live import LiveCommandError
+from beacon_live.models import FrameRecord
+from beacon_live.retry_debug import RetryCaptureData
 
 
 def test_replay_accepts_pi_smoke_files_and_prints_summary(
@@ -111,6 +113,51 @@ def test_replay_keeps_legacy_input_option(
     assert "valid_beacon_rows: 1" in captured.out
     assert "local_survey_cu_percent: " in captured.out
     assert captured.err == ""
+
+
+def test_retry_debug_writes_auditable_channel_csv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    output_csv = tmp_path / "retry-audit.csv"
+    monkeypatch.setattr(
+        "beacon_live.cli.read_retry_debug_capture",
+        lambda path: RetryCaptureData(
+            frames=(
+                FrameRecord(
+                    timestamp=1000.1,
+                    bssid="aa:bb:cc:dd:ee:ff",
+                    frame_type=2,
+                    frame_subtype=0,
+                    retry_flag=True,
+                    receiver_address="00:11:22:33:44:55",
+                ),
+            ),
+            tshark_row_count=1,
+            malformed_row_count=0,
+        ),
+    )
+
+    assert main(
+        [
+            "retry-debug",
+            "--input",
+            str(tmp_path / "capture.pcapng"),
+            "--output-csv",
+            str(output_csv),
+        ]
+    ) == 0
+
+    with output_csv.open(encoding="utf-8") as output_file:
+        rows = list(csv.DictReader(output_file))
+    channel = next(row for row in rows if row["scope"] == "channel")
+    assert channel["retry_eligible_frame_count"] == "1"
+    assert channel["retry_frame_count"] == "1"
+    assert channel["retry_percent"] == "100.000000"
+    captured = capsys.readouterr()
+    assert f"Retry audit CSV: {output_csv}" in captured.err
+    assert "decoded_frames=1" in captured.err
 
 
 def test_replay_writes_stats_csv_and_beacon_jsonl_logs(

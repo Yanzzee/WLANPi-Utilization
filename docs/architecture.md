@@ -22,6 +22,11 @@ Recommended architecture
 
 A single capture worker reads frames continuously and emits normalized frame records into the analysis pipeline.
 
+Monitor-mode acquisition includes every decoded 802.11 frame heard on the
+tuned channel, regardless of whether it is addressed to the WLAN Pi. The live
+TShark display filter selects decoded WLAN frames only; it does not select a
+destination address.
+
 This layer should do only the minimum necessary work:
 
 * timestamp
@@ -308,6 +313,9 @@ Recommended behavior:
 * bucket retry metrics into independent one-second samples; `RET` and each graph
   column are the retry percentage for that second, while the graph retains the
   latest two minutes of those samples
+* complete a live bucket from the ordered capture stream, after a frame timestamp
+  enters a later second; do not use the wall-clock redraw deadline to finalize a
+  bucket because TShark stdout may still contain buffered rows for that second
 * compute each sample as frames with the Retry bit set divided by all
   retry-eligible frames received in that second
 * treat unicast data frames and retry-capable unicast management frames as
@@ -336,6 +344,10 @@ Recommended behavior:
   observed beacon rate as a percentage of expected when available (separate graph)
 * preserve a gap/unavailable value when capture input lacks retry or beacon
   interval fields
+* support offline verification from a monitor-mode PCAP/PCAPNG file. The retry
+  audit must report per-second channel and per-known-BSSID numerators,
+  denominators, percentages, group-address exclusions, missing-Retry-bit
+  exclusions, non-retryable-type exclusions, and the selected footer BSSID.
 
 
 ⸻

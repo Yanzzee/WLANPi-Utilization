@@ -156,6 +156,48 @@ For troubleshooting, collect a timestamped debug bundle:
 The script creates `debug/pi_debug_<timestamp>/`, archives it as
 `debug/pi_debug_<timestamp>.tar.gz`, and prints the archive path.
 
+## Capture and Audit Retry Metrics
+
+The retry screen analyzes all decoded monitor-mode WLAN traffic on the tuned
+channel, not only traffic addressed to the WLAN Pi. To produce a reproducible
+input for the retry audit, stop the live display and run the following exact
+commands for channel 36:
+
+```bash
+sudo ip link set wlan0 down
+sudo iw dev wlan0 set type monitor
+sudo ip link set wlan0 up
+sudo iw dev wlan0 set channel 36 HT20
+sudo dumpcap -i wlan0 -a duration:60 -s 0 \
+  -w /tmp/wlanpi-retry-debug.pcapng
+```
+
+For an explicit center frequency, replace the final `iw` command with, for
+example, `sudo iw dev wlan0 set freq 5975 HT20`. The dump has no MAC-address
+capture filter. It retains full frames so the same file can also verify beacon
+identity and QBSS fields.
+
+Audit the capture on the WLAN Pi:
+
+```bash
+.venv/bin/beacon-live retry-debug \
+  --input /tmp/wlanpi-retry-debug.pcapng \
+  --output-csv /tmp/wlanpi-retry-audit.csv
+```
+
+Or copy the PCAPNG to this machine and run the same command against its local
+path. The CSV contains one `channel` row and zero or more `bssid` rows per
+capture second. It exposes decoded-frame and readable-Retry-bit counts,
+group-address, missing-bit, and non-retryable-type exclusions, the eligible
+denominator, retry numerator, percentage, and the BSSID selected for the
+display footer. A blank percentage means the second had no retry-eligible
+frames; `0.000000` means eligible frames were present but none had the Retry bit
+set.
+
+The live analyzer finalizes a second only after the ordered TShark timestamps
+cross into the following second. This prevents a display refresh from closing a
+bucket before buffered TShark rows have been ingested.
+
 ## Copy Files Back to the Mac
 
 From your Mac, use `scp` with the Pi hostname or IP address:
@@ -164,6 +206,8 @@ From your Mac, use `scp` with the Pi hostname or IP address:
 scp pi@<pi-hostname-or-ip>:~/WLANPi-Utilization/samples/pi_*.txt samples/
 scp pi@<pi-hostname-or-ip>:~/WLANPi-Utilization/samples/pi_*.tsv samples/
 scp pi@<pi-hostname-or-ip>:~/WLANPi-Utilization/debug/pi_debug_*.tar.gz debug/
+scp pi@<pi-hostname-or-ip>:/tmp/wlanpi-retry-debug.pcapng debug/
+scp pi@<pi-hostname-or-ip>:/tmp/wlanpi-retry-audit.csv debug/
 ```
 
 Adjust the remote path if you cloned the repo somewhere else on the Pi.

@@ -20,6 +20,10 @@ from beacon_live.live import run_live
 from beacon_live.log_writer import CaptureLogWriter
 from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import build_live_log_paths
+from beacon_live.retry_debug import RetryDebugCommandError
+from beacon_live.retry_debug import analyze_retry_frames
+from beacon_live.retry_debug import read_retry_debug_capture
+from beacon_live.retry_debug import write_retry_audit_csv
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
     parse_survey_dump,
@@ -48,6 +52,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.command == "live":
         return _run_live_command(args, parser)
+
+    if args.command == "retry-debug":
+        return _run_retry_debug_command(args)
 
     parser.print_help()
     return 0
@@ -169,6 +176,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_live_arguments(live)
 
+    retry_debug = subparsers.add_parser(
+        "retry-debug",
+        help="Audit retry calculations from a saved PCAP/PCAPNG capture.",
+    )
+    retry_debug.add_argument(
+        "--input",
+        required=True,
+        type=Path,
+        help="Monitor-mode PCAP or PCAPNG file to analyze with TShark.",
+    )
+    retry_debug.add_argument(
+        "--output-csv",
+        required=False,
+        type=Path,
+        help="Write the audit CSV to this path instead of standard output.",
+    )
+
     return parser
 
 
@@ -202,7 +226,10 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         "--interval-seconds",
         default=1.0,
         type=float,
-        help="Terminal update interval and optional survey polling interval. Default: 1.",
+        help=(
+            "Optional survey polling interval. Display metrics remain aligned "
+            "to capture-second boundaries. Default: 1."
+        ),
     )
     parser.add_argument(
         "--survey-debug",
@@ -302,6 +329,38 @@ def _run_replay(
             file=sys.stderr,
         )
 
+    return 0
+
+
+def _run_retry_debug_command(args: argparse.Namespace) -> int:
+    try:
+        capture = read_retry_debug_capture(args.input)
+    except RetryDebugCommandError as exc:
+        print(f"Command failed: {exc.command_text}", file=sys.stderr)
+        if exc.returncode is not None:
+            print(f"Exit status: {exc.returncode}", file=sys.stderr)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        return 1
+
+    rows = analyze_retry_frames(capture.frames)
+    if args.output_csv is None:
+        write_retry_audit_csv(rows, sys.stdout)
+    else:
+        args.output_csv.parent.mkdir(parents=True, exist_ok=True)
+        with args.output_csv.open("w", encoding="utf-8", newline="") as output:
+            write_retry_audit_csv(rows, output)
+        print(f"Retry audit CSV: {args.output_csv}", file=sys.stderr)
+
+    channel_seconds = sum(row.scope == "channel" for row in rows)
+    print(
+        "Retry audit: "
+        f"decoded_frames={len(capture.frames)} "
+        f"tshark_rows={capture.tshark_row_count} "
+        f"malformed_rows={capture.malformed_row_count} "
+        f"seconds={channel_seconds}",
+        file=sys.stderr,
+    )
     return 0
 
 

@@ -211,6 +211,35 @@ def test_retry_samples_use_independent_one_second_windows() -> None:
     assert [row.second for row in analyzer.snapshot.history] == [1002]
 
 
+def test_capture_publication_waits_until_all_rows_for_second_are_ingested() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _frame(1000.1, "aa", retry=False), publish_snapshot=False
+    )
+
+    # A wall-clock refresh while TShark is still emitting second 1000 must not
+    # make the partial retry bucket immutable.
+    assert analyzer.publish_capture_complete(None) == []
+    analyzer.ingest(
+        _frame(1000.9, "aa", retry=True), publish_snapshot=False
+    )
+    assert analyzer.publish_capture_complete(None) == []
+
+    # The first ordered frame from second 1001 is the capture watermark that
+    # proves every second-1000 row has already passed through stdout.
+    analyzer.ingest(
+        _frame(1001.0, "aa", retry=False), publish_snapshot=False
+    )
+    published = analyzer.publish_capture_complete(None)
+
+    assert [row.second for row in published] == [1000]
+    assert published[0].retry_eligible_frame_count == 2
+    assert published[0].retry_frame_count == 1
+    assert published[0].retry_percent == pytest.approx(50.0)
+    assert analyzer.snapshot.current.second == 1000
+    assert analyzer.snapshot.current.retry_percent == pytest.approx(50.0)
+
+
 def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:
     analyzer = Analyzer()
     for index in range(5):
@@ -270,6 +299,22 @@ def test_retry_percentage_excludes_frames_that_cannot_be_retried() -> None:
     assert retry_state is not None
     assert retry_state.retry_eligible_frame_count == 2
     assert retry_state.window_retry_percent == pytest.approx(50.0)
+
+
+def test_multicast_destination_is_excluded_even_with_unicast_receiver() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _address_frame(
+            1000.1,
+            retry=True,
+            receiver_address="00:11:22:33:44:55",
+            destination_address="01:00:5e:00:00:01",
+        )
+    )
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.current.retry_eligible_frame_count == 0
+    assert analyzer.snapshot.current.retry_percent is None
 
 
 def test_each_retry_copy_of_the_same_frame_is_counted() -> None:

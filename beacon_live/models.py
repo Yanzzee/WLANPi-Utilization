@@ -54,20 +54,32 @@ class FrameRecord:
     @property
     def retry_eligible(self) -> bool:
         """Whether this received MPDU can contribute to a retry ratio."""
+        return self.retry_exclusion_reason is None
+
+    @property
+    def retry_exclusion_reason(self) -> Optional[str]:
+        """Return why the frame is excluded from retry calculations."""
+        if any(
+            _is_group_address(address)
+            for address in (
+                self.receiver_address,
+                self.destination_address,
+            )
+            if address is not None
+        ):
+            return "group_address"
         if self.retry_flag is None:
-            return False
+            return "missing_retry_bit"
         if self.frame_type == 0:
             # Unicast management exchanges can be retried. Probe requests,
             # beacons, Action No Ack, and reserved subtypes cannot.
             if self.frame_subtype not in {0, 1, 2, 3, 5, 9, 10, 11, 12, 13}:
-                return False
+                return "non_retryable_frame_type"
         elif self.frame_type != 2:
             # Control and extension frames do not use the retry semantics
             # measured by this screen.
-            return False
-
-        receiver = self.receiver_address or self.destination_address
-        return receiver is None or not _is_group_address(receiver)
+            return "non_retryable_frame_type"
+        return None
 
     @property
     def mac_addresses(self) -> tuple[str, ...]:

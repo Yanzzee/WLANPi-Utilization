@@ -72,7 +72,7 @@ def test_parse_all_frame_beacon_extracts_retry_and_beacon_fields() -> None:
 
 def test_parse_all_frame_data_extracts_retry_without_beacon_fields() -> None:
     record = parse_tshark_frame_row(
-        "1700000000.250\t2\t0\t1\taa:bb:cc:dd:ee:ff\t11:22:33:44:55:66\taa:bb:cc:dd:ee:ff\t11:22:33:44:55:66\t77:88:99:aa:bb:cc\t\t\t\t\t-51\t128\t"
+        "1700000000.250\t2\t0\t1\taa:bb:cc:dd:ee:ff\t11:22:33:44:55:66\taa:bb:cc:dd:ee:ff\t11:22:33:44:55:66\t76:88:99:aa:bb:cc\t\t\t\t\t-51\t128\t"
     )
 
     assert record is not None
@@ -83,7 +83,7 @@ def test_parse_all_frame_data_extracts_retry_without_beacon_fields() -> None:
     assert record.mac_addresses == (
         "aa:bb:cc:dd:ee:ff",
         "11:22:33:44:55:66",
-        "77:88:99:aa:bb:cc",
+        "76:88:99:aa:bb:cc",
     )
     assert record.qbss_cu_raw is None
     assert record.beacon_record() is None

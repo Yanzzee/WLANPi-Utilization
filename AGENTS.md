@@ -94,8 +94,13 @@ Additional fields when available:
 
 ## Retry data rules
 
+- Analyze every decoded 802.11 frame heard in monitor mode on the tuned channel;
+  do not filter capture to traffic destined for the WLAN Pi.
 - Retry graph samples are independent one-second ratios retained in the shared
   two-minute history.
+- Close a live one-second bucket only after the ordered capture timestamps cross
+  into a later second. A wall-clock UI refresh must not finalize a bucket while
+  TShark can still have rows from that second buffered on stdout.
 - The denominator contains only frames eligible for Retry-bit retransmission:
   unicast data frames and retry-capable unicast management frames.
 - Exclude beacons, probe requests, Action No Ack, group-addressed frames,

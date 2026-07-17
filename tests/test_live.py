@@ -191,10 +191,10 @@ def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
     )
     assert stats_rows[0]["unique_bssid_count"] == "1"
     assert stats_rows[0]["selected_qbss_cu_percent"] == "25.10"
-    assert stats_rows[0]["received_frame_count"] == "1"
-    assert stats_rows[0]["retry_eligible_frame_count"] == "0"
-    assert stats_rows[0]["retry_frame_count"] == "0"
-    assert stats_rows[0]["retry_percent"] == ""
+    assert stats_rows[0]["received_frame_count"] == "3"
+    assert stats_rows[0]["retry_eligible_frame_count"] == "2"
+    assert stats_rows[0]["retry_frame_count"] == "1"
+    assert stats_rows[0]["retry_percent"] == "50.00"
     assert stats_rows[0]["local_cu_percent"] == ""
 
     beacons = [
@@ -223,6 +223,9 @@ def test_survey_enabled_live_mode_uses_available_data(
             [SurveySample(1.0, 1000, 100, 0, 0, None, 5180, True)],
             [SurveySample(2.0, 2000, 300, 0, 0, None, 5180, True)],
             [SurveySample(3.0, 3000, 500, 0, 0, None, 5180, True)],
+            [SurveySample(4.0, 4000, 700, 0, 0, None, 5180, True)],
+            [SurveySample(5.0, 5000, 900, 0, 0, None, 5180, True)],
+            [SurveySample(6.0, 6000, 1100, 0, 0, None, 5180, True)],
         ]
     )
     monkeypatch.setattr(
@@ -339,6 +342,8 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
         local_cu_percent=None,
     )
 
+    assert warmup_filter.filter([]) == []
+    assert warmup_filter.remaining_cycles == 1
     assert warmup_filter.filter([stats]) == []
     assert warmup_filter.filter([stats]) == [stats]
 
@@ -348,6 +353,9 @@ class _FakeTsharkProcess:
         self.stdout = io.StringIO(
             "1000.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\tAlpha\t128\t2\t0\t-45\t256\t100\n"
             "1001.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\tAlpha\t64\t3\t0\t-44\t256\t100\n"
+            "1001.200\t2\t0\t1\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t\t\t\t\t-50\t100\t\n"
+            "1001.300\t2\t0\t0\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t\t\t\t\t-50\t100\t\n"
+            "1002.100\t2\t0\t0\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:12\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:12\taa:aa:aa:aa:aa:aa\t\t\t\t\t-50\t100\t\n"
         )
         self.stderr = io.StringIO("")
 
@@ -371,7 +379,6 @@ class _FakeSelector:
 
 def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monotonic_value = -1.0
-    wall_times = iter([1001.0, 1002.0])
 
     def fake_monotonic() -> float:
         nonlocal monotonic_value
@@ -392,7 +399,6 @@ def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("beacon_live.live.selectors.DefaultSelector", _FakeSelector)
     monkeypatch.setattr("beacon_live.live.time.monotonic", fake_monotonic)
-    monkeypatch.setattr("beacon_live.live.time.time", lambda: next(wall_times))
 
 
 def _field_args(command: list[str]) -> list[str]:

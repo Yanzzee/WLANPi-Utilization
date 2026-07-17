@@ -54,6 +54,8 @@ class LiveWarmupFilter:
 
     def filter(self, stats_rows: list[SecondStats]) -> list[SecondStats]:
         if self.remaining_cycles > 0:
+            if not stats_rows:
+                return []
             self.remaining_cycles -= 1
             return []
         return stats_rows
@@ -188,6 +190,7 @@ def build_tshark_command(iface: str) -> list[str]:
         "-l",
         "-i",
         iface,
+        "-n",
         "-Y",
         "wlan",
         "-T",
@@ -367,10 +370,21 @@ def run_live(
                     beacon = frame.beacon_record()
                     if beacon is not None:
                         log_writer.write_beacon(beacon)
-                    # Live publication already happens once per refresh cycle.
-                    # Deferring here avoids rebuilding the rolling snapshot for
-                    # every frame on a busy channel.
+                    # Defer frame-level snapshots. The capture-watermark call
+                    # below publishes only when this frame crosses a second
+                    # boundary, avoiding a rebuild for every busy-channel row.
                     analyzer.ingest(frame, publish_snapshot=False)
+                    include_history = warmup_filter.remaining_cycles <= 0
+                    completed_stats = analyzer.publish_capture_complete(
+                        latest_local_cu_percent,
+                        include_history=include_history,
+                    )
+                    _publish_live_stats(
+                        warmup_filter.filter(completed_stats),
+                        stats_writer=log_writer.write_stats,
+                        dashboard=dashboard,
+                        snapshot=analyzer.snapshot,
+                    )
 
             if time.monotonic() >= next_survey_poll:
                 if local_cu:
@@ -415,19 +429,6 @@ def run_live(
                                 survey_warning_printed = True
                         previous_survey_samples = current_survey_samples
 
-                wall_second = int(time.time())
-                include_history = warmup_filter.remaining_cycles <= 0
-                completed_stats = analyzer.advance(
-                    wall_second,
-                    latest_local_cu_percent,
-                    include_history=include_history,
-                )
-                _publish_live_stats(
-                    warmup_filter.filter(completed_stats),
-                    stats_writer=log_writer.write_stats,
-                    dashboard=dashboard,
-                    snapshot=analyzer.snapshot,
-                )
                 next_survey_poll = _next_interval_deadline(
                     next_survey_poll,
                     interval_seconds,

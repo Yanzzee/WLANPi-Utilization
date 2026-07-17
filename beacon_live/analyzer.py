@@ -211,6 +211,44 @@ class Analyzer:
         )
         return published
 
+    def publish_capture_complete(
+        self,
+        local_cu_percent: Optional[float],
+        *,
+        include_history: bool = True,
+    ) -> list[SecondStats]:
+        """Publish seconds completed by the ordered capture stream.
+
+        TShark can have many rows buffered when a wall-clock refresh fires. A
+        second is therefore complete only after a frame from a later capture
+        second has been ingested. This prevents live publication from making
+        an incomplete retry bucket immutable while older rows are still being
+        drained from TShark stdout.
+        """
+        self._latest_local_cu_percent = local_cu_percent
+        if self._reference_timestamp is None:
+            return []
+
+        capture_second = int(self._reference_timestamp)
+        published = self._publish_ready(
+            before_second=capture_second,
+            default_local_cu_percent=local_cu_percent,
+            include_history=include_history,
+            refresh_snapshot=False,
+        )
+        if not published:
+            return []
+
+        latest_second = published[-1].second
+        self._expire_records(self._reference_timestamp)
+        self._prune_completed_seconds(latest_second)
+        self._refresh_current_snapshot(
+            reference_timestamp=float(latest_second + 1),
+            current_second=latest_second,
+            upper_exclusive=float(latest_second + 1),
+        )
+        return published
+
     def flush(self, *, include_history: bool = True) -> list[SecondStats]:
         """Publish every observed second still buffered by the analyzer."""
         for second in sorted(self._pending_seconds):
@@ -271,6 +309,7 @@ class Analyzer:
         before_second: Optional[int] = None,
         default_local_cu_percent: Optional[float] = None,
         include_history: bool = True,
+        refresh_snapshot: bool = True,
     ) -> list[SecondStats]:
         published: list[SecondStats] = []
         retained: list[SecondStats] = []
@@ -288,7 +327,8 @@ class Analyzer:
                 self._record_history(stats)
 
         self._ready_stats = retained
-        self._refresh_after_publication()
+        if refresh_snapshot:
+            self._refresh_after_publication()
         return published
 
     def _record_history(self, stats: SecondStats) -> None:
@@ -745,6 +785,17 @@ def _frames_by_bssid(
         if bssid is not None:
             grouped.setdefault(bssid, []).append(frame)
     return grouped
+
+
+def associate_frame_bssid(
+    frame: FrameRecord,
+    known_bssids: tuple[str, ...],
+) -> Optional[str]:
+    """Associate a frame using BSSID/TA/RA/SA/DA address matches."""
+    known_by_address = {
+        _canonical_address(bssid): bssid for bssid in known_bssids
+    }
+    return _associated_bssid(frame, known_by_address)
 
 
 def _associated_bssid(

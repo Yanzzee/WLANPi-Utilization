@@ -228,6 +228,12 @@ Every received retry transmission is counted, including multiple retries of the
 same original frame. A nonzero value below 1% is displayed as `<1%` rather than
 being rounded to `0%`.
 
+The channel `RET` value is not scoped to the footer BSSID. It uses every decoded
+retry-eligible frame heard in monitor mode on the tuned channel, including
+traffic not addressed to the WLAN Pi. Live buckets are finalized only after an
+ordered capture timestamp enters the next second, so a wall-clock redraw cannot
+publish a partial bucket while TShark still has older rows buffered.
+
 The Retries footer shows the BSSID with the highest retry percentage for the
 current second. A tie keeps the previously displayed retry BSSID. If no retries
 occurred, the footer shows the strongest beacon BSSID by RSSI. Frames can be
@@ -363,6 +369,43 @@ sudo .venv/bin/beacon-live live --iface wlan0 --channel 36 --survey-debug
 Unsupported or unusable survey counters produce a warning while QBSS beacon
 capture continues. AP QBSS CU and local survey CU are different measurements
 and are never combined.
+
+### Retry PCAP audit
+
+To verify the retry numerator, denominator, and footer selection independently
+of the LCD, stop the live display and collect a short monitor-mode capture on
+the same channel. For channel 36, the exact setup and dump commands are:
+
+```bash
+sudo ip link set wlan0 down
+sudo iw dev wlan0 set type monitor
+sudo ip link set wlan0 up
+sudo iw dev wlan0 set channel 36 HT20
+sudo dumpcap -i wlan0 -a duration:60 -s 0 \
+  -w /tmp/wlanpi-retry-debug.pcapng
+```
+
+`dumpcap` records all frames delivered by the monitor interface; there is no
+destination-MAC capture filter. Use `iw dev wlan0 set freq <MHz> HT20` instead
+of the channel command when testing an explicit center frequency.
+
+Run the audit on the WLAN Pi or copy the PCAPNG to a development machine with
+TShark and this package installed:
+
+```bash
+.venv/bin/beacon-live retry-debug \
+  --input /tmp/wlanpi-retry-debug.pcapng \
+  --output-csv /tmp/wlanpi-retry-audit.csv
+```
+
+Each `channel` CSV row is the exact one-second value used by `RET` and the
+graph. It reports all decoded frames, frames with a readable Retry bit, mutually
+exclusive group-address/missing-bit/non-retryable-type exclusions, the eligible
+denominator, retry numerator, and percentage. The following `bssid` rows show
+the same calculation for each known BSSID. `footer_bssid` and
+`is_footer_bssid` identify the BSSID selected for the bottom two display lines.
+PCAP files and audit output contain real network MAC addresses and SSIDs and
+should be handled as sensitive diagnostic data.
 
 ### Replay without Wi-Fi hardware
 
