@@ -16,6 +16,7 @@ from beacon_live.lcd_dashboard import _OVERFLOW_GRAPH
 from beacon_live.lcd_dashboard import _STATION_GRAPH
 from beacon_live.lcd_dashboard import _format_station_count
 from beacon_live.lcd_dashboard import _raw_to_graph_height
+from beacon_live.lcd_dashboard import _value_to_graph_height
 from beacon_live.models import BeaconRecord
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
@@ -39,14 +40,15 @@ def test_lcd_dashboard_writes_128_square_ppm_and_creates_directory(
 
     assert payload.startswith(b"P6\n128 128\n255\n")
     assert len(payload.split(b"\n", 3)[3]) == 128 * 128 * 3
-    assert dashboard.text_lines[0] == "5180MHz STA -- SUM --"
+    assert dashboard.text_lines[0] == "5180MHz Channel"
     assert dashboard.text_lines[1] == "CU --% AVG --% MAX --%"
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
-    assert state["metadata"] == "5180MHz STA -- SUM --"
+    assert state["metadata"] == "5180MHz Channel"
     assert state["metadata_candidates"] == [
-        "5180MHz STA -- SUM --",
-        "5180 STA -- SUM --",
+        "5180MHz Channel",
+        "5180 Channel",
     ]
+    assert state["metadata_metric_token_count"] == 1
     assert state["metric_color"] == list(_CU_GRAPH)
     assert state["summary_metric_token_count"] == 2
     assert state["channel"] == "36"
@@ -70,7 +72,7 @@ def test_lcd_dashboard_uses_requested_two_row_header_and_footer(
 
     metadata, summary, ssid, rssi, bssid, channel = dashboard.text_lines
 
-    assert metadata == "5975MHz STA 12 SUM 18"
+    assert metadata == "5975MHz Channel"
     assert summary == "CU 75% AVG 50% MAX 75%"
     assert ssid == "Alpha"
     assert rssi == "-45"
@@ -120,7 +122,15 @@ def test_raw_qbss_values_map_to_quarter_scale_graph_height() -> None:
     assert _raw_to_graph_height(255) == 64
 
 
-def test_station_sum_and_bssid_count_support_three_digit_values(
+def test_station_counts_map_one_to_one_to_64_graph_pixels() -> None:
+    assert _value_to_graph_height(0, 64) == 1
+    assert _value_to_graph_height(1, 64) == 1
+    assert _value_to_graph_height(32, 64) == 32
+    assert _value_to_graph_height(64, 64) == 64
+    assert _value_to_graph_height(65, 64) == 64
+
+
+def test_station_sum_supports_three_digit_values(
     tmp_path: Path,
 ) -> None:
     dashboard = LcdDashboard(
@@ -139,8 +149,10 @@ def test_station_sum_and_bssid_count_support_three_digit_values(
             )
         )
     )
+    dashboard.set_active_screen(2)
 
-    assert dashboard.text_lines[0] == "STA 999 SUM 999"
+    assert dashboard.text_lines[0] == "Stations"
+    assert dashboard.text_lines[1] == "SUM 999 MAX 999 TOP --"
 
 
 def test_station_count_above_999_uses_infinity_symbol_in_text() -> None:
@@ -210,6 +222,7 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.navigate_down(now=1.0)
     assert dashboard.active_screen_id == ADMISSION_CAPACITY_SCREEN_ID
     assert dashboard.metric_color == _ADMISSION_GRAPH
+    assert dashboard.text_lines[0] == "5180MHz Admission"
     assert dashboard.text_lines[1] == "ADC 80% AVG 45% MIN 10%"
     assert dashboard.text_lines[2] == "Alpha"
     assert [second for second, _ in dashboard.graph_data] == [1000, 1001]
@@ -224,8 +237,8 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.navigate_down(now=1.3)
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert dashboard.metric_color == _STATION_GRAPH
-    assert dashboard.text_lines[0] == "5180MHz TOP STA 10"
-    assert dashboard.text_lines[1] == "SUM 15 AVG 9 MAX 15"
+    assert dashboard.text_lines[0] == "5180MHz Stations"
+    assert dashboard.text_lines[1] == "SUM 15 MAX 15 TOP 10"
     assert dashboard.text_lines[2] == "Bravo"
     assert dashboard.graph_data == ((1000, 3), (1001, 15))
     station_pixels = dashboard.render().split(b"\n", 3)[3]
@@ -234,7 +247,7 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.snapshot is snapshot
 
 
-def test_total_station_graph_truncates_over_100_and_colors_overflow_red(
+def test_total_station_graph_truncates_over_64_and_colors_overflow_red(
     tmp_path: Path,
 ) -> None:
     dashboard = LcdDashboard(
@@ -244,8 +257,8 @@ def test_total_station_graph_truncates_over_100_and_colors_overflow_red(
     )
     dashboard.update(
         _snapshot(
-            _stats(1000, 25.0, 64, station_count=80),
-            _stats(1001, 50.0, 128, station_count=150),
+            _stats(1000, 25.0, 64, station_count=64),
+            _stats(1001, 50.0, 128, station_count=65),
         )
     )
     dashboard.set_active_screen(2)
@@ -253,7 +266,8 @@ def test_total_station_graph_truncates_over_100_and_colors_overflow_red(
     pixel_data = dashboard.render().split(b"\n", 3)[3]
     latest_x = GRAPH_X + GRAPH_WIDTH - 1
 
-    assert dashboard.graph_data == ((1000, 80), (1001, 150))
+    assert dashboard.graph_data == ((1000, 64), (1001, 65))
+    assert _pixel(pixel_data, latest_x - 1, GRAPH_Y) == _STATION_GRAPH
     assert _pixel(pixel_data, latest_x, GRAPH_Y) == _OVERFLOW_GRAPH
     assert _pixel(pixel_data, latest_x, GRAPH_Y + GRAPH_HEIGHT - 1) == (
         _OVERFLOW_GRAPH

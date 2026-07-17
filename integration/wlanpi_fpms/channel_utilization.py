@@ -311,8 +311,18 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
     draw = ImageDraw.Draw(frame)
     font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
     metadata = _select_metadata(draw, state, font)
-    _draw_compact_text(draw, 1, 3, metadata, font, _WHITE, gap=3)
-    _draw_metric_summary(
+    _draw_metric_text(
+        draw,
+        1,
+        3,
+        metadata,
+        font,
+        state["metric_color"],
+        metric_token_count=state["metadata_metric_token_count"],
+        metric_tokens_at_end=True,
+        gap=3,
+    )
+    _draw_metric_text(
         draw,
         2,
         17,
@@ -320,6 +330,7 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         font,
         state["metric_color"],
         metric_token_count=state["summary_metric_token_count"],
+        metric_tokens_at_end=False,
         gap=3,
     )
     _draw_left_right(
@@ -354,8 +365,9 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
 
 def _read_display_state(path: Path) -> dict[str, object]:
     defaults = {
-        "metadata": "STA -- SUM --",
-        "metadata_candidates": ["STA -- SUM --"],
+        "metadata": "Channel",
+        "metadata_candidates": ["Channel"],
+        "metadata_metric_token_count": 1,
         "summary": "CU --% AVG --% MAX --%",
         "summary_metric_token_count": 2,
         "metric_color": _DEFAULT_METRIC_COLOR,
@@ -374,6 +386,7 @@ def _read_display_state(path: Path) -> dict[str, object]:
         if key
         not in {
             "metadata_candidates",
+            "metadata_metric_token_count",
             "summary_metric_token_count",
             "metric_color",
         }
@@ -387,15 +400,20 @@ def _read_display_state(path: Path) -> dict[str, object]:
     if not isinstance(candidates, list):
         candidates = defaults["metadata_candidates"]
     state["metadata_candidates"] = [str(value) for value in candidates]
+    state["metadata_metric_token_count"] = _read_metric_token_count(
+        payload.get("metadata_metric_token_count"),
+        default=1,
+    )
     state["summary_metric_token_count"] = _read_metric_token_count(
-        payload.get("summary_metric_token_count")
+        payload.get("summary_metric_token_count"),
+        default=2,
     )
     state["metric_color"] = _read_metric_color(payload.get("metric_color"))
     return state
 
 
-def _read_metric_token_count(value: object) -> int:
-    return value if isinstance(value, int) and value >= 0 else 2
+def _read_metric_token_count(value: object, *, default: int) -> int:
+    return value if isinstance(value, int) and value >= 0 else default
 
 
 def _read_metric_color(value: object) -> tuple[int, int, int]:
@@ -465,24 +483,7 @@ def _select_metadata(draw, state: dict[str, object], font) -> str:
     return str(candidates[-1])
 
 
-def _draw_compact_text(
-    draw,
-    x: int,
-    y: int,
-    text: str,
-    font,
-    color,
-    *,
-    gap: int,
-) -> None:
-    """Draw space-delimited fields with a fixed pixel gap."""
-    current_x = x
-    for token in text.split():
-        _draw_text_top(draw, current_x, y, token, font, color)
-        current_x += _text_width(draw, token, font) + gap
-
-
-def _draw_metric_summary(
+def _draw_metric_text(
     draw,
     x: int,
     y: int,
@@ -491,9 +492,10 @@ def _draw_metric_summary(
     metric_color: object,
     *,
     metric_token_count: object,
+    metric_tokens_at_end: bool,
     gap: int,
 ) -> None:
-    """Draw the graph-associated metric in color and secondary fields white."""
+    """Draw graph-associated leading or trailing fields in the graph color."""
     color = (
         metric_color
         if isinstance(metric_color, tuple) and len(metric_color) == 3
@@ -504,15 +506,22 @@ def _draw_metric_summary(
         if isinstance(metric_token_count, int) and metric_token_count >= 0
         else 2
     )
+    tokens = str(text).split()
+    trailing_start = max(0, len(tokens) - colored_tokens)
     current_x = x
-    for index, token in enumerate(str(text).split()):
+    for index, token in enumerate(tokens):
+        is_metric = (
+            index >= trailing_start
+            if metric_tokens_at_end
+            else index < colored_tokens
+        )
         _draw_text_top(
             draw,
             current_x,
             y,
             token,
             font,
-            color if index < colored_tokens else _WHITE,
+            color if is_metric else _WHITE,
         )
         current_x += _text_width(draw, token, font) + gap
 

@@ -191,8 +191,9 @@ class LcdDashboard:
             "screen_count": self.screen_manager.screen_count,
             "metadata": metadata,
             "metadata_candidates": self.metadata_candidates,
+            "metadata_metric_token_count": view.metadata_metric_token_count,
             "summary": summary,
-            "summary_metric_token_count": 2,
+            "summary_metric_token_count": view.summary_metric_token_count,
             "metric_color": self.metric_color,
             "ssid": ssid,
             "rssi": rssi,
@@ -231,6 +232,8 @@ def _raw_to_graph_height(raw: int) -> int:
 def _value_to_graph_height(value: float, maximum: float) -> int:
     if maximum == 255:
         return _raw_to_graph_height(round(value))
+    if maximum == GRAPH_HEIGHT:
+        return min(GRAPH_HEIGHT, max(1, round(value)))
     if maximum <= 0:
         return 1
     bounded = min(maximum, max(0, value))

@@ -167,9 +167,9 @@ def test_launch_failure_is_reported_without_leaving_session(
 @pytest.mark.parametrize(
     ("metadata", "summary"),
     [
-        ("2484MHz STA 999 SUM 999", "CU 99% AVG 99% MAX 99%"),
-        ("2484MHz STA 999 SUM 999", "ADC 99% AVG 99% MIN 99%"),
-        ("2484MHz TOP STA 999", "SUM 999 AVG 999 MAX 999"),
+        ("2484MHz Channel", "CU 99% AVG 99% MAX 99%"),
+        ("2484MHz Admission", "ADC 99% AVG 99% MIN 99%"),
+        ("2484MHz Stations", "SUM 999 MAX 999 TOP 999"),
     ],
 )
 def test_all_screen_text_allows_ten_pixel_scanner_font(
@@ -191,7 +191,7 @@ def test_all_screen_text_allows_ten_pixel_scanner_font(
 
 def test_three_digit_percentage_uses_nine_pixel_font_fallback() -> None:
     state = _font_state(
-        metadata="2484MHz STA 999 SUM 999",
+        metadata="2484MHz Admission",
         summary="ADC 100% AVG 100% MIN 100%",
     )
 
@@ -205,11 +205,11 @@ def test_three_digit_percentage_uses_nine_pixel_font_fallback() -> None:
     assert selected.size == 9
 
 
-def test_metric_summary_colors_only_graph_associated_value() -> None:
+def test_metric_text_colors_summary_prefix_and_metadata_suffix() -> None:
     draw = _FakeDraw()
     metric_color = (0, 160, 255)
 
-    channel_utilization._draw_metric_summary(
+    channel_utilization._draw_metric_text(
         draw,
         2,
         17,
@@ -217,6 +217,18 @@ def test_metric_summary_colors_only_graph_associated_value() -> None:
         _FakeFont(size=10, path="scanner.ttf", character_width=6),
         metric_color,
         metric_token_count=2,
+        metric_tokens_at_end=False,
+        gap=3,
+    )
+    channel_utilization._draw_metric_text(
+        draw,
+        1,
+        3,
+        "2484MHz Admission",
+        _FakeFont(size=10, path="scanner.ttf", character_width=6),
+        metric_color,
+        metric_token_count=1,
+        metric_tokens_at_end=True,
         gap=3,
     )
 
@@ -227,6 +239,8 @@ def test_metric_summary_colors_only_graph_associated_value() -> None:
         "45%",
         "MIN",
         "10%",
+        "2484MHz",
+        "Admission",
     ]
     assert [call[1] for call in draw.text_calls] == [
         metric_color,
@@ -235,15 +249,17 @@ def test_metric_summary_colors_only_graph_associated_value() -> None:
         (255, 255, 255),
         (255, 255, 255),
         (255, 255, 255),
+        (255, 255, 255),
+        metric_color,
     ]
 
 
 def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
     state = {
-        "metadata": "2484MHz STA 999 SUM 999",
+        "metadata": "2484MHz Admission Capacity",
         "metadata_candidates": [
-            "2484MHz STA 999 SUM 999",
-            "2484 STA 999 SUM 999",
+            "2484MHz Admission Capacity",
+            "2484 Admission",
         ],
         "summary": "CU 99% AVG 99% MAX 99%",
         "ssid": "Example",
@@ -255,15 +271,15 @@ def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
 
     selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
 
-    assert selected == "2484 STA 999 SUM 999"
+    assert selected == "2484 Admission"
 
 
 def test_metadata_never_includes_band_information() -> None:
     state = {
-        "metadata": "2484MHz STA 1 SUM 2",
+        "metadata": "2484MHz Channel",
         "metadata_candidates": [
-            "2484MHz STA 1 SUM 2",
-            "2484 STA 1 SUM 2",
+            "2484MHz Channel",
+            "2484 Channel",
         ],
         "summary": "CU 9% AVG 9% MAX 9%",
         "ssid": "Example",
@@ -275,7 +291,7 @@ def test_metadata_never_includes_band_information() -> None:
 
     selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
 
-    assert selected == "2484MHz STA 1 SUM 2"
+    assert selected == "2484MHz Channel"
     assert "G" not in selected
 
 

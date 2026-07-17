@@ -229,6 +229,8 @@ Show channel utilization for the selected BSSID.
 Recommended behavior:
 
 * display the selected BSSID identity
+* show `Channel` on the top line in the CU graph color; do not show `STA` or
+  `SUM` on that line
 * display CU from the latest beacon of that BSSID
 * show a two-minute graph of CU for the selected BSSID(s)
 * indicate when the selected BSSID changed with a vertical line in the graph
@@ -240,6 +242,8 @@ Show admission capacity instead for the selected BSSID.
 Recommended behavior:
 
 * use the same selected BSSID logic as CU
+* show `Admission` on the top line in the ADC graph color; do not show `STA` or
+  `SUM` on that line
 * display admission capacity as a percentage of the maximum ADC value, 31,250,
   from the latest beacon in the window
 * show ADC, average ADC, and minimum ADC percentages without CU values
@@ -274,12 +278,13 @@ Recommended behavior:
 * make the total station count the primary value
 * optionally swap the CU/SUM layout if that improves readability
 * display the SSID/BSSID with the highest station count
-* graph the two-minute trend on a fixed 0–100 scale
-* truncate graph bars above 100 at the graph ceiling and distinguish them as
+* show `Stations` on the top line in the station graph color
+* show `SUM`, `MAX`, and `TOP` on the second line; omit `AVG`
+* graph the two-minute trend on a fixed 0–64 scale, with one station per
+  vertical graph pixel
+* truncate graph bars above 64 at the graph ceiling and distinguish them as
   overflow bars
-* label the highest advertised station count as `TOP STA`; do not show a BSSID
-  count on this screen
-* ensure `TOP STA` and the footer SSID/BSSID describe the same BSSID
+* ensure `TOP` and the footer SSID/BSSID describe the same BSSID
 
 Display styling
 

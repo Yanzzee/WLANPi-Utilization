@@ -7,6 +7,8 @@ from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import AdmissionCapacityScreen
 from beacon_live.screens import CU_SCREEN_ID
+from beacon_live.screens import CuScreen
+from beacon_live.screens import STATION_GRAPH_MAXIMUM
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 from beacon_live.screens import TotalStationCountScreen
 
@@ -38,6 +40,7 @@ def test_admission_capacity_uses_selected_bssid_and_shared_adc_history() -> None
     view = AdmissionCapacityScreen().render(snapshot)
 
     assert view.title == "Admission Capacity"
+    assert view.metadata_tokens == ("Admission",)
     assert view.summary == "ADC 80% AVG 45% MIN 10%"
     assert "CU" not in view.summary
     assert view.graph_label == "Selected ADC"
@@ -76,9 +79,9 @@ def test_total_station_count_uses_shared_history_and_highest_station_bssid() -> 
     view = TotalStationCountScreen().render(snapshot)
 
     assert view.title == "Total Station Count"
-    assert view.summary == "SUM 15 AVG 9 MAX 15"
-    assert view.metadata_tokens == ("TOP STA", "10")
-    assert view.graph_maximum == 100
+    assert view.summary == "SUM 15 MAX 15 TOP 10"
+    assert view.metadata_tokens == ("Stations",)
+    assert view.graph_maximum == STATION_GRAPH_MAXIMUM
     assert snapshot.selected_bssid == "aa"
     assert view.identity.ssid == "Bravo"
     assert view.identity.bssid == "bb"
@@ -86,7 +89,7 @@ def test_total_station_count_uses_shared_history_and_highest_station_bssid() -> 
     assert [point.value for point in view.graph_points] == [3, 15]
 
 
-def test_total_station_graph_keeps_fixed_scale_above_100() -> None:
+def test_total_station_graph_keeps_fixed_64_count_scale() -> None:
     analyzer = Analyzer()
     analyzer.ingest(
         _record(
@@ -94,7 +97,7 @@ def test_total_station_graph_keeps_fixed_scale_above_100() -> None:
             ssid="Crowded",
             bssid="aa",
             cu_raw=64,
-            station_count=150,
+            station_count=65,
             admission_capacity=15625,
             rssi_dbm=-40,
         )
@@ -103,8 +106,14 @@ def test_total_station_graph_keeps_fixed_scale_above_100() -> None:
 
     view = TotalStationCountScreen().render(analyzer.snapshot)
 
-    assert view.graph_maximum == 100
-    assert [point.value for point in view.graph_points] == [150]
+    assert view.graph_maximum == 64
+    assert [point.value for point in view.graph_points] == [65]
+
+
+def test_cu_screen_uses_channel_top_line_label() -> None:
+    view = CuScreen().render(_analyzer_with_history().snapshot)
+
+    assert view.metadata_tokens == ("Channel",)
 
 
 def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:

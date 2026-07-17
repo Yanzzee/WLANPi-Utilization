@@ -12,6 +12,7 @@ from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 CU_SCREEN_ID = "cu"
 ADMISSION_CAPACITY_SCREEN_ID = "admission_capacity"
 TOTAL_STATION_COUNT_SCREEN_ID = "total_station_count"
+STATION_GRAPH_MAXIMUM = 64
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,8 @@ class ScreenView:
     graph_points: tuple[GraphPoint, ...]
     graph_maximum: float
     identity: DisplayIdentity
+    metadata_metric_token_count: int = 1
+    summary_metric_token_count: int = 2
 
 
 class ScreenDefinition(Protocol):
@@ -68,7 +71,7 @@ class CuScreen:
         return ScreenView(
             screen_id=self.screen_id,
             title="Channel Utilization",
-            metadata_tokens=_selected_station_metadata(snapshot),
+            metadata_tokens=("Channel",),
             summary=summary,
             graph_label="Selected QBSS CU",
             graph_points=graph_points,
@@ -94,7 +97,7 @@ class AdmissionCapacityScreen:
         return ScreenView(
             screen_id=self.screen_id,
             title="Admission Capacity",
-            metadata_tokens=_selected_station_metadata(snapshot),
+            metadata_tokens=("Admission",),
             summary=(
                 f"ADC {_whole_percent(current)}% "
                 f"AVG {_whole_percent(_mean(values))}% "
@@ -137,18 +140,15 @@ class TotalStationCountScreen:
         return ScreenView(
             screen_id=self.screen_id,
             title="Total Station Count",
-            metadata_tokens=(
-                "TOP STA",
-                _station_count(top_station_count),
-            ),
+            metadata_tokens=("Stations",),
             summary=(
                 f"SUM {_station_count(current_sum)} "
-                f"AVG {_station_count(_rounded(_mean(values)))} "
-                f"MAX {_station_count(max(values) if values else None)}"
+                f"MAX {_station_count(max(values) if values else None)} "
+                f"TOP {_station_count(top_station_count)}"
             ),
             graph_label="Total QBSS station count",
             graph_points=graph_points,
-            graph_maximum=100,
+            graph_maximum=STATION_GRAPH_MAXIMUM,
             identity=_identity_from_state(
                 top_station_state,
                 unavailable_text="<No Station Counts>",
@@ -201,21 +201,6 @@ def _admission_capacity_percent(value: Optional[int]) -> Optional[float]:
     if value is None:
         return None
     return value / QBSS_ADMISSION_CAPACITY_MAX * 100
-
-
-def _selected_station_metadata(snapshot: MetricsSnapshot) -> tuple[str, ...]:
-    selected_station_count = snapshot.current.selected_qbss_station_count
-    station_sum = (
-        snapshot.current.qbss_station_count_sum
-        if snapshot.generated_at is not None
-        else None
-    )
-    return (
-        "STA",
-        _station_count(selected_station_count),
-        "SUM",
-        _station_count(station_sum),
-    )
 
 
 def _selected_identity(snapshot: MetricsSnapshot) -> DisplayIdentity:
@@ -271,7 +256,3 @@ def _station_count(value: Optional[int]) -> str:
 
 def _whole_percent(value: Optional[float]) -> str:
     return "--" if value is None else str(round(value))
-
-
-def _rounded(value: Optional[float]) -> Optional[int]:
-    return None if value is None else round(value)
