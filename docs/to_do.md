@@ -22,7 +22,7 @@ Features & changes
     *disable/override other buttons while the display application is running
 7. DONE     Menu - add logging only start/stop without any display
     do any screens need to be a separate menu?
-8. Documentation
+8. DONE     Documentation
     reduce README to user information only
     create appropriate documents in docs folder 
 9. DONE     when logging, periodically check for free disk space and close if nearly full

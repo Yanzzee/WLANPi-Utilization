@@ -1,473 +1,268 @@
-WLANPi Utilization 1.1 Technical Plan
+# Architecture
+
+This document is the technical source of truth for WLANPi Beacon Live. It
+describes the current Phase 1–5 architecture and the constraints future work
+must preserve.
+
+User operation belongs in the [README](../README.md). Detailed display and log
+behavior lives in [screens.md](screens.md) and [logging.md](logging.md).
+
+## Core invariants
+
+- Capture each decoded 802.11 frame exactly once.
+- Analyze each frame through one shared analyzer pipeline.
+- Keep a continuous 120-second rolling history.
+- Publish immutable snapshots for every renderer and shared completed
+  statistics for logging.
+- Never restart capture, analysis, or history when the active screen changes or
+  logging starts/stops.
+- Keep UI state, logging state, and analyzer state separate.
+- Keep hardware-specific code isolated from parser and analyzer logic.
+- Keep the live path free of pandas.
+- Users never select an SSID or BSSID.
+- Treat AP QBSS utilization and local survey utilization as separate metrics.
+- Treat advertised QBSS station count and any future observed-client count as
+  separate metrics. Do not call observed clients an associated-station count.
+
+## Data flow
+
+```text
+monitor interface / replay input
+            │
+            ▼
+ acquisition and parsing ── one normalized FrameRecord per decoded frame
+            │
+            ▼
+      shared Analyzer ───── rolling frames, latest beacons, derived metrics
+            │
+            ▼
+ shared analyzer output
+      ├── immutable MetricsSnapshot ── terminal/LCD renderers
+      └── completed SecondStats ────── shared logging service
+
+ valid beacon projections ─────────── shared logging service
+```
+
+Display navigation changes only the active screen index. Logging changes only
+whether the logging service consumes records and snapshots. Neither operation
+creates another analyzer or capture worker.
+
+## Acquisition layer
+
+Live capture configures one interface in monitor mode on a selected 20 MHz
+channel and launches one line-buffered TShark process. The TShark display filter
+accepts decoded WLAN frames; it does not filter for traffic addressed to the
+WLAN Pi.
+
+The parser normalizes available fields into `FrameRecord`, including:
+
+- capture timestamp;
+- 802.11 type, subtype, and readable Retry bit;
+- BSSID, TA, RA, SA, and DA addresses;
+- SSID and RSSI;
+- frame length and beacon interval;
+- QBSS channel utilization, station count, and admission capacity; and
+- supported vendor AP-name/vendor clues.
+
+A valid beacon can also be represented as `BeaconRecord`. Replay inputs feed
+the same aggregation behavior without requiring Wi-Fi hardware.
+
+Hardware commands (`ip`, `iw`, TShark, survey reads) stay in the live/survey
+boundary. Parsers, aggregation, selection, grouping, and renderers remain
+hardware-testable.
+
+## Analysis layer
+
+`Analyzer` owns the rolling state and publishes `MetricsSnapshot` objects. It
+maintains:
+
+- normalized frames in the current 120-second window;
+- beacons grouped by BSSID;
+- the latest authoritative beacon for each BSSID;
+- per-second history rows;
+- per-BSSID and channel retry counts;
+- automatically selected display BSSIDs;
+- best-effort radio groups; and
+- channel-composition state.
+
+The analyzer ingests live rows continuously but avoids rebuilding a snapshot
+for every busy-channel frame. It publishes when capture timestamps cross a
+second boundary and when pending data is flushed during shutdown.
+
+### Rolling-window and latest-beacon rules
+
+- A BSSID is present only while at least one of its beacons remains in the
+  rolling window.
+- For an already selected BSSID, its newest beacon in the window is
+  authoritative for SSID, QBSS utilization, station count, admission capacity,
+  AP name, vendor, and beacon interval.
+- Older beacon contents never overwrite newer values.
+- The latest-beacon rule chooses values within a BSSID; it is not a BSSID
+  selection tie-breaker.
+- Inactive screens continue receiving the same new history through shared
+  snapshots.
 
-Objective
+### QBSS BSSID selection
 
-Keep capture and analysis single-pass and continuous, while making the display layer switchable. The app should collect frames once, compute metrics once, retain a rolling two-minute history, and let the user scroll through views without restarting any analysis.
+Only BSSIDs whose latest retained beacon contains usable QBSS channel
+utilization are candidates for the Utilization and Admission screens.
 
-Core design rules
+1. Find the strongest peak RSSI in the window.
+2. Treat candidates within 3 dB of that signal as near-equal.
+3. Prefer the near-equal candidate advertising the highest latest station
+   count.
+4. If the current selection remains tied, keep it to prevent churn.
+5. Use a deterministic BSSID ordering only after those rules; never use beacon
+   or frame timing as a tie-breaker.
 
-1. The user never selects a BSSID or SSID.
-2. The application chooses the reporting BSSID automatically for each view.
-3. Switching views must not restart capture, metric accumulation, or graph history.
-4. Every screen should render from the same current snapshot plus the same two-minute rolling history.
-5. For any chosen BSSID, the latest beacon in the window is the authoritative beacon for that BSSID.
-6. Use a 2–3 dB hysteresis threshold when deciding whether to switch to a different strongest BSSID.
-7. AP name IEs should be treated as a best-effort clue for radio grouping, not as a standard identity field.
+Users cannot override this selection.
 
-⸻
+### Retry buckets and selection
 
-Recommended architecture
+Retry samples are independent one-second channel ratios. A live second closes
+only after an ordered capture timestamp enters a later second; a wall-clock UI
+refresh must not finalize it while older TShark rows may still be buffered.
 
-1) Acquisition layer
+The denominator contains frames eligible for Retry-bit retransmission:
+unicast data plus retry-capable unicast management frames with a readable Retry
+bit. Exclude beacons, probe requests, Action No Ack, group-addressed frames,
+control frames, extension frames, and frames without a readable Retry bit.
+Count every captured retry transmission, including multiple retries of the same
+original frame.
+
+A frame is associated with a known BSSID when that BSSID appears in `bssid`,
+TA, RA, SA, or DA. The retry footer uses the BSSID with the highest one-second
+retry percentage. It keeps the current footer on a percentage tie and falls
+back to the strongest beacon RSSI when no retries occurred. Timing is never a
+tie-breaker.
+
+### Radio grouping
 
-A single capture worker reads frames continuously and emits normalized frame records into the analysis pipeline.
+Radio grouping is deliberately conservative and best-effort. A BSSID is not
+assumed to equal a physical radio.
 
-Monitor-mode acquisition includes every decoded 802.11 frame heard on the
-tuned channel, regardless of whether it is addressed to the WLAN Pi. The live
-TShark display filter selects decoded WLAN frames only; it does not select a
-destination address.
+Current grouping requires a shared vendor OUI and compatible AP-name/RSSI/MAC
+evidence. Matching AP names permit a wider RSSI tolerance; without an AP name,
+BSSIDs need similar RSSI and related MAC addresses. Conflicting known AP names
+prevent grouping. Complete-link compatibility prevents a chain of weak matches
+from collapsing clearly different radios.
 
-This layer should do only the minimum necessary work:
-
-* timestamp
-* channel / frequency
-* RSSI
-* BSSID
-* SSID
-* beacon/probe-response/frame type
-* Retry bit
-* sequence-related fields if useful
-* station count / QBSS fields if present
-* AP name or vendor-specific name field if present
+AP names and vendor-specific fields are clues, not standardized identities.
+Composition counts must therefore be labeled as estimates.
 
-Do not make this layer aware of screen logic.
+## Snapshot model
 
-2) Analysis layer
+The immutable snapshot contains:
 
-A single analyzer maintains the rolling window and updates derived state continuously.
+- the generated/reference time and window length;
+- current and historical `SecondStats`;
+- current `BssidState` and `RetryBssidState` collections;
+- selected QBSS, station, and retry BSSIDs; and
+- a `CompositionSnapshot`.
 
-It should:
-
-* keep a two-minute rolling buffer of per-frame observations
-* maintain a latest-record per BSSID
-* maintain per-BSSID rolling metrics
-* maintain per-channel aggregates
-* maintain best-effort radio groups
-* expose a read-only snapshot object to the UI
+UI code reads the snapshot and formats a view. It must not independently parse
+frames, select BSSIDs, or compute metrics.
 
-3) Display layer
+## Display layer
 
-Each screen is a pure renderer over the same snapshot.
+`ScreenManager` owns only the active screen index and navigation debounce. The
+five screen definitions are pure renderers over a snapshot:
 
-The display system should:
+1. Utilization
+2. Admission
+3. Composition
+4. Stations
+5. Retries
 
-* hold a list of screen definitions
-* switch the active screen index on up/down
-* never reset the analyzer on navigation
-* never rebuild the rolling history on navigation
-* only redraw what is currently active
+Up/down navigation changes the index with wraparound and a 0.2-second debounce.
+It does not reset analyzer state. The LCD renderer writes a PPM frame and JSON
+display state; the thin FPMS adapter owns GPIO/menu integration and draws those
+artifacts on the device display.
 
-If the current front panel expects a single “Display” start mode, that mode should initialize the shared analyzer once, then attach the screen selector on top of it.
-
-⸻
-
-Data model
-
-Raw frame record
-
-A normalized record for every captured frame.
-
-Suggested fields:
+See [screens.md](screens.md) for exact metric and presentation behavior.
 
-* ts
-* channel
-* frequency
-* bssid
-* ssid
-* rssi
-* frame_type
-* subtype
-* retry_flag
-* transmitter address (TA)
-* receiver address (RA)
-* source address (SA)
-* destination address (DA)
-* frame_len
-* seq_ctrl if available
-* beacon_interval if available
-* qbss_cu
-* qbss_admission_capacity
-* station_count
-* ap_name
-* vendor_ie_source
-* is_management_frame
-* is_beacon
-* is_probe_response
+## Logging layer
 
-This is the minimal canonical input for all later metrics.
+One `LoggingService` is shared by display-with-logging and logging-only modes.
+It consumes valid beacon projections and completed analyzer statistics, and it
+owns file state, disk checks, low-disk markers, and rollover. Logging-only mode
+substitutes a no-op renderer but runs the same acquisition and analyzer.
 
-Per-BSSID state
+Logging state can change without changing the analyzer or capture process. If
+disk pressure stops logging during display mode, display capture continues. If
+it occurs in logging-only mode, the process exits cleanly after closing logs.
 
-One record per BSSID, updated from the rolling window.
+See [logging.md](logging.md) for formats and policy.
 
-Suggested fields:
+## Runtime modes
 
-* bssid
-* ssid
-* last_seen_ts
-* latest_beacon_ts
-* latest_beacon_record
-* window_frames
-* window_beacons
-* window_management_frames
-* window_retry_frames
-* window_total_frames
-* window_station_count_latest
-* window_qbss_present
-* window_cu_latest
-* window_admission_capacity_latest
-* window_rssi_latest
-* window_rssi_peak
-* window_ap_name
-* radio_group_id
-* selection_score
+- **FPMS display:** live capture plus LCD artifacts and screen navigation.
+- **FPMS display and log:** the same runtime with logging active.
+- **FPMS logging-only:** the same capture/analyzer with rendering disabled.
+- **Terminal live:** the same analyzer with a terminal renderer.
+- **Replay:** saved TSV input through parser/aggregation behavior without Wi-Fi
+  hardware.
+- **Retry debug:** offline PCAP/PCAPNG audit with explicit exclusion counts.
 
-Important rule: latest_beacon_record must be the newest beacon for that BSSID inside the current window, even if another older beacon has a different station count or QBSS value.
+The FPMS adapter prevents simultaneous display and logging-only capture
+sessions so the device never starts two capture pipelines for one app session.
 
-Per-radio group state
+## Module boundaries
 
-This is the best-effort deduplicated “actual radio” abstraction.
+| Area | Main modules |
+| --- | --- |
+| Models and snapshots | `beacon_live/models.py` |
+| Parsing | `beacon_live/parser.py` |
+| Rolling analysis and selection | `beacon_live/analyzer.py`, `beacon_live/aggregator.py` |
+| Radio grouping | `beacon_live/radio_grouping.py` |
+| Screens and UI state | `beacon_live/screens.py`, `beacon_live/screen_manager.py` |
+| Terminal/LCD rendering | `beacon_live/dashboard.py`, `beacon_live/lcd_dashboard.py` |
+| Live hardware boundary | `beacon_live/live.py`, `beacon_live/survey.py` |
+| Logging | `beacon_live/log_writer.py` |
+| CLI/device entrypoints | `beacon_live/cli.py`, `beacon_live/device.py` |
+| FPMS integration | `integration/wlanpi_fpms/channel_utilization.py` |
 
-Suggested fields:
+## Development rules
 
-* radio_group_id
-* representative_bssid
-* candidate_bssids
-* ap_name_set
-* ssid_set
-* channel
-* best_rssi
-* best_station_count
-* last_updated_ts
+- Prefer dataclasses, pure functions, immutable snapshots, and small modules.
+- Add pytest coverage for parser, aggregation, selection, grouping, logging,
+  and navigation behavior.
+- A new display screen should normally be a new renderer over existing shared
+  state—not a new analysis path.
+- Do not introduce hardware requirements into unit-testable analysis code.
+- Preserve laptop replay mode and the common engine used by live, replay,
+  logging, and display workflows.
 
-This is where AP name can help collapse multiple BSSIDs that belong to the same physical radio.
+See [development.md](development.md) for setup and test commands.
 
-Channel snapshot (if needed)
+## Phase history
 
-One object per channel, derived from all BSSID states on that channel.
+The phase structure remains the project roadmap and implementation history.
 
-Suggested fields:
+### Phase 1 — shared rolling snapshot
 
-* channel
-* active_bssid_count
-* qbss_reporting_bssid_count
-* radio_group_count
-* unique_ap_count_estimate
-* total_station_count
-* total_retry_rate
-* selected_display_bssid
-* selected_display_radio_group
-* selected_cu
-* selected_admission_capacity
-* selected_retry_rate
-* selected_beacon_rate
-* top_station_bssid
-* top_retry_bssid
+- Introduced the single analyzer and 120-second state.
+- Kept the original utilization workflow through shared snapshots.
+- Established newest-beacon authority within each BSSID.
 
-UI state
+### Phase 2 — screen navigation and core metrics
 
-Keep UI state separate from analytics.
+- Added navigation without capture/history resets.
+- Added admission-capacity and total-station-count renderers.
 
-Suggested fields:
+### Phase 3 — retry percentage
 
-* active_screen_id
-* screen_order
-* scroll_locked if needed for brief navigation debounce
-* last_user_input_ts
+- Expanded the canonical live input to all decoded WLAN frames.
+- Added capture-timestamp-driven one-second retry buckets and offline audit.
 
-Do not store metric history in UI state.
+### Phase 4 — composition and radio grouping
 
-⸻
+- Added conservative AP-name/OUI/RSSI/MAC radio grouping.
+- Added the channel-composition renderer.
 
-BSSID selection logic
+### Phase 5 — logging safety and documentation
 
-Primary rule
-
-Choose the reporting BSSID using the strongest RSSI beacon in the current window.
-
-Hysteresis rule
-
-Do not switch to a different BSSID unless it is meaningfully stronger, using a 2-3 dB threshold.
-
-Tie-breakers
-
-When BSSIDs are close enough to be considered the same radio or near-equal candidates:
-
-1. Prefer the one with the most stations.
-2. If still tied, keep the current selected BSSID to avoid display churn.
-
-“Same radio” heuristic
-
-Treat BSSIDs as probably the same radio when one or more of these are true:
-
-* AP name matches
-* similar RSSI and adjacent BSSID MACs
-
-This should be a heuristic, not a hard identity rule. The goal is stable display behavior, not perfect RF identity resolution.
-
-Latest beacon rule
-
-For the selected BSSID and for any metric shown on a screen, always use the latest beacon from the two-minute window as the displayed value source for that BSSID.
-
-That avoids stale QBSS values from beacons that have not yet refreshed.
-
-If a no beacon is received from a BSSID during the latest window, do not include any metrics for that BSSID in the current window.
-
-Never change the data or graph for anything older than the current window.
-
-⸻
-
-Screen architecture
-
-Each screen should be a pure function of the shared snapshot.
-
-Screen 1: CU
-
-Show channel utilization for the selected BSSID.
-
-Recommended behavior:
-
-* display the selected BSSID identity
-* show `Utilization` on the top line in the CU graph color; do not show `STA` or
-  `SUM` on that line
-* display CU from the latest beacon of that BSSID
-* show a two-minute graph of CU for the selected BSSID(s)
-* indicate when the selected BSSID changed with a vertical line in the graph
-
-Screen 2: Admission capacity
-
-Show admission capacity instead for the selected BSSID.
-
-Recommended behavior:
-
-* use the same selected BSSID logic as CU
-* show `Admission` on the top line in the ADC graph color; do not show `STA` or
-  `SUM` on that line
-* display admission capacity as a percentage of the maximum ADC value, 31,250,
-  from the latest beacon in the window
-* show ADC, average ADC, and minimum ADC percentages without CU values
-* show a two-minute graph of ADC percentage for the selected BSSID(s)
-* indicate when the selected BSSID changed with a vertical line in the graph
-* keep the same graph time base as the CU screen
-
-Screen 3: Channel composition
-
-Show:
-
-* number of BSSIDs on the channel
-* number reporting QBSS IEs
-* estimated number of distinct radios
-* estimated number of unique APs (likely to be the same if only looking at one channel)
-* the strongest SSID & BSSID by signal
-* the AP name associated with the strongest signal BSSID
-* the AP vendor if known - use vendor IEs and possibly OUI if database is available
-
-Recommended behavior:
-
-* provide a “best effort” distinction between BSSID count and radio count
-* include a detail line for the current grouping confidence if useful
-* optionally list BSSIDs sorted by station count on a secondary detail screen
-
-Screen 4: Total station count
-
-Show total station count sum of all received BSSID beacons
-
-Recommended behavior:
-
-* make the total station count the primary value
-* optionally swap the CU/SUM layout if that improves readability
-* display the SSID/BSSID with the highest station count
-* show `Stations` on the top line in the station graph color
-* show `SUM`, `MAX`, and `TOP` on the second line; omit `AVG`
-* graph the two-minute trend on a fixed 0–64 scale, with one station per
-  vertical graph pixel
-* truncate graph bars above 64 at the graph ceiling and distinguish them as
-  overflow bars
-* ensure `TOP` and the footer SSID/BSSID describe the same BSSID
-
-Display styling
-
-* use the same Scanner font for all screens and prefer size 10
-* color the current graph-associated metric to match its graph
-* render all secondary summary fields, metadata, and footer text in white
-* use a distinct graph/primary-metric color for each screen
-
-Screen 5: Retry percentage
-
-Show retries as a percentage of retry-eligible frames received on the channel.
-
-Recommended behavior:
-
-* normalize all received 802.11 frame headers through the existing single
-  capture and analyzer pipeline
-* bucket retry metrics into independent one-second samples; `RET` and each graph
-  column are the retry percentage for that second, while the graph retains the
-  latest two minutes of those samples
-* complete a live bucket from the ordered capture stream, after a frame timestamp
-  enters a later second; do not use the wall-clock redraw deadline to finalize a
-  bucket because TShark stdout may still contain buffered rows for that second
-* compute each sample as frames with the Retry bit set divided by all
-  retry-eligible frames received in that second
-* treat unicast data frames and retry-capable unicast management frames as
-  eligible; exclude beacons, probe requests, Action No Ack, group-addressed
-  frames, control frames, extension frames, and frames without a readable Retry
-  bit
-* count every received retry transmission independently, including multiple
-  retry transmissions of the same original frame; do not deduplicate retries
-* keep beacon contents authoritative only for beacon-derived fields, while
-  allowing eligible non-beacon frames to contribute to retry counts
-* associate a frame with a known BSSID when the BSSID occurs in `wlan.bssid`,
-  transmitter address (`wlan.ta`), receiver address (`wlan.ra`), source address
-  (`wlan.sa`), or destination address (`wlan.da`)
-* show frequency and `Retries` on the top line
-* show `RET`, `AVG`, and `MAX` percentages on the second line
-* render a nonzero percentage below 1% as `<1%` so whole-number display
-  rounding does not make measurable retry traffic look like zero
-* graph the two-minute history of one-second retry percentages on a fixed
-  0–100% scale
-* display the beacon-derived SSID and RSSI for the BSSID with the highest
-  one-second retry percentage
-* if multiple BSSIDs tie for the highest retry percentage, keep displaying the
-  previous retry-screen BSSID; do not use frame timing as a tie-breaker
-* if no retries occurred in the second, display the strongest-RSSI beacon BSSID
-* retain beacon interval and expose the selected strongest-signal BSSID's
-  observed beacon rate as a percentage of expected when available (separate graph)
-* preserve a gap/unavailable value when capture input lacks retry or beacon
-  interval fields
-* support offline verification from a monitor-mode PCAP/PCAPNG file. The retry
-  audit must report per-second channel and per-known-BSSID numerators,
-  denominators, percentages, group-address exclusions, missing-Retry-bit
-  exclusions, non-retryable-type exclusions, and the selected footer BSSID.
-
-
-⸻
-
-
-Navigation
-
-The control stick up/down should only change active_screen_id.
-
-Requirements:
-
-* no analyzer reset
-* no graph reset
-* no capture restart
-* no per-screen reinitialization
-
-Add a small debounce so one press does not accidentally skip multiple screens.
-
-
-⸻
-
-
-Logging-only mode
-
-Add a menu item that starts capture and logging without rendering the display screens.
-
-This mode should:
-
-* use the same acquisition and analysis engine
-* write logs to disk
-* keep screen rendering disabled
-* still enforce disk-space safety checks
-
-
-⸻
-
-
-Documentation
-
-Split documentation into:
-
-* user-facing README
-* developer/technical docs in docs/
-
-The README should stay user-centered and brief. The deeper implementation notes belong in docs/.
-
-⸻
-
-Rolling history and graph behavior
-
-All graphs should use the same two-minute rolling window.
-
-That means:
-
-* graphs do not restart when the user scrolls
-* the newest visible sample should always be current
-* the history for the inactive screens continues updating in the background
-* when the user returns to a screen, it shows the current state immediately
-
-Implementation-wise, the simplest reliable pattern is a time-bucketed ring buffer keyed by metric and BSSID/radio/channel.
-
-⸻
-
-Suggested internal update cycle
-
-1. Receive frame.
-2. Normalize it into a canonical frame record.
-3. Update per-BSSID state.
-4. Update radio-group heuristics.
-5. Update channel aggregates.
-6. Expire records older than two minutes.
-7. Recompute selected BSSID and selected radio.
-8. Publish a new immutable snapshot.
-9. The display reads the latest snapshot on its own refresh cadence.
-
-⸻
-
-Logging and disk safety
-
-Long-term logging needs guardrails.
-
-Recommended behavior:
-
-* periodically check free disk space
-* stop cleanly before the disk is nearly full
-* append a clear end-of-log marker that explains logging stopped because disk space ran low
-* rotate to a new file at fixed intervals for long-term logging
-
-Suggested log policy:
-
-* one active file at a time
-* periodic rotation by time or size
-* final “disk full / logging stopped” record in the file when the safety threshold is hit
-
-⸻
-
-Practical implementation order
-
-Phase 1
-
-* create the shared rolling snapshot model
-* keep the existing CU screen working through the new snapshot
-* confirm the latest-beacon rule
-
-Phase 2
-
-* add screen navigation without reset behavior
-* add admission capacity and total station count views
-
-Phase 3
-
-* add retry percentage
-* confirm the capture path supports Retry-bit extraction reliably
-
-Phase 4
-
-* add radio grouping using AP name and other vendor clues
-* add channel composition metrics
-
-Phase 5
-
-* add logging-only mode and disk-space guardrails
-* tighten docs and split user/developer content
+- Added shared toggleable logging for display and logging-only operation.
+- Added periodic free-space checks, low-disk markers, and hourly rollover.
+- Split user, screen, logging, troubleshooting, testing, and development
+  documentation by audience.
