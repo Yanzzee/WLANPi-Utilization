@@ -72,6 +72,15 @@ def _patch_fpms(path: Path) -> None:
             raise SystemExit(f"FPMS post-menu anchor not found in {path}")
         text = text.replace(anchor, append_code + anchor, 1)
 
+    # The three auxiliary-key dispatchers live in fpms.py, not Button.
+    for button_number in (1, 2, 3):
+        text = _insert_page_handler(
+            text,
+            method_name=f"menu_key{button_number}",
+            handler_name=f"page_key{button_number}_handler",
+            path=path,
+        )
+
     _write_with_backup(path, text)
 
 
@@ -98,30 +107,23 @@ def _patch_buttons(path: Path) -> None:
         )
         text = text[:insertion] + handler_code + text[insertion:]
 
-    text = _insert_page_navigation_handler(
+    text = _insert_page_handler(
         text,
         method_name="menu_up",
         handler_name="page_up_handler",
         path=path,
     )
-    text = _insert_page_navigation_handler(
+    text = _insert_page_handler(
         text,
         method_name="menu_down",
         handler_name="page_down_handler",
         path=path,
     )
-    for button_number in (1, 2, 3):
-        text = _insert_page_navigation_handler(
-            text,
-            method_name=f"menu_key{button_number}",
-            handler_name=f"page_key{button_number}_handler",
-            path=path,
-        )
     if text != original:
         _write_with_backup(path, text)
 
 
-def _insert_page_navigation_handler(
+def _insert_page_handler(
     text: str,
     *,
     method_name: str,

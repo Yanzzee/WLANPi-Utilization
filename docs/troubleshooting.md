@@ -28,6 +28,31 @@ sudo ./scripts/install_wlanpi_fpms.sh
 
 The patcher keeps one-time `.beacon-live.bak` copies of modified FPMS files.
 
+## `sudo: unable to resolve host`
+
+This warning means the device hostname is not represented correctly in
+`/etc/hosts`. It is separate from the Beacon Live installer and does not cause
+an FPMS patch-anchor failure.
+
+Compare the configured hostname with the local host entry:
+
+```bash
+hostname
+cat /etc/hostname
+grep -v '^#' /etc/hosts
+```
+
+On a typical WLAN Pi, `/etc/hosts` should contain a line using the exact name
+reported by `hostname`, for example:
+
+```text
+127.0.1.1 wlanpi-2g
+```
+
+Correct the hostname or `/etc/hosts` entry using the normal WLAN Pi OS system
+configuration. The warning can coexist with a successful command, but fixing
+it avoids repeated `sudo` delays and noise.
+
 ## A required command is missing
 
 Run the setup check:
