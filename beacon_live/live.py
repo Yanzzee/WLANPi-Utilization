@@ -31,6 +31,10 @@ from beacon_live.survey import compute_local_cu_result_from_samples
 from beacon_live.survey import parse_survey_dump
 
 TSHARK_CAPTURE_FIELDS = list(TSHARK_FRAME_FIELD_NAMES)
+TSHARK_CAPTURE_PROTOCOLS = (
+    "radiotap,wlan_radio,wlan,wlan_ext,wlan_aggregate"
+)
+TSHARK_CAPTURE_BUFFER_MIB = 16
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
 LIVE_WARMUP_CYCLES = 1
@@ -204,6 +208,16 @@ def build_tshark_command(iface: str) -> list[str]:
         "-l",
         "-i",
         iface,
+        "-B",
+        str(TSHARK_CAPTURE_BUFFER_MIB),
+        "--disable-protocol",
+        "ALL",
+        "--enable-protocol",
+        TSHARK_CAPTURE_PROTOCOLS,
+        "-o",
+        "wlan.defragment:FALSE",
+        "-o",
+        "wlan.enable_decryption:FALSE",
         "-N",
         "m",
         "-Y",
@@ -453,21 +467,22 @@ def run_live(
                     # boundary plus beacon-delay grace, avoiding a rebuild for
                     # every busy-channel row.
                     analyzer.ingest(frame, publish_snapshot=False)
-                    include_history = warmup_filter.remaining_cycles <= 0
-                    completed_stats = analyzer.publish_capture_complete(
-                        latest_local_cu_percent,
-                        include_history=include_history,
-                    )
-                    _publish_live_stats(
-                        warmup_filter.filter(completed_stats),
-                        stats_writer=(
-                            logging_service.write_stats
-                            if logging_service is not None
-                            else _discard_stats
-                        ),
-                        dashboard=dashboard,
-                        snapshot=analyzer.snapshot,
-                    )
+                    if analyzer.has_ready_stats:
+                        include_history = warmup_filter.remaining_cycles <= 0
+                        completed_stats = analyzer.publish_capture_complete(
+                            latest_local_cu_percent,
+                            include_history=include_history,
+                        )
+                        _publish_live_stats(
+                            warmup_filter.filter(completed_stats),
+                            stats_writer=(
+                                logging_service.write_stats
+                                if logging_service is not None
+                                else _discard_stats
+                            ),
+                            dashboard=dashboard,
+                            snapshot=analyzer.snapshot,
+                        )
 
             current = time.monotonic()
             if (

@@ -1,5 +1,6 @@
 import csv
 import json
+import threading
 from collections import namedtuple
 from datetime import datetime
 from datetime import timedelta
@@ -176,6 +177,72 @@ def test_logging_service_checks_disk_only_at_periodic_deadlines(
     assert service.maintain(now=9.99) is None
     assert service.maintain(now=10.0) is None
     assert checks == [tmp_path, tmp_path]
+    service.stop()
+
+
+def test_logging_service_writes_on_worker_and_drains_in_order(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    original_write_beacon = CaptureLogWriter.write_beacon
+
+    def delayed_write(
+        writer: CaptureLogWriter,
+        record: BeaconRecord,
+    ) -> None:
+        entered_write.set()
+        release_write.wait(timeout=2.0)
+        original_write_beacon(writer, record)
+
+    monkeypatch.setattr(CaptureLogWriter, "write_beacon", delayed_write)
+    service = _logging_service(tmp_path)
+    assert service.start()
+    paths = service.current_paths
+    assert paths is not None and paths.beacons_jsonl is not None
+
+    service.write_beacon(_beacon(timestamp=1000.0))
+    assert entered_write.wait(timeout=1.0)
+    # The worker is still blocked in the first disk write, but the capture-side
+    # caller can enqueue the next ordered record without waiting for that I/O.
+    service.write_beacon(_beacon(timestamp=1001.0))
+    release_write.set()
+    assert service.stop()
+
+    rows = [
+        json.loads(line)
+        for line in paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["local_time"] for row in rows] == [
+        datetime.fromtimestamp(timestamp).astimezone().isoformat()
+        for timestamp in (1000.0, 1001.0)
+    ]
+
+
+def test_logging_worker_write_error_preserves_low_disk_stop_behavior(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    attempted_write = threading.Event()
+
+    def failing_write(
+        writer: CaptureLogWriter,
+        record: BeaconRecord,
+    ) -> None:
+        attempted_write.set()
+        raise OSError("disk write failed")
+
+    monkeypatch.setattr(CaptureLogWriter, "write_beacon", failing_write)
+    service = _logging_service(tmp_path)
+    assert service.start()
+    service.write_beacon(_beacon())
+    assert attempted_write.wait(timeout=1.0)
+    assert service._write_failed.wait(timeout=1.0)
+
+    assert service.seconds_until_maintenance(now=0.0) == 0.0
+    assert service.maintain(now=0.0) is LoggingEvent.LOW_DISK_STOP
+    assert service.active is False
 
 
 def test_low_disk_stops_logging_and_writes_markers_to_both_formats(

@@ -93,7 +93,7 @@ Changing screens never restarts capture or clears graph history.
 | Stations | AP-advertised QBSS station counts plus unique client MACs observed in BSSID-linked data frames. |
 | Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
 | Beacon Loss | Percentage of phase-aware expected beacons not received across all BSSIDs on the strongest estimated radio. |
-| Composition | BSSID and QBSS counts plus best-effort physical-radio, AP name, and vendor information. |
+| Composition | BSSID and QBSS counts plus best-effort physical-radio, `AP` (vendor AP-name), and vendor information. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are
 shown as gaps or `--`. On Stations, the amber series is the AP-advertised QBSS

@@ -79,9 +79,22 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
     command = build_tshark_command("wlan9")
 
     assert command[:4] == ["tshark", "-l", "-i", "wlan9"]
-    assert command[4:6] == ["-N", "m"]
+    assert command[4:6] == ["-B", "16"]
+    assert command[6:10] == [
+        "--disable-protocol",
+        "ALL",
+        "--enable-protocol",
+        "radiotap,wlan_radio,wlan,wlan_ext,wlan_aggregate",
+    ]
+    assert [
+        command[index + 1]
+        for index, value in enumerate(command)
+        if value == "-o"
+    ] == ["wlan.defragment:FALSE", "wlan.enable_decryption:FALSE"]
+    assert command[command.index("-N") + 1] == "m"
     assert "wlan" in command
     assert "wlan.fc.type_subtype == 8" not in command
+    assert "-s" not in command
     assert _field_args(command) == [
         "frame.time_epoch",
         "wlan.fc.type",
@@ -97,7 +110,6 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         "wlan.qbss.scount",
         "wlan.qbss.adc",
         "radiotap.dbm_antsignal",
-        "frame.len",
         "wlan.fixed.beacon",
         "wlan.cisco.ccx1.name",
         "wlan.vs.aruba.ap_name",

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import json
+import queue
 import shutil
+import threading
 import time
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -45,9 +47,11 @@ STATS_CSV_FIELDS = [
 DEFAULT_MIN_FREE_BYTES = 256 * 1024 * 1024
 DEFAULT_DISK_CHECK_INTERVAL_SECONDS = 30.0
 DEFAULT_ROTATION_INTERVAL_SECONDS = 60.0 * 60.0
+DEFAULT_LOG_QUEUE_CAPACITY = 4096
 LOW_DISK_END_MESSAGE = (
     "END_OF_LOG: logging stopped because free disk space was nearly full"
 )
+_STOP_LOG_WRITER = object()
 
 
 @dataclass(frozen=True)
@@ -240,6 +244,7 @@ class LoggingService:
         min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
         disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
         rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
+        write_queue_capacity: int = DEFAULT_LOG_QUEUE_CAPACITY,
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] = lambda: datetime.now().astimezone(),
         disk_usage: Callable[[Path], object] = shutil.disk_usage,
@@ -252,6 +257,8 @@ class LoggingService:
             raise ValueError("disk check interval must be greater than zero")
         if rotation_interval_seconds <= 0:
             raise ValueError("rotation interval must be greater than zero")
+        if write_queue_capacity <= 0:
+            raise ValueError("write queue capacity must be greater than zero")
 
         self._metadata = metadata
         self._log_dir = log_dir
@@ -261,10 +268,14 @@ class LoggingService:
         self._min_free_bytes = min_free_bytes
         self._disk_check_interval_seconds = disk_check_interval_seconds
         self._rotation_interval_seconds = rotation_interval_seconds
+        self._write_queue_capacity = write_queue_capacity
         self._monotonic = monotonic
         self._now = now
         self._disk_usage = disk_usage
         self._writer: Optional[CaptureLogWriter] = None
+        self._write_queue: Optional[queue.Queue[object]] = None
+        self._writer_thread: Optional[threading.Thread] = None
+        self._write_failed = threading.Event()
         self._active = False
         self._file_number = 0
         self._next_disk_check: Optional[float] = None
@@ -294,6 +305,7 @@ class LoggingService:
         writer.open()
         started_at = self._monotonic()
         self._writer = writer
+        self._start_writer_worker(writer)
         self._active = True
         self._current_paths = paths
         self._pending_event = None
@@ -311,23 +323,16 @@ class LoggingService:
         return True
 
     def write_stats(self, stats: SecondStats) -> None:
-        if self._writer is not None:
-            try:
-                self._writer.write_stats(stats)
-            except OSError:
-                self._stop_for_low_disk(None)
-                self._pending_event = LoggingEvent.LOW_DISK_STOP
+        self._enqueue(stats)
 
     def write_beacon(self, record: BeaconRecord) -> None:
-        if self._writer is not None:
-            try:
-                self._writer.write_beacon(record)
-            except OSError:
-                self._stop_for_low_disk(None)
-                self._pending_event = LoggingEvent.LOW_DISK_STOP
+        self._enqueue(record)
 
     def maintain(self, *, now: Optional[float] = None) -> Optional[LoggingEvent]:
         """Run deterministic disk and rollover checks when their deadlines pass."""
+        if self._write_failed.is_set():
+            self._stop_for_low_disk(None)
+            return LoggingEvent.LOW_DISK_STOP
         if self._pending_event is not None:
             event = self._pending_event
             self._pending_event = None
@@ -358,7 +363,7 @@ class LoggingService:
         return None
 
     def seconds_until_maintenance(self, *, now: Optional[float] = None) -> Optional[float]:
-        if self._pending_event is not None:
+        if self._pending_event is not None or self._write_failed.is_set():
             return 0.0
         if not self._active:
             return None
@@ -394,6 +399,7 @@ class LoggingService:
         )
         writer.open()
         self._writer = writer
+        self._start_writer_worker(writer)
         self._active = True
         self._current_paths = paths
         self._next_disk_check = current + self._disk_check_interval_seconds
@@ -401,6 +407,7 @@ class LoggingService:
 
     def _stop_for_low_disk(self, free_bytes: Optional[int]) -> None:
         writer = self._writer
+        self._stop_writer_worker()
         try:
             if writer is not None:
                 writer.write_low_disk_end_marker(
@@ -421,11 +428,67 @@ class LoggingService:
         self._active = False
         self._next_disk_check = None
         self._next_rotation = None
+        self._stop_writer_worker()
+        self._write_failed.clear()
         if writer is not None:
             try:
                 writer.close()
             except OSError:
                 pass
+
+    def _enqueue(self, record: object) -> None:
+        work_queue = self._write_queue
+        if self._active and work_queue is not None:
+            # Backpressure is deliberate: never discard a log record merely to
+            # keep capture moving. The bounded queue absorbs normal disk jitter
+            # while preserving output correctness during a sustained slowdown.
+            work_queue.put(record)
+
+    def _start_writer_worker(self, writer: CaptureLogWriter) -> None:
+        self._write_failed.clear()
+        work_queue: queue.Queue[object] = queue.Queue(
+            maxsize=self._write_queue_capacity
+        )
+        thread = threading.Thread(
+            target=self._run_writer,
+            args=(writer, work_queue),
+            name="beacon-live-log-writer",
+            daemon=True,
+        )
+        self._write_queue = work_queue
+        self._writer_thread = thread
+        thread.start()
+
+    def _stop_writer_worker(self) -> None:
+        work_queue = self._write_queue
+        thread = self._writer_thread
+        self._write_queue = None
+        self._writer_thread = None
+        if work_queue is None or thread is None:
+            return
+        work_queue.put(_STOP_LOG_WRITER)
+        thread.join()
+
+    def _run_writer(
+        self,
+        writer: CaptureLogWriter,
+        work_queue: queue.Queue[object],
+    ) -> None:
+        write_failed = False
+        while True:
+            record = work_queue.get()
+            if record is _STOP_LOG_WRITER:
+                return
+            if write_failed:
+                continue
+            try:
+                if isinstance(record, BeaconRecord):
+                    writer.write_beacon(record)
+                elif isinstance(record, SecondStats):
+                    writer.write_stats(record)
+            except OSError:
+                write_failed = True
+                self._write_failed.set()
 
 
 def _advance_deadline(deadline: float, interval: float, current: float) -> float:

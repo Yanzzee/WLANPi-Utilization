@@ -55,13 +55,21 @@ channel and launches one line-buffered TShark process. The TShark display filter
 accepts decoded WLAN frames; it does not filter for traffic addressed to the
 WLAN Pi.
 
+The live TShark process enables only the Radiotap/802.11 dissector chain and
+disables WLAN decryption and defragmentation. None of the analyzer metrics
+requires payload or higher-layer protocol dissection. A 16 MiB capture buffer
+provides headroom during short scheduler stalls. Capture snapshot length remains
+unrestricted: TShark's snapshot length is global, so shortening data frames
+would also risk truncating beacon information elements used for QBSS, AP-name,
+vendor, and radio-grouping output.
+
 The parser normalizes available fields into `FrameRecord`, including:
 
 - capture timestamp;
 - 802.11 type, subtype, and readable Retry bit;
 - BSSID, TA, RA, SA, and DA addresses;
 - SSID and RSSI;
-- frame length and beacon interval;
+- beacon interval (and frame length when present in older replay exports);
 - QBSS channel utilization, station count, and admission capacity; and
 - supported vendor AP-name/vendor clues.
 
@@ -92,6 +100,13 @@ The analyzer ingests live rows continuously but avoids rebuilding a snapshot
 for every busy-channel frame. It publishes a second after ordered capture time
 passes that boundary by the 102.4 ms beacon-delay allowance, and when pending
 data is flushed during shutdown.
+
+Frame association, retry eligibility, and client detection are projected once
+per capture second. Completed one-second projections are retained for the
+rolling window and merged for snapshot publication. If the retained BSSID set
+changes, affected projections are rebuilt from the single raw-frame store so
+address-based association keeps the same meaning. The completed projection is
+also reused when publishing that second, avoiding a second window scan.
 
 ### Rolling-window and latest-beacon rules
 
@@ -219,9 +234,21 @@ It consumes valid beacon projections and completed analyzer statistics, and it
 owns file state, disk checks, low-disk markers, and rollover. Logging-only mode
 substitutes a no-op renderer but runs the same acquisition and analyzer.
 
+Log records enter a bounded FIFO queue and one logging thread owns record
+serialization, writes, and per-record flushes. Rollover, stop, and low-disk
+handling drain and join that worker before closing or replacing its files.
+Queue saturation applies backpressure rather than dropping records.
+
 Logging state can change without changing the analyzer or capture process. If
 disk pressure stops logging during display mode, display capture continues. If
 it occurs in logging-only mode, the process exits cleanly after closing logs.
+
+The analyzer remains single-threaded by design because capture timestamp order,
+latest-beacon authority, selection hysteresis, and immutable one-second closure
+share one state transition. TShark already performs capture/dissection in a
+separate process, while the logging worker removes disk I/O from that ordered
+analyzer path. Per-frame multiprocessing is avoided because serialization and
+reordering costs would work against the lightweight normalized row format.
 
 See [logging.md](logging.md) for formats and policy.
 

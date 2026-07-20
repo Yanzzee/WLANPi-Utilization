@@ -34,7 +34,6 @@ TSHARK_FRAME_FIELD_NAMES = (
     "wlan.qbss.scount",
     "wlan.qbss.adc",
     "radiotap.dbm_antsignal",
-    "frame.len",
     "wlan.fixed.beacon",
     "wlan.cisco.ccx1.name",
     "wlan.vs.aruba.ap_name",
@@ -44,10 +43,12 @@ TSHARK_FRAME_FIELD_NAMES = (
 )
 
 EXPECTED_TSHARK_FRAME_FIELD_COUNT = len(TSHARK_FRAME_FIELD_NAMES)
-PHASE_THREE_TSHARK_FRAME_FIELD_COUNT = (
-    EXPECTED_TSHARK_FRAME_FIELD_COUNT - 5
-)
-LEGACY_TSHARK_FRAME_FIELD_COUNT = PHASE_THREE_TSHARK_FRAME_FIELD_COUNT - 4
+# Older exports included the unused ``frame.len`` field. Keep accepting those
+# rows so replay and retry-debug inputs remain backward compatible while the
+# live command emits one less field for every captured frame.
+PRE_PERFORMANCE_TSHARK_FRAME_FIELD_COUNT = EXPECTED_TSHARK_FRAME_FIELD_COUNT + 1
+PHASE_THREE_TSHARK_FRAME_FIELD_COUNT = 16
+LEGACY_TSHARK_FRAME_FIELD_COUNT = 12
 
 
 def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
@@ -131,10 +132,35 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
         LEGACY_TSHARK_FRAME_FIELD_COUNT,
         PHASE_THREE_TSHARK_FRAME_FIELD_COUNT,
         EXPECTED_TSHARK_FRAME_FIELD_COUNT,
+        PRE_PERFORMANCE_TSHARK_FRAME_FIELD_COUNT,
     ):
         return None
 
     if len(fields) == EXPECTED_TSHARK_FRAME_FIELD_COUNT:
+        (
+            timestamp_text,
+            frame_type_text,
+            frame_subtype_text,
+            retry_text,
+            bssid_text,
+            transmitter_text,
+            receiver_text,
+            source_text,
+            destination_text,
+            ssid_text,
+            cu_text,
+            scount_text,
+            adc_text,
+            rssi_text,
+            beacon_interval_text,
+            cisco_ap_name_text,
+            aruba_ap_name_text,
+            extreme_ap_name_text,
+            aerohive_ap_name_text,
+            resolved_bssid_text,
+        ) = fields
+        frame_length_text = ""
+    elif len(fields) == PRE_PERFORMANCE_TSHARK_FRAME_FIELD_COUNT:
         (
             timestamp_text,
             frame_type_text,

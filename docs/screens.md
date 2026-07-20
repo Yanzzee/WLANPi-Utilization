@@ -189,7 +189,7 @@ It shows:
 - `QBSS`: retained BSSIDs advertising QBSS information;
 - `Est Radios`: best-effort estimated physical-radio count;
 - `Radio BSSIDs`: BSSIDs grouped with the strongest estimated radio;
-- `AP Name`: supported vendor AP-name information when present;
+- `AP`: supported vendor AP-name information when present;
 - `Vendor`: supported vendor identification when present.
 
 The footer cycles every two seconds through BSSIDs grouped with the strongest

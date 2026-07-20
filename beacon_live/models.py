@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from dataclasses import field
+from functools import cached_property
 from typing import Optional
 
 
@@ -56,12 +57,12 @@ class FrameRecord:
     def is_beacon(self) -> bool:
         return self.is_management_frame and self.frame_subtype == 8
 
-    @property
+    @cached_property
     def retry_eligible(self) -> bool:
         """Whether this received MPDU can contribute to a retry ratio."""
         return self.retry_exclusion_reason is None
 
-    @property
+    @cached_property
     def retry_exclusion_reason(self) -> Optional[str]:
         """Return why the frame is excluded from retry calculations."""
         if any(
@@ -86,7 +87,7 @@ class FrameRecord:
             return "non_retryable_frame_type"
         return None
 
-    @property
+    @cached_property
     def mac_addresses(self) -> tuple[str, ...]:
         """Return every available BSSID/TA/RA/SA/DA address once."""
         addresses: list[str] = []

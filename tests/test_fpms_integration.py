@@ -547,7 +547,7 @@ def test_composition_lines_choose_font_size_independently() -> None:
     state["detail_lines"] = [
         "Est Radios 99",
         "Radio BSSIDs 99",
-        "AP Name Room-101",
+        "AP Room-101",
         "Vendor Example Wireless Corporation",
     ]
     fonts = channel_utilization._scanner_font_candidates(

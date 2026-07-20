@@ -94,6 +94,21 @@ def test_parse_phase_four_uses_bundled_oui_resolution_as_vendor_fallback() -> No
     assert record.vendor == "AcmeWire"
 
 
+def test_parse_optimized_live_row_without_unused_frame_length() -> None:
+    record = parse_tshark_frame_row(
+        "1700000000.125\t0\t8\t0\tAA:BB:CC:DD:EE:FF\tAA:BB:CC:DD:EE:FF\tff:ff:ff:ff:ff:ff\tAA:BB:CC:DD:EE:FF\tff:ff:ff:ff:ff:ff\tLabNet\t128\t12\t42\t-47\t100\tRoom-101\t\t\t\tCisco_aa:bb:cc"
+    )
+
+    assert record is not None
+    assert record.frame_length is None
+    assert record.beacon_interval_tu == 100
+    assert record.qbss_cu_raw == 128
+    assert record.qbss_station_count == 12
+    assert record.qbss_admission_capacity == 42
+    assert record.ap_name == "Room-101"
+    assert record.vendor == "Cisco"
+
+
 def test_parse_all_frame_data_extracts_retry_without_beacon_fields() -> None:
     record = parse_tshark_frame_row(
         "1700000000.250\t2\t0\t1\taa:bb:cc:dd:ee:ff\t11:22:33:44:55:66\taa:bb:cc:dd:ee:ff\t11:22:33:44:55:66\t76:88:99:aa:bb:cc\t\t\t\t\t-51\t128\t"

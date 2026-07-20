@@ -98,7 +98,8 @@ The stats file contains one row for each emitted capture second. Columns cover:
 - strongest-radio beacon received/expected counts and beacon-loss percentage;
 - optional local survey utilization.
 
-Rows use local ISO-8601 timestamps with offsets and are flushed immediately.
+Rows use local ISO-8601 timestamps with offsets. The logging worker flushes
+each row as it writes it.
 The client field is named `unique_client_mac_count`. It is a per-second count,
 matching the cyan Stations graph sample; it is not the 120-second `MAC` summary
 total and does not contain a list of addresses.
@@ -110,8 +111,17 @@ logging is active. Objects contain local time, run metadata, SSID/BSSID, QBSS
 values, RSSI, beacon interval, AP-name/vendor clues, and the other normalized
 beacon fields available to the parser.
 
-Each line is flushed immediately. Normal beacon objects do not include a
-`record_type` field; the low-disk marker described below does.
+The logging worker flushes each line as it writes it. Normal beacon objects do
+not include a `record_type` field; the low-disk marker described below does.
+
+## Capture-path isolation
+
+Beacon and completed-second records are handed to one bounded FIFO logging
+queue. A dedicated logging thread serializes and flushes them in capture order,
+so normal filesystem latency does not stall TShark stdout draining or analyzer
+publication. Stop, rollover, and low-disk transitions drain and join the worker
+before files are closed. If the queue fills during a sustained disk slowdown,
+the producer waits rather than dropping output.
 
 ## Disk-space safety
 

@@ -605,6 +605,29 @@ def test_frames_associate_when_bssid_appears_in_any_mac_address_field() -> None:
     assert retry_state.window_retry_percent == pytest.approx(50.0)
 
 
+def test_cached_window_reassociates_older_frame_when_bssid_becomes_known() -> None:
+    analyzer = Analyzer()
+    bssid = "aa:bb:cc:dd:ee:ff"
+    analyzer.ingest(
+        _address_frame(1000.2, retry=True, transmitter_address=bssid),
+        publish_snapshot=False,
+    )
+    analyzer.ingest(
+        _beacon_frame(1001.0, bssid, "Alpha", -40, retry=False),
+        publish_snapshot=False,
+    )
+    analyzer.ingest(
+        _frame(1002.2, bssid, retry=False),
+        publish_snapshot=False,
+    )
+    analyzer.publish_capture_complete(None)
+
+    state = analyzer.snapshot.state_for(bssid)
+    assert state is not None
+    assert state.window_frame_count == 2
+    assert state.window_retry_frame_count == 1
+
+
 def test_top_retry_bssid_can_be_derived_before_its_beacon_is_seen() -> None:
     analyzer = Analyzer()
     analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=False))
@@ -759,6 +782,62 @@ def test_unique_client_mac_window_expires_old_clients() -> None:
 
     analyzer.advance(1003, None)
 
+    assert analyzer.snapshot.window_unique_client_mac_count == 1
+
+
+def test_high_load_buckets_keep_exact_retry_and_client_counts() -> None:
+    analyzer = Analyzer()
+    base_second = 1000
+    second_count = 6
+    frames_per_second = 1000
+    bssid = "02:00:00:00:00:01"
+    client = "02:00:00:00:10:01"
+
+    for offset in range(second_count):
+        second = base_second + offset
+        analyzer.ingest(
+            _beacon_frame(second, bssid, "Alpha", -40, retry=False),
+            publish_snapshot=False,
+        )
+        for index in range(frames_per_second):
+            analyzer.ingest(
+                FrameRecord(
+                    timestamp=second
+                    + (index + 1) / (frames_per_second + 2),
+                    bssid=bssid,
+                    frame_type=2,
+                    frame_subtype=0,
+                    retry_flag=index % 5 == 0,
+                    transmitter_address=client,
+                    receiver_address=bssid,
+                    source_address=client,
+                    destination_address=bssid,
+                ),
+                publish_snapshot=False,
+            )
+
+    analyzer.ingest(
+        _frame(
+            base_second + second_count + 0.2,
+            bssid,
+            retry=False,
+        ),
+        publish_snapshot=False,
+    )
+    published = analyzer.publish_capture_complete(None)
+
+    assert [row.second for row in published] == list(
+        range(base_second, base_second + second_count)
+    )
+    assert all(
+        row.received_frame_count == frames_per_second + 1
+        and row.retry_eligible_frame_count == frames_per_second
+        and row.retry_frame_count == frames_per_second // 5
+        and row.retry_percent == pytest.approx(20.0)
+        and row.unique_client_mac_count == 1
+        for row in published
+    )
+    assert analyzer.snapshot.current == published[-1]
     assert analyzer.snapshot.window_unique_client_mac_count == 1
 
 

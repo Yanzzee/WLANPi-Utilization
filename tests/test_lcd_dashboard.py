@@ -369,7 +369,7 @@ def test_lcd_composition_screen_writes_eight_line_text_state_without_graph(
     assert state["detail_lines"] == [
         "Est Radios 1",
         "Radio BSSIDs 2",
-        "AP Name Room-101",
+        "AP Room-101",
         "Vendor Example Wireless",
     ]
     assert state["text_only"] is True
