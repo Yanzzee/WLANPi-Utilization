@@ -321,6 +321,7 @@ def run_live(
     lcd_frame: Optional[Path] = None,
     logging_only: bool = False,
     logging_control_path: Optional[Path] = None,
+    logging_status_path: Optional[Path] = None,
     initial_logging_enabled: Optional[bool] = None,
     min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
     disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
@@ -478,6 +479,11 @@ def run_live(
                 logging_event = logging_service.maintain(now=current)
                 if logging_event is LoggingEvent.LOW_DISK_STOP:
                     low_disk_latched = True
+                    if logging_status_path is not None:
+                        _write_logging_status(
+                            logging_status_path,
+                            reason="disk_space_nearly_full",
+                        )
                     print(
                         "Logging stopped: free disk space is below the safety "
                         "threshold.",
@@ -620,6 +626,25 @@ def _read_logging_control(path: Path) -> Optional[bool]:
     except (KeyError, OSError, TypeError, ValueError, UnicodeError):
         return None
     return value if isinstance(value, bool) else None
+
+
+def _write_logging_status(path: Path, *, reason: str) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(
+            json.dumps({"reason": reason}, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except OSError:
+        # Notification IPC is best-effort and must never stop capture.
+        pass
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _print_logging_started(

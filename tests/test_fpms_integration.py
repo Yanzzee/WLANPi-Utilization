@@ -58,6 +58,7 @@ def test_fpms_launch_command_enables_both_logs_together() -> None:
     assert "--stats-csv" in display_only
     assert "--beacons-jsonl" in display_only
     assert "--logging-control" in display_only
+    assert "--logging-status" in display_only
     assert "--stats-csv" in display_and_log
     assert "--beacons-jsonl" in display_and_log
     assert display_and_log[display_and_log.index("--log-dir") :][:2] == [
@@ -204,6 +205,81 @@ def test_stop_logging_with_display_keeps_capture_process_running(
     ) == {"logging_enabled": False}
 
     session = app.g_vars["channel_utilization_session"]
+    session.stop()
+
+
+def test_display_and_log_start_message_is_shown_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    messages: list[str] = []
+    monkeypatch.setattr(
+        channel_utilization,
+        "_display_page_status",
+        lambda g_vars, message: messages.append(message),
+    )
+
+    app = channel_utilization.ChannelUtilizationApp(
+        {},
+        popen=lambda command: _FakeProcess(command),
+    )
+    app.launch(band="5", channel=36, logging=True)
+    app.launch(band="5", channel=36, logging=True)
+
+    assert messages == [
+        (
+            "Logging started: Ch 36 5180 MHz "
+            "Log folder: /var/log/wlanpi-beacon-live"
+        )
+    ]
+
+    session = app.g_vars["channel_utilization_session"]
+    session.stop()
+
+
+def test_display_low_disk_message_is_shown_once_and_logging_stays_stopped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    monkeypatch.setattr(channel_utilization, "LOG_DIR", log_dir)
+    messages: list[str] = []
+    monkeypatch.setattr(
+        channel_utilization,
+        "_display_page_status",
+        lambda g_vars, message: messages.append(message),
+    )
+
+    app = channel_utilization.ChannelUtilizationApp(
+        {},
+        popen=lambda command: _FakeProcess(command),
+    )
+    app.launch(band="5", channel=36, logging=True)
+    session = app.g_vars["channel_utilization_session"]
+    frame.with_name("logging.status.json").write_text(
+        json.dumps({"reason": "disk_space_nearly_full"}),
+        encoding="utf-8",
+    )
+
+    session._check_logging_status()
+    session._check_logging_status()
+    # FPMS can invoke the active page action again during refresh. It must not
+    # re-enable logging or repeat either notification after a low-disk stop.
+    app.launch(band="5", channel=36, logging=True)
+
+    assert session.logging_enabled is False
+    assert messages == [
+        f"Logging started: Ch 36 5180 MHz Log folder: {log_dir}",
+        (
+            "Logging stopped - disk nearly full: Ch 36 5180 MHz "
+            f"Log folder: {log_dir}"
+        ),
+    ]
+
     session.stop()
 
 

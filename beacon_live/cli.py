@@ -116,6 +116,8 @@ def _run_live_command(
             live_options["logging_only"] = True
         if args.logging_control is not None:
             live_options["logging_control_path"] = args.logging_control
+        if args.logging_status is not None:
+            live_options["logging_status_path"] = args.logging_status
         if args.logging_initial_state is not None:
             live_options["initial_logging_enabled"] = (
                 args.logging_initial_state == "enabled"
@@ -315,6 +317,12 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--logging-control",
+        type=Path,
+        required=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--logging-status",
         type=Path,
         required=False,
         help=argparse.SUPPRESS,

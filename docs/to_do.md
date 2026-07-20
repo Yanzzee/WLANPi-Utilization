@@ -75,3 +75,6 @@ Features & changes
         start logging hangs for a second before the screen can be navigated again
         add a status as it starts or change the menu to change text
         add confirmation that logging has stopped - logging channel X has started... etc
+25. unify app name - beacon-live and Utilization
+        update log path if necessary
+        

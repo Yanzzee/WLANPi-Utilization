@@ -342,11 +342,13 @@ def test_low_disk_stops_display_logging_but_capture_continues(
 ) -> None:
     stats_csv = tmp_path / "display-stats.csv"
     beacons_jsonl = tmp_path / "display-beacons.jsonl"
+    logging_status = tmp_path / "logging.status.json"
     _prepare_one_interval_live_run(monkeypatch)
 
     assert run_live(
         stats_csv=stats_csv,
         beacons_jsonl=beacons_jsonl,
+        logging_status_path=logging_status,
         min_free_bytes=10**30,
     ) == 0
 
@@ -357,6 +359,9 @@ def test_low_disk_stops_display_logging_but_capture_continues(
     assert rows[-1]["record_type"] == "end_of_log"
     assert rows[-1]["reason"] == "disk_space_nearly_full"
     assert sum(row.get("record_type") == "end_of_log" for row in rows) == 1
+    assert json.loads(logging_status.read_text(encoding="utf-8")) == {
+        "reason": "disk_space_nearly_full"
+    }
     # The terminal dashboard still receives later analyzed seconds after the
     # logging service has closed.
     assert "Alpha/aa:aa:aa:aa:aa:aa" in capsys.readouterr().out

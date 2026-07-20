@@ -20,8 +20,10 @@ closes any active logs.
 
 Successful logging start/stop notifications include the tuned channel,
 frequency, and `/var/log/wlanpi-beacon-live` folder. `Display + Log` shows the
-start notification before normal display operation and the stop notification
-when exiting left; both overlays restore the existing display state.
+start notification once, before normal display operation, and the stop
+notification when exiting left; both overlays restore the existing display
+state. If disk pressure stops logging while the display remains active, a
+one-time low-disk notification is shown.
 
 The FPMS adapter prevents a separate display capture from starting while a
 logging-only capture is already active. Stop the logging-only session first.

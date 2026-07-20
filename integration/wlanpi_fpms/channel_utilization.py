@@ -23,6 +23,7 @@ LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = "wlan0"
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
 LOGGING_STATUS_SECONDS = 1.0
+LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
 
 _WHITE = (255, 255, 255)
 _DEFAULT_METRIC_COLOR = (0, 220, 120)
@@ -93,6 +94,8 @@ def build_launch_command(
             str(LOG_DIR),
             "--logging-control",
             str(_logging_control_path()),
+            "--logging-status",
+            str(_logging_status_path()),
             "--logging-initial-state",
             "enabled" if logging else "disabled",
         ]
@@ -228,6 +231,7 @@ class ChannelUtilizationApp:
             self.g_vars.pop("channel_utilization_logging_session", None)
 
         session = self.g_vars.get("channel_utilization_session")
+        logging_started = False
         if not isinstance(session, _DisplaySession):
             _write_logging_enabled(logging)
             session = _DisplaySession(
@@ -251,11 +255,12 @@ class ChannelUtilizationApp:
                 self.g_vars.pop("channel_utilization_session", None)
                 _display_error(self.g_vars, "Unable to start capture.")
                 return
+            logging_started = logging
         elif session.finished and not session.exit_reported:
             session.exit_reported = True
             _display_error(self.g_vars, "Capture stopped.\nCheck journal.")
         else:
-            session.set_logging(logging)
+            logging_started = session.set_logging(logging)
 
         self.g_vars["page_exit_handler"] = session.stop
         self.g_vars["page_up_handler"] = session.navigate_up
@@ -265,14 +270,14 @@ class ChannelUtilizationApp:
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
-        if logging:
+        if logging_started:
             session.show_logging_status("Logging started")
 
     def start_logging_only(self, *, band: str, channel: int) -> None:
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession) and not display_session.finished:
-            display_session.set_logging(True)
-            display_session.show_logging_status("Logging started")
+            if display_session.set_logging(True):
+                display_session.show_logging_status("Logging started")
             return
 
         session = self.g_vars.get("channel_utilization_logging_session")
@@ -381,6 +386,7 @@ class _DisplaySession:
         self.screen_offset = 0
         self.current_screen_name: Optional[str] = None
         self.last_navigation_ts: Optional[float] = None
+        self.low_disk_stopped = False
 
     @property
     def finished(self) -> bool:
@@ -390,6 +396,7 @@ class _DisplaySession:
         FRAME_PATH.parent.mkdir(parents=True, exist_ok=True)
         FRAME_PATH.unlink(missing_ok=True)
         _screen_control_path(FRAME_PATH).unlink(missing_ok=True)
+        _logging_status_path().unlink(missing_ok=True)
         self._write_screen_offset()
         self.process = self.popen(self.command)
         self.thread = threading.Thread(
@@ -427,9 +434,14 @@ class _DisplaySession:
         self.g_vars.pop("page_key2_handler", None)
         self.g_vars.pop("page_key3_handler", None)
 
-    def set_logging(self, enabled: bool) -> None:
+    def set_logging(self, enabled: bool) -> bool:
+        if enabled and self.low_disk_stopped:
+            return False
+        if enabled == self.logging_enabled:
+            return False
         _write_logging_enabled(enabled)
         self.logging_enabled = enabled
+        return True
 
     def navigate_up(self) -> None:
         self._navigate(-1)
@@ -517,9 +529,28 @@ class _DisplaySession:
             except (FileNotFoundError, OSError):
                 pass
 
+            self._check_logging_status()
+
             if self.process is not None and self.process.poll() is not None:
                 return
             self.stop_event.wait(0.1)
+
+    def _check_logging_status(self) -> None:
+        if self.low_disk_stopped:
+            return
+        try:
+            payload = json.loads(
+                _logging_status_path().read_text(encoding="utf-8")
+            )
+        except (OSError, TypeError, ValueError, UnicodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        if payload.get("reason") != LOW_DISK_STATUS_REASON:
+            return
+        self.low_disk_stopped = True
+        self.logging_enabled = False
+        self.show_logging_status("Logging stopped - disk nearly full")
 
 
 class _LoggingOnlySession:
@@ -752,6 +783,10 @@ def _filename_component(value: str) -> str:
 
 def _logging_control_path() -> Path:
     return FRAME_PATH.with_name("logging.control.json")
+
+
+def _logging_status_path() -> Path:
+    return FRAME_PATH.with_name("logging.status.json")
 
 
 def _write_logging_enabled(enabled: bool) -> None:
