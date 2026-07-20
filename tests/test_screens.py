@@ -1,3 +1,5 @@
+from typing import Optional
+
 import pytest
 
 from beacon_live.analyzer import Analyzer
@@ -7,6 +9,8 @@ from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import AdmissionCapacityScreen
+from beacon_live.screens import COMPOSITION_SCREEN_ID
+from beacon_live.screens import CompositionScreen
 from beacon_live.screens import CU_SCREEN_ID
 from beacon_live.screens import CuScreen
 from beacon_live.screens import RETRY_SCREEN_ID
@@ -28,12 +32,14 @@ def test_screen_navigation_wraps_and_debounces_without_changing_snapshot() -> No
     assert not manager.navigate_down(now=10.1)
     assert manager.active_screen_id == ADMISSION_CAPACITY_SCREEN_ID
     assert manager.navigate_down(now=10.3)
-    assert manager.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert manager.active_screen_id == COMPOSITION_SCREEN_ID
     assert manager.navigate_down(now=10.6)
-    assert manager.active_screen_id == RETRY_SCREEN_ID
+    assert manager.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert manager.navigate_down(now=10.9)
+    assert manager.active_screen_id == RETRY_SCREEN_ID
+    assert manager.navigate_down(now=11.2)
     assert manager.active_screen_id == CU_SCREEN_ID
-    assert manager.navigate_up(now=11.2)
+    assert manager.navigate_up(now=11.5)
     assert manager.active_screen_id == RETRY_SCREEN_ID
 
     assert manager.snapshot is snapshot
@@ -122,6 +128,62 @@ def test_cu_screen_uses_utilization_top_line_label() -> None:
     assert view.metadata_tokens == ("Utilization",)
 
 
+def test_composition_screen_renders_only_analyzer_snapshot_fields() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.1,
+            ssid="Alpha",
+            bssid="00:11:22:33:44:50",
+            cu_raw=64,
+            station_count=3,
+            admission_capacity=10_000,
+            rssi_dbm=-35,
+            ap_name="Room-101",
+            vendor="Example Wireless",
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.2,
+            ssid="Bravo",
+            bssid="00:11:22:33:44:51",
+            cu_raw=64,
+            station_count=2,
+            admission_capacity=10_000,
+            rssi_dbm=-37,
+            ap_name="Room-101",
+            vendor="Example Wireless",
+        )
+    )
+
+    view = CompositionScreen().render(analyzer.snapshot)
+
+    assert view.title == "Composition"
+    assert view.metadata_tokens == ("Composition",)
+    assert view.summary == "BSSIDs 2 QBSS BSSIDs 2"
+    assert view.text_only
+    assert view.graph_points == ()
+    assert view.detail_lines == (
+        "Est Radios 1",
+        "Strongest Radio BSSIDs 2",
+        "AP Name Room-101",
+        "Vendor Example Wireless",
+    )
+    assert view.identity.ssid == "Alpha"
+    assert view.identity.bssid == "00:11:22:33:44:50"
+    assert view.identity.rssi_dbm == -35
+
+
+def test_composition_screen_uses_required_missing_name_placeholders() -> None:
+    view = CompositionScreen().render(Analyzer().snapshot)
+
+    assert view.detail_lines[-2:] == (
+        "AP Name <no AP name>",
+        "Vendor <unknown>",
+    )
+
+
 def test_retry_screen_uses_shared_history_and_highest_retry_bssid() -> None:
     snapshot = _retry_analyzer_with_history().snapshot
 
@@ -149,7 +211,7 @@ def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:
     analyzer = _analyzer_with_history()
     analyzer_identity = id(analyzer)
     manager = ScreenManager(snapshot=analyzer.snapshot, debounce_seconds=0)
-    manager.set_active_index(2)
+    manager.set_active_index(3)
     original_seconds = tuple(row.second for row in manager.snapshot.history)
 
     analyzer.ingest(
@@ -271,6 +333,8 @@ def _record(
     station_count: int,
     admission_capacity: int,
     rssi_dbm: int,
+    ap_name: Optional[str] = None,
+    vendor: Optional[str] = None,
 ) -> BeaconRecord:
     return BeaconRecord(
         timestamp=timestamp,
@@ -281,4 +345,6 @@ def _record(
         qbss_station_count=station_count,
         qbss_admission_capacity=admission_capacity,
         rssi_dbm=rssi_dbm,
+        ap_name=ap_name,
+        vendor=vendor,
     )

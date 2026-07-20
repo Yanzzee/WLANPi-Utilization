@@ -8,10 +8,13 @@ from typing import Optional, Union
 
 from beacon_live.models import BeaconRecord
 from beacon_live.models import BssidState
+from beacon_live.models import CompositionSnapshot
 from beacon_live.models import FrameRecord
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
+from beacon_live.radio_grouping import estimate_radio_groups
+from beacon_live.radio_grouping import select_strongest_radio
 
 DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
@@ -108,6 +111,9 @@ class Analyzer:
         self._history_selected_bssid: Optional[str] = None
         self._current_retry_bssid: Optional[str] = None
         self._history_retry_bssid: Optional[str] = None
+        self._composition_second: Optional[int] = None
+        self._strongest_radio_bssids: tuple[str, ...] = ()
+        self._composition_display_bssid: Optional[str] = None
         self._snapshot = MetricsSnapshot.empty(window_seconds=window_seconds)
 
     @property
@@ -393,6 +399,7 @@ class Analyzer:
             self._history_by_second[second]
             for second in sorted(self._history_by_second)
         )
+        composition = self._composition_snapshot(states, current_second)
         self._snapshot = MetricsSnapshot(
             generated_at=reference_timestamp,
             window_seconds=self.window_seconds,
@@ -403,6 +410,83 @@ class Analyzer:
             top_station_bssid=_top_station_bssid(states),
             top_retry_bssid=self._current_retry_bssid,
             retry_bssids=retry_states,
+            composition=composition,
+        )
+
+    def _composition_snapshot(
+        self,
+        states: tuple[BssidState, ...],
+        current_second: int,
+    ) -> CompositionSnapshot:
+        groups = estimate_radio_groups(states)
+        previous_second = self._composition_second
+        previous_radio_bssids = self._strongest_radio_bssids
+
+        strongest = select_strongest_radio(
+            groups,
+            previous_radio_bssids,
+        )
+
+        if strongest is None:
+            self._composition_second = current_second
+            self._strongest_radio_bssids = ()
+            self._composition_display_bssid = None
+            return CompositionSnapshot(
+                bssid_count=len(states),
+                qbss_bssid_count=sum(
+                    state.advertises_qbss for state in states
+                ),
+                estimated_radio_count=len(groups),
+                strongest_radio_bssid_count=0,
+                strongest_radio_ap_name=None,
+                strongest_radio_vendor=None,
+                displayed_ssid=None,
+                displayed_bssid=None,
+                displayed_rssi_dbm=None,
+            )
+
+        radio_unchanged = bool(
+            set(previous_radio_bssids).intersection(strongest.bssids)
+        )
+        displayed_bssid = self._composition_display_bssid
+        if not radio_unchanged or previous_second is None:
+            displayed_bssid = strongest.bssids[0]
+        elif previous_second < current_second:
+            try:
+                previous_index = strongest.bssids.index(displayed_bssid or "")
+            except ValueError:
+                previous_index = -1
+            elapsed_seconds = current_second - previous_second
+            displayed_bssid = strongest.bssids[
+                (previous_index + elapsed_seconds) % len(strongest.bssids)
+            ]
+        elif displayed_bssid not in strongest.bssids:
+            displayed_bssid = strongest.bssids[0]
+
+        displayed_state = next(
+            member
+            for member in strongest.members
+            if member.bssid == displayed_bssid
+        )
+        self._composition_second = current_second
+        self._strongest_radio_bssids = strongest.bssids
+        self._composition_display_bssid = displayed_bssid
+        return CompositionSnapshot(
+            bssid_count=len(states),
+            qbss_bssid_count=sum(
+                state.advertises_qbss for state in states
+            ),
+            estimated_radio_count=len(groups),
+            strongest_radio_bssid_count=len(strongest.members),
+            strongest_radio_ap_name=strongest.ap_name,
+            strongest_radio_vendor=strongest.vendor,
+            displayed_ssid=displayed_state.ssid,
+            displayed_bssid=displayed_state.bssid,
+            displayed_rssi_dbm=(
+                displayed_state.peak_rssi_dbm
+                if displayed_state.peak_rssi_dbm is not None
+                else displayed_state.latest_rssi_dbm
+            ),
         )
 
     def _states_at(
@@ -471,6 +555,8 @@ class Analyzer:
                     ),
                     latest_rssi_dbm=latest.rssi_dbm,
                     peak_rssi_dbm=max(rssi_values) if rssi_values else None,
+                    latest_ap_name=latest.ap_name,
+                    latest_vendor=latest.vendor,
                     window_frame_count=len(bssid_frames),
                     window_retry_observed_frame_count=len(retry_observations),
                     window_retry_frame_count=retry_frame_count,

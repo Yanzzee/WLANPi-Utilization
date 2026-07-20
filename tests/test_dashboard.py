@@ -134,11 +134,15 @@ def test_terminal_dashboard_uses_shared_screen_registry() -> None:
     dashboard.navigate_down(now=1.0)
     admission = dashboard.render()
     dashboard.navigate_down(now=1.3)
+    composition = dashboard.render()
+    dashboard.navigate_down(now=1.6)
     station_total = dashboard.render()
 
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert "Admission Capacity" in admission
     assert "ADC --" in admission
+    assert "Composition" in composition
+    assert "Est Radios" in composition
     assert "Total Station Count" in station_total
     assert "SUM 12" in station_total
     assert dashboard.snapshot is snapshot

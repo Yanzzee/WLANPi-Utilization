@@ -36,10 +36,18 @@ TSHARK_FRAME_FIELD_NAMES = (
     "radiotap.dbm_antsignal",
     "frame.len",
     "wlan.fixed.beacon",
+    "wlan.cisco.ccx1.name",
+    "wlan.vs.aruba.ap_name",
+    "wlan.vs.extreme.ap_name",
+    "wlan.vs.aerohive.hostname",
+    "wlan.bssid_resolved",
 )
 
 EXPECTED_TSHARK_FRAME_FIELD_COUNT = len(TSHARK_FRAME_FIELD_NAMES)
-LEGACY_TSHARK_FRAME_FIELD_COUNT = EXPECTED_TSHARK_FRAME_FIELD_COUNT - 4
+PHASE_THREE_TSHARK_FRAME_FIELD_COUNT = (
+    EXPECTED_TSHARK_FRAME_FIELD_COUNT - 5
+)
+LEGACY_TSHARK_FRAME_FIELD_COUNT = PHASE_THREE_TSHARK_FRAME_FIELD_COUNT - 4
 
 
 def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
@@ -121,6 +129,7 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
     fields = line.split("\t")
     if len(fields) not in (
         LEGACY_TSHARK_FRAME_FIELD_COUNT,
+        PHASE_THREE_TSHARK_FRAME_FIELD_COUNT,
         EXPECTED_TSHARK_FRAME_FIELD_COUNT,
     ):
         return None
@@ -143,7 +152,34 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
             rssi_text,
             frame_length_text,
             beacon_interval_text,
+            cisco_ap_name_text,
+            aruba_ap_name_text,
+            extreme_ap_name_text,
+            aerohive_ap_name_text,
+            resolved_bssid_text,
         ) = fields
+    elif len(fields) == PHASE_THREE_TSHARK_FRAME_FIELD_COUNT:
+        (
+            timestamp_text,
+            frame_type_text,
+            frame_subtype_text,
+            retry_text,
+            bssid_text,
+            transmitter_text,
+            receiver_text,
+            source_text,
+            destination_text,
+            ssid_text,
+            cu_text,
+            scount_text,
+            adc_text,
+            rssi_text,
+            frame_length_text,
+            beacon_interval_text,
+        ) = fields
+        cisco_ap_name_text = aruba_ap_name_text = ""
+        extreme_ap_name_text = aerohive_ap_name_text = ""
+        resolved_bssid_text = ""
     else:
         (
             timestamp_text,
@@ -160,6 +196,9 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
             beacon_interval_text,
         ) = fields
         transmitter_text = receiver_text = source_text = destination_text = ""
+        cisco_ap_name_text = aruba_ap_name_text = ""
+        extreme_ap_name_text = aerohive_ap_name_text = ""
+        resolved_bssid_text = ""
 
     try:
         timestamp = float(timestamp_text)
@@ -201,9 +240,16 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
     qbss_cu_percent = (
         qbss_cu_raw / 255 * 100 if qbss_cu_raw is not None else None
     )
+    bssid = _parse_optional_mac(bssid_text)
+    ap_name, ie_vendor = _vendor_ap_identity(
+        cisco_ap_name_text,
+        aruba_ap_name_text,
+        extreme_ap_name_text,
+        aerohive_ap_name_text,
+    )
     return FrameRecord(
         timestamp=timestamp,
-        bssid=_parse_optional_mac(bssid_text),
+        bssid=bssid,
         ssid=ssid_text if ssid_text != "" else None,
         rssi_dbm=rssi_dbm,
         frame_type=frame_type,
@@ -219,6 +265,11 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
         receiver_address=_parse_optional_mac(receiver_text),
         source_address=_parse_optional_mac(source_text),
         destination_address=_parse_optional_mac(destination_text),
+        ap_name=ap_name,
+        vendor=(
+            ie_vendor
+            or _vendor_from_resolved_bssid(resolved_bssid_text, bssid)
+        ),
     )
 
 
@@ -250,6 +301,40 @@ def _parse_optional_bool(value: str) -> Union[bool, None, _Malformed]:
 def _parse_optional_mac(value: str) -> Optional[str]:
     text = value.strip()
     return text.lower() if text else None
+
+
+def _vendor_ap_identity(
+    cisco_name: str,
+    aruba_name: str,
+    extreme_name: str,
+    aerohive_name: str,
+) -> tuple[Optional[str], Optional[str]]:
+    candidates = (
+        (cisco_name, "Cisco"),
+        (aruba_name, "Aruba"),
+        (extreme_name, "Extreme Networks"),
+        (aerohive_name, "Aerohive"),
+    )
+    for value, vendor in candidates:
+        name = value.strip()
+        if name:
+            return name, vendor
+    return None, None
+
+
+def _vendor_from_resolved_bssid(
+    value: str,
+    bssid: Optional[str],
+) -> Optional[str]:
+    resolved = value.strip()
+    if not resolved:
+        return None
+    if bssid is not None and resolved.casefold() == bssid.casefold():
+        return None
+    if "_" not in resolved:
+        return None
+    vendor = resolved.rsplit("_", 1)[0].strip()
+    return vendor or None
 
 
 def _parse_optional_int(

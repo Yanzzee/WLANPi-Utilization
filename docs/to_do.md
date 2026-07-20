@@ -10,7 +10,7 @@ Features & changes
     identify the number of discreet radios (identify & deduplicate SSIDs on same radio)
     identify number of unique APs if possible
     list the BSSIDs by station count (separate screen?)
-    include the number (#) of BSSIDs that are likely from the same radio prepended to the SSID on row 3
+    include the number (#) of BSSIDs that are likely from the same radio prepended to the SSID on this screen only
 4. DONE     additional graph/screen - total station count
     swap values for CU and SUM in display
     list the SSID/BSSID with highest station count
@@ -19,7 +19,7 @@ Features & changes
     include beacon rate of strongest signal as a percentage of expected (separate screen?)
     list the SSID/BSSID with highest retry rates
 6. Navigation - enable scrolling between screens with up/down on control stick
-    disable other buttons while the display application is running
+    *disable other buttons while the display application is running
 7. Menu - add logging only start/stop without any display
     do any screens need to be a separate menu?
 8. Documentation
@@ -29,20 +29,43 @@ Features & changes
     add message to end of log that the disk is full
     for long term logging, write separate files periodically
 10. how much can metrics also be found from hardware instead of just using beacons
+        channel utilization - depends on hardware
+        admission capacity - no
+        retries - local only
+        beacon count - local only, add to retries or separate screen
+        clients - both - use unique MAC addresses
 11. screenshot on device
         * when a button is pressed, take the current rendered screen image
         * write it to a PNG file on disk
         * name it with a timestamp, screen name, and maybe channel/BSSID
         * keep the capture/analysis loop running normally
 12. look into the possibility of scanning multiple channels
+        probably not very feasible, beacons are 10 per second per BSSID
 13. classroom mode
         find likely radios in classroom
         scan beacons for those radios
         record and show analytics from the study
-14. return to standard mode when application quits instead of monitor mode? what is default?
+14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. optimize code for processor utilization and/or use multithreading for multiple cores
-16. change the channel screen label to "Utilization"
+16. DONE change the channel screen label to "Utilization"
 17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? 
         consider how to tie what metric is used to select the displayed BSSID, likely color
+        this is for RSSI except some screens
+            stations
+            retries
 18. additional graph/screen - noise
         from adapter
+19. make the text dynamic per line - only decrease size on the line needed, otherwise size 10 font.
+        this should only ever affect line 2 if there is 100%
+        line 3 for SSID should just be trunkated
+20. on the Stations screen - instead of Max station count, include the locally detected station count from frames
+        do not include probe requests or other frames that are not from an associated client
+        include clients that were detected within the last 2 minutes
+        can call this MAC or stay with MAX
+        possibly overlay this as a line or bar on the graph
+21. additional screen - Beacons
+        for all BSSIDs associated with the strongest radio, count all received beacons and divide by the number of expected beacons
+        this may need to track beacon timing instead of a simple 10 beacons per second, because it is actually one beacon per 102.4ms. or 10 beacons per 1.024 seconds, or 9.765625 beacons per second. sometimes there will be 9 per second and often there will be 10 per second. this graph may need to be delayed by one second in order to see if the additional beacons were received in the following window
+        alternatively, we could look at all BSSIDs collectively, including those that are far away, but there will be a higher probability that beacons are not received because they are too weak to be demodulated, not because they were dropped because of contention.
+22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Mist, Ubiquiti, etc
+        add better discovery if possible - MLD identity, controller identifiers, richer vendor-specific device IDs ?

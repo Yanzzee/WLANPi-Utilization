@@ -11,6 +11,7 @@ from beacon_live.lcd_dashboard import GRAPH_X
 from beacon_live.lcd_dashboard import GRAPH_Y
 from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _ADMISSION_GRAPH
+from beacon_live.lcd_dashboard import _COMPOSITION_TEXT
 from beacon_live.lcd_dashboard import _CU_GRAPH
 from beacon_live.lcd_dashboard import _OVERFLOW_GRAPH
 from beacon_live.lcd_dashboard import _RETRY_GRAPH
@@ -24,6 +25,7 @@ from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.models import SecondStats
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import COMPOSITION_SCREEN_ID
 from beacon_live.screens import RETRY_SCREEN_ID
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
 
@@ -152,7 +154,7 @@ def test_station_sum_supports_three_digit_values(
             )
         )
     )
-    dashboard.set_active_screen(2)
+    dashboard.set_active_screen(3)
 
     assert dashboard.text_lines[0] == "Stations"
     assert dashboard.text_lines[1] == "SUM 999 MAX 999 TOP --"
@@ -238,6 +240,12 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert _pixel(admission_pixels, latest_x, baseline) == _ADMISSION_GRAPH
 
     assert dashboard.navigate_down(now=1.3)
+    assert dashboard.active_screen_id == COMPOSITION_SCREEN_ID
+    assert dashboard.metric_color == _COMPOSITION_TEXT
+    assert dashboard.text_lines[0] == "5180MHz Composition"
+    assert dashboard.graph_data == ()
+
+    assert dashboard.navigate_down(now=1.6)
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert dashboard.metric_color == _STATION_GRAPH
     assert dashboard.text_lines[0] == "5180MHz Stations"
@@ -248,6 +256,66 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert _pixel(station_pixels, latest_x, baseline) == _STATION_GRAPH
     assert len({_CU_GRAPH, _ADMISSION_GRAPH, _STATION_GRAPH}) == 3
     assert dashboard.snapshot is snapshot
+
+
+def test_lcd_composition_screen_writes_eight_line_text_state_without_graph(
+    tmp_path: Path,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    dashboard = LcdDashboard(
+        frame,
+        band="5",
+        channel="36",
+        frequency_mhz=5180,
+    )
+    analyzer = Analyzer()
+    analyzer.ingest(
+        BeaconRecord(
+            timestamp=1000.1,
+            ssid="Alpha",
+            bssid="00:11:22:33:44:50",
+            qbss_cu_raw=64,
+            qbss_cu_percent=64 / 255 * 100,
+            qbss_station_count=3,
+            qbss_admission_capacity=10_000,
+            rssi_dbm=-35,
+            ap_name="Room-101",
+            vendor="Example Wireless",
+        )
+    )
+    analyzer.ingest(
+        BeaconRecord(
+            timestamp=1000.2,
+            ssid="Bravo",
+            bssid="00:11:22:33:44:51",
+            qbss_cu_raw=64,
+            qbss_cu_percent=64 / 255 * 100,
+            qbss_station_count=2,
+            qbss_admission_capacity=10_000,
+            rssi_dbm=-37,
+            ap_name="Room-101",
+            vendor="Example Wireless",
+        )
+    )
+    dashboard.set_active_screen(2)
+    dashboard.refresh(analyzer.snapshot)
+
+    state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
+    assert state["screen_id"] == COMPOSITION_SCREEN_ID
+    assert state["metadata"] == "5180MHz Composition"
+    assert state["summary"] == "BSSIDs 2 QBSS BSSIDs 2"
+    assert state["detail_lines"] == [
+        "Est Radios 1",
+        "Strongest Radio BSSIDs 2",
+        "AP Name Room-101",
+        "Vendor Example Wireless",
+    ]
+    assert state["text_only"] is True
+    assert state["ssid"] == "Alpha"
+    assert state["rssi"] == "-35"
+    assert state["bssid"] == "00:11:22:33:44:50"
+    assert state["channel"] == "36"
+    assert set(frame.read_bytes().split(b"\n", 3)[3]) == {0}
 
 
 def test_total_station_graph_truncates_over_64_and_colors_overflow_red(
@@ -264,7 +332,7 @@ def test_total_station_graph_truncates_over_64_and_colors_overflow_red(
             _stats(1001, 50.0, 128, station_count=65),
         )
     )
-    dashboard.set_active_screen(2)
+    dashboard.set_active_screen(3)
 
     pixel_data = dashboard.render().split(b"\n", 3)[3]
     latest_x = GRAPH_X + GRAPH_WIDTH - 1
@@ -288,7 +356,7 @@ def test_lcd_retry_screen_renders_shared_retry_history_and_top_bssid(
     )
     snapshot = _retry_snapshot()
     dashboard.update(snapshot)
-    dashboard.set_active_screen(3)
+    dashboard.set_active_screen(4)
 
     assert dashboard.active_screen_id == RETRY_SCREEN_ID
     assert dashboard.metric_color == _RETRY_GRAPH
@@ -317,7 +385,7 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     control = frame.with_suffix(".control.json")
     dashboard = LcdDashboard(frame, band="5", channel="36")
     snapshot = _phase_two_snapshot()
-    control.write_text('{"active_screen_offset":2}', encoding="utf-8")
+    control.write_text('{"active_screen_offset":3}', encoding="utf-8")
 
     dashboard.refresh(snapshot)
 
@@ -326,8 +394,8 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     assert [row.second for row in dashboard.snapshot.history] == [1000, 1001]
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
     assert state["screen_id"] == TOTAL_STATION_COUNT_SCREEN_ID
-    assert state["screen_index"] == 2
-    assert state["screen_count"] == 4
+    assert state["screen_index"] == 3
+    assert state["screen_count"] == 5
 
 
 def _stats(

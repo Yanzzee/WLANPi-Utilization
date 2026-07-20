@@ -1,6 +1,7 @@
 """Shared data models for beacon, survey, and rolling analysis."""
 
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Optional
 
 
@@ -19,6 +20,8 @@ class BeaconRecord:
     qbss_admission_capacity: Optional[int]
     rssi_dbm: Optional[int] = None
     beacon_interval_tu: Optional[int] = None
+    ap_name: Optional[str] = None
+    vendor: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,8 @@ class FrameRecord:
     receiver_address: Optional[str] = None
     source_address: Optional[str] = None
     destination_address: Optional[str] = None
+    ap_name: Optional[str] = None
+    vendor: Optional[str] = None
 
     @property
     def is_management_frame(self) -> bool:
@@ -110,6 +115,8 @@ class FrameRecord:
             qbss_admission_capacity=self.qbss_admission_capacity,
             rssi_dbm=self.rssi_dbm,
             beacon_interval_tu=self.beacon_interval_tu,
+            ap_name=self.ap_name,
+            vendor=self.vendor,
         )
 
 
@@ -164,6 +171,8 @@ class BssidState:
     latest_admission_capacity: Optional[int]
     latest_rssi_dbm: Optional[int]
     peak_rssi_dbm: Optional[int]
+    latest_ap_name: Optional[str] = None
+    latest_vendor: Optional[str] = None
     window_frame_count: int = 0
     window_retry_observed_frame_count: int = 0
     window_retry_frame_count: int = 0
@@ -174,6 +183,18 @@ class BssidState:
     def qbss_present(self) -> bool:
         """Whether the authoritative latest beacon contains QBSS CU."""
         return self.latest_qbss_cu_percent is not None
+
+    @property
+    def advertises_qbss(self) -> bool:
+        """Whether the latest beacon contains any decoded QBSS field."""
+        return any(
+            value is not None
+            for value in (
+                self.latest_qbss_cu_raw,
+                self.latest_station_count,
+                self.latest_admission_capacity,
+            )
+        )
 
     @property
     def latest_beacon(self) -> BeaconRecord:
@@ -210,6 +231,35 @@ class BssidState:
 
 
 @dataclass(frozen=True)
+class CompositionSnapshot:
+    """Analyzer-derived fields required by the text-only Composition screen."""
+
+    bssid_count: int
+    qbss_bssid_count: int
+    estimated_radio_count: int
+    strongest_radio_bssid_count: int
+    strongest_radio_ap_name: Optional[str]
+    strongest_radio_vendor: Optional[str]
+    displayed_ssid: Optional[str]
+    displayed_bssid: Optional[str]
+    displayed_rssi_dbm: Optional[int]
+
+    @classmethod
+    def empty(cls) -> "CompositionSnapshot":
+        return cls(
+            bssid_count=0,
+            qbss_bssid_count=0,
+            estimated_radio_count=0,
+            strongest_radio_bssid_count=0,
+            strongest_radio_ap_name=None,
+            strongest_radio_vendor=None,
+            displayed_ssid=None,
+            displayed_bssid=None,
+            displayed_rssi_dbm=None,
+        )
+
+
+@dataclass(frozen=True)
 class RetryBssidState:
     """One-second retry metrics for one BSSID from the shared frame stream."""
 
@@ -236,6 +286,9 @@ class MetricsSnapshot:
     top_station_bssid: Optional[str] = None
     top_retry_bssid: Optional[str] = None
     retry_bssids: tuple[RetryBssidState, ...] = ()
+    composition: CompositionSnapshot = field(
+        default_factory=CompositionSnapshot.empty
+    )
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":
@@ -260,6 +313,7 @@ class MetricsSnapshot:
             top_station_bssid=None,
             top_retry_bssid=None,
             retry_bssids=(),
+            composition=CompositionSnapshot.empty(),
         )
 
     @property

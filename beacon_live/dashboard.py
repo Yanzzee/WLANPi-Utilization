@@ -122,6 +122,27 @@ class TerminalDashboard:
             f"{view.title} | rolling {self.snapshot.window_seconds}s | "
             f"rows={len(self.snapshot.history)}"
         )
+        if view.text_only:
+            identity = view.identity
+            if identity.bssid is None:
+                ssid_line = identity.unavailable_text
+                bssid_line = "--"
+            else:
+                ssid_line = (
+                    f"{identity.ssid or '<hidden>'} "
+                    f"{_format_rssi(identity.rssi_dbm)}"
+                )
+                bssid_line = identity.bssid
+            return "\n".join(
+                (
+                    title,
+                    view.summary,
+                    *view.detail_lines,
+                    ssid_line,
+                    bssid_line,
+                )
+            )
+
         graph = "".join(
             "·"
             if point.value is None
@@ -240,6 +261,10 @@ def _format_identity(identity: DisplayIdentity) -> str:
         else f"{identity.rssi_dbm} dBm"
     )
     return _truncate(f"{ssid}/{identity.bssid} ({rssi})", 72)
+
+
+def _format_rssi(value: Optional[int]) -> str:
+    return "--" if value is None else f"{value} dBm"
 
 
 def _truncate(value: str, width: int) -> str:

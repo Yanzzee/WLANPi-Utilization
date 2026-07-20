@@ -333,6 +333,19 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         metric_tokens_at_end=False,
         gap=3,
     )
+    if state["text_only"]:
+        for top_y, detail_line in zip(
+            (33, 49, 65, 81),
+            state["detail_lines"],
+        ):
+            _draw_text_top(
+                draw,
+                2,
+                top_y,
+                _truncate_text(draw, str(detail_line), font, 124),
+                font,
+                _WHITE,
+            )
     _draw_left_right(
         draw,
         2,
@@ -371,6 +384,8 @@ def _read_display_state(path: Path) -> dict[str, object]:
         "summary": "CU --% AVG --% MAX --%",
         "summary_metric_token_count": 2,
         "metric_color": _DEFAULT_METRIC_COLOR,
+        "text_only": False,
+        "detail_lines": [],
         "ssid": "--",
         "rssi": "--",
         "bssid": "--",
@@ -389,6 +404,8 @@ def _read_display_state(path: Path) -> dict[str, object]:
             "metadata_metric_token_count",
             "summary_metric_token_count",
             "metric_color",
+            "text_only",
+            "detail_lines",
         }
     )
     state: dict[str, object] = {
@@ -409,6 +426,11 @@ def _read_display_state(path: Path) -> dict[str, object]:
         default=2,
     )
     state["metric_color"] = _read_metric_color(payload.get("metric_color"))
+    state["text_only"] = payload.get("text_only") is True
+    detail_lines = payload.get("detail_lines", defaults["detail_lines"])
+    if not isinstance(detail_lines, list):
+        detail_lines = defaults["detail_lines"]
+    state["detail_lines"] = [str(value) for value in detail_lines[:4]]
     return state
 
 
@@ -465,6 +487,11 @@ def _font_fits(draw, state: dict[str, object], font) -> bool:
     if not any(
         _compact_text_width(draw, candidate, font, gap=3) <= 126
         for candidate in state["metadata_candidates"]
+    ):
+        return False
+    if any(
+        _text_width(draw, str(line), font) > width
+        for line in state.get("detail_lines", [])
     ):
         return False
     footer_width = (

@@ -207,6 +207,28 @@ def test_three_digit_percentage_uses_nine_pixel_font_fallback() -> None:
     assert selected.size == 9
 
 
+def test_composition_longest_label_uses_eight_pixel_scanner_font() -> None:
+    state = _font_state(
+        metadata="2484MHz Composition",
+        summary="BSSIDs 99 QBSS BSSIDs 99",
+    )
+    state["detail_lines"] = [
+        "Est Radios 99",
+        "Strongest Radio BSSIDs 99",
+        "AP Name Room-101",
+        "Vendor Example",
+    ]
+
+    selected = channel_utilization._select_scanner_font(
+        _FakeDraw(),
+        state,
+        _FakeFont(size=10, path="scanner.ttf", character_width=6),
+        _FakeImageFontModule,
+    )
+
+    assert selected.size == 8
+
+
 def test_metric_text_colors_summary_prefix_and_metadata_suffix() -> None:
     draw = _FakeDraw()
     metric_color = (0, 160, 255)

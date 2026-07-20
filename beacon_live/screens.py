@@ -12,6 +12,7 @@ from beacon_live.models import RetryBssidState
 
 CU_SCREEN_ID = "cu"
 ADMISSION_CAPACITY_SCREEN_ID = "admission_capacity"
+COMPOSITION_SCREEN_ID = "composition"
 TOTAL_STATION_COUNT_SCREEN_ID = "total_station_count"
 RETRY_SCREEN_ID = "retry"
 STATION_GRAPH_MAXIMUM = 64
@@ -44,6 +45,8 @@ class ScreenView:
     identity: DisplayIdentity
     metadata_metric_token_count: int = 1
     summary_metric_token_count: int = 2
+    text_only: bool = False
+    detail_lines: tuple[str, ...] = ()
 
 
 class ScreenDefinition(Protocol):
@@ -109,6 +112,50 @@ class AdmissionCapacityScreen:
             graph_points=graph_points,
             graph_maximum=100,
             identity=_selected_identity(snapshot),
+        )
+
+
+@dataclass(frozen=True)
+class CompositionScreen:
+    screen_id: str = COMPOSITION_SCREEN_ID
+
+    def render(self, snapshot: MetricsSnapshot) -> ScreenView:
+        composition = snapshot.composition
+        return ScreenView(
+            screen_id=self.screen_id,
+            title="Composition",
+            metadata_tokens=("Composition",),
+            summary=(
+                f"BSSIDs {composition.bssid_count} "
+                f"QBSS BSSIDs {composition.qbss_bssid_count}"
+            ),
+            graph_label="",
+            graph_points=(),
+            graph_maximum=1,
+            identity=DisplayIdentity(
+                ssid=composition.displayed_ssid,
+                bssid=composition.displayed_bssid,
+                rssi_dbm=composition.displayed_rssi_dbm,
+                unavailable_text="<No Beacons>",
+            ),
+            metadata_metric_token_count=0,
+            summary_metric_token_count=0,
+            text_only=True,
+            detail_lines=(
+                f"Est Radios {composition.estimated_radio_count}",
+                (
+                    "Strongest Radio BSSIDs "
+                    f"{composition.strongest_radio_bssid_count}"
+                ),
+                (
+                    "AP Name "
+                    f"{composition.strongest_radio_ap_name or '<no AP name>'}"
+                ),
+                (
+                    "Vendor "
+                    f"{composition.strongest_radio_vendor or '<unknown>'}"
+                ),
+            ),
         )
 
 
@@ -203,6 +250,7 @@ class RetryScreen:
 DEFAULT_SCREENS: tuple[ScreenDefinition, ...] = (
     CuScreen(),
     AdmissionCapacityScreen(),
+    CompositionScreen(),
     TotalStationCountScreen(),
     RetryScreen(),
 )

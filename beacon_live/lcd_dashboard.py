@@ -11,6 +11,7 @@ from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import COMPOSITION_SCREEN_ID
 from beacon_live.screens import CU_SCREEN_ID
 from beacon_live.screens import RETRY_SCREEN_ID
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
@@ -28,10 +29,12 @@ _CU_GRAPH = (0, 220, 120)
 _ADMISSION_GRAPH = (0, 160, 255)
 _STATION_GRAPH = (255, 190, 0)
 _RETRY_GRAPH = (210, 90, 255)
+_COMPOSITION_TEXT = (255, 255, 255)
 _OVERFLOW_GRAPH = (255, 0, 0)
 _GRAPH_COLORS = {
     CU_SCREEN_ID: _CU_GRAPH,
     ADMISSION_CAPACITY_SCREEN_ID: _ADMISSION_GRAPH,
+    COMPOSITION_SCREEN_ID: _COMPOSITION_TEXT,
     TOTAL_STATION_COUNT_SCREEN_ID: _STATION_GRAPH,
     RETRY_SCREEN_ID: _RETRY_GRAPH,
 }
@@ -146,18 +149,35 @@ class LcdDashboard:
 
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
-
-        for y in (GRAPH_Y, GRAPH_Y + 16, GRAPH_Y + 32, GRAPH_Y + 48, GRAPH_Y + 63):
-            canvas.horizontal_line(GRAPH_X, GRAPH_X + GRAPH_WIDTH - 1, y, _DIM)
-        canvas.vertical_line(GRAPH_X - 1, GRAPH_Y, GRAPH_Y + GRAPH_HEIGHT - 1, _DIM)
-        canvas.vertical_line(
-            GRAPH_X + GRAPH_WIDTH,
-            GRAPH_Y,
-            GRAPH_Y + GRAPH_HEIGHT - 1,
-            _DIM,
-        )
-
         view = self.screen_manager.view
+
+        if not view.text_only:
+            for y in (
+                GRAPH_Y,
+                GRAPH_Y + 16,
+                GRAPH_Y + 32,
+                GRAPH_Y + 48,
+                GRAPH_Y + 63,
+            ):
+                canvas.horizontal_line(
+                    GRAPH_X,
+                    GRAPH_X + GRAPH_WIDTH - 1,
+                    y,
+                    _DIM,
+                )
+            canvas.vertical_line(
+                GRAPH_X - 1,
+                GRAPH_Y,
+                GRAPH_Y + GRAPH_HEIGHT - 1,
+                _DIM,
+            )
+            canvas.vertical_line(
+                GRAPH_X + GRAPH_WIDTH,
+                GRAPH_Y,
+                GRAPH_Y + GRAPH_HEIGHT - 1,
+                _DIM,
+            )
+
         graph_data = self.graph_data[-GRAPH_WIDTH:]
         start_x = GRAPH_X + GRAPH_WIDTH - len(graph_data)
         baseline = GRAPH_Y + GRAPH_HEIGHT - 1
@@ -198,6 +218,8 @@ class LcdDashboard:
             "summary": summary,
             "summary_metric_token_count": view.summary_metric_token_count,
             "metric_color": self.metric_color,
+            "text_only": view.text_only,
+            "detail_lines": view.detail_lines,
             "ssid": ssid,
             "rssi": rssi,
             "bssid": bssid,

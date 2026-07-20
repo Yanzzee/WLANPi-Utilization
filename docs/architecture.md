@@ -267,10 +267,10 @@ Show:
 * number of BSSIDs on the channel
 * number reporting QBSS IEs
 * estimated number of distinct radios
-* estimated number of unique APs
+* estimated number of unique APs (likely to be the same if only looking at one channel)
 * the strongest SSID & BSSID by signal
 * the AP name associated with the strongest signal BSSID
-* the AP vendor if known
+* the AP vendor if known - use vendor IEs and possibly OUI if database is available
 
 Recommended behavior:
 

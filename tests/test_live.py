@@ -79,6 +79,7 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
     command = build_tshark_command("wlan9")
 
     assert command[:4] == ["tshark", "-l", "-i", "wlan9"]
+    assert command[4:6] == ["-N", "m"]
     assert "wlan" in command
     assert "wlan.fc.type_subtype == 8" not in command
     assert _field_args(command) == [
@@ -98,6 +99,11 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         "radiotap.dbm_antsignal",
         "frame.len",
         "wlan.fixed.beacon",
+        "wlan.cisco.ccx1.name",
+        "wlan.vs.aruba.ap_name",
+        "wlan.vs.extreme.ap_name",
+        "wlan.vs.aerohive.hostname",
+        "wlan.bssid_resolved",
     ]
 
 

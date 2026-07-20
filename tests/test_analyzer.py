@@ -35,6 +35,8 @@ def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:
 
     assert analyzer.snapshot.bssids == ()
     assert analyzer.snapshot.selected_bssid is None
+    assert analyzer.snapshot.composition.bssid_count == 0
+    assert analyzer.snapshot.composition.estimated_radio_count == 0
 
 
 def test_latest_beacon_wins_even_when_an_older_beacon_arrives_late() -> None:
@@ -158,6 +160,120 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
 
     with pytest.raises(FrozenInstanceError):
         snapshot.selected_bssid = "bb"  # type: ignore[misc]
+
+
+def test_composition_counts_all_beaconing_and_qbss_bssids_in_window() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        BeaconRecord(
+            timestamp=1000.1,
+            ssid=None,
+            bssid="00:11:22:33:44:50",
+            qbss_cu_raw=None,
+            qbss_cu_percent=None,
+            qbss_station_count=None,
+            qbss_admission_capacity=None,
+            rssi_dbm=-40,
+        )
+    )
+    analyzer.ingest(
+        BeaconRecord(
+            timestamp=1000.2,
+            ssid="QBSS",
+            bssid="00:11:23:33:44:50",
+            qbss_cu_raw=None,
+            qbss_cu_percent=None,
+            qbss_station_count=4,
+            qbss_admission_capacity=None,
+            rssi_dbm=-50,
+        )
+    )
+
+    composition = analyzer.snapshot.composition
+
+    assert composition.bssid_count == 2
+    assert composition.qbss_bssid_count == 1
+
+
+def test_composition_snapshot_selects_strongest_radio_and_rotates_members() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.1,
+            bssid="00:11:22:33:44:50",
+            ssid="Alpha",
+            station_count=4,
+            rssi_dbm=-35,
+            ap_name="Room-101",
+            vendor="Example Wireless",
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.2,
+            bssid="00:11:22:33:44:51",
+            ssid=None,
+            station_count=2,
+            rssi_dbm=-37,
+            ap_name="Room-101",
+            vendor="Example Wireless",
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.3,
+            bssid="00:11:23:aa:bb:cc",
+            ssid="Weaker",
+            station_count=1,
+            rssi_dbm=-70,
+        )
+    )
+
+    first = analyzer.snapshot.composition
+    assert first.estimated_radio_count == 2
+    assert first.strongest_radio_bssid_count == 2
+    assert first.strongest_radio_ap_name == "Room-101"
+    assert first.strongest_radio_vendor == "Example Wireless"
+    assert first.displayed_ssid == "Alpha"
+    assert first.displayed_bssid == "00:11:22:33:44:50"
+    assert first.displayed_rssi_dbm == -35
+
+    analyzer.advance(1002, None)
+    second = analyzer.snapshot.composition
+    assert second.displayed_ssid is None
+    assert second.displayed_bssid == "00:11:22:33:44:51"
+    assert second.displayed_rssi_dbm == -37
+
+    analyzer.advance(1003, None)
+    assert (
+        analyzer.snapshot.composition.displayed_bssid
+        == "00:11:22:33:44:50"
+    )
+
+
+def test_composition_rotation_restarts_when_strongest_radio_changes() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.1,
+            bssid="00:11:22:33:44:50",
+            ssid="Alpha",
+            rssi_dbm=-40,
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1001.1,
+            bssid="00:11:23:33:44:50",
+            ssid="New Strongest",
+            rssi_dbm=-20,
+        )
+    )
+
+    composition = analyzer.snapshot.composition
+    assert composition.strongest_radio_bssid_count == 1
+    assert composition.displayed_ssid == "New Strongest"
+    assert composition.displayed_bssid == "00:11:23:33:44:50"
 
 
 def test_retry_percentage_uses_eligible_frames_and_tracks_top_bssid() -> None:
@@ -424,6 +540,8 @@ def _record(
     station_count: Optional[int] = 1,
     admission_capacity: Optional[int] = 0,
     rssi_dbm: Optional[int] = -50,
+    ap_name: Optional[str] = None,
+    vendor: Optional[str] = None,
 ) -> BeaconRecord:
     return BeaconRecord(
         timestamp=timestamp,
@@ -434,6 +552,8 @@ def _record(
         qbss_station_count=station_count,
         qbss_admission_capacity=admission_capacity,
         rssi_dbm=rssi_dbm,
+        ap_name=ap_name,
+        vendor=vendor,
     )
 
 
