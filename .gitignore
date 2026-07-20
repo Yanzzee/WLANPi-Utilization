@@ -226,3 +226,5 @@ logs/
 
 # Local Pi smoke-test debug bundles
 debug/
+docs/.DS_Store
+.DS_Store

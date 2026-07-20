@@ -18,8 +18,15 @@ from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.log_writer import CaptureLogWriter
+from beacon_live.log_writer import DEFAULT_DISK_CHECK_INTERVAL_SECONDS
+from beacon_live.log_writer import DEFAULT_MIN_FREE_BYTES
+from beacon_live.log_writer import DEFAULT_ROTATION_INTERVAL_SECONDS
 from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import build_live_log_paths
+from beacon_live.retry_debug import RetryDebugCommandError
+from beacon_live.retry_debug import analyze_retry_frames
+from beacon_live.retry_debug import read_retry_debug_capture
+from beacon_live.retry_debug import write_retry_audit_csv
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
     parse_survey_dump,
@@ -49,6 +56,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "live":
         return _run_live_command(args, parser)
 
+    if args.command == "retry-debug":
+        return _run_retry_debug_command(args)
+
     parser.print_help()
     return 0
 
@@ -77,10 +87,16 @@ def _run_live_command(
             f"{command_prefix}accepts --frequency-mhz or --band/--channel, "
             "not both"
         )
+    if args.logging_only and args.lcd_frame is not None:
+        parser.error(
+            f"{command_prefix}--logging-only cannot be combined with --lcd-frame"
+        )
+    write_stats_csv = args.stats_csv or args.logging_only
+    write_beacons_jsonl = args.beacons_jsonl or args.logging_only
     log_paths = build_live_log_paths(
         args.log_dir,
-        write_stats_csv=args.stats_csv,
-        write_beacons_jsonl=args.beacons_jsonl,
+        write_stats_csv=write_stats_csv,
+        write_beacons_jsonl=write_beacons_jsonl,
     )
     try:
         live_options = dict(
@@ -96,6 +112,23 @@ def _run_live_command(
         )
         if args.lcd_frame is not None:
             live_options["lcd_frame"] = args.lcd_frame
+        if args.logging_only:
+            live_options["logging_only"] = True
+        if args.logging_control is not None:
+            live_options["logging_control_path"] = args.logging_control
+        if args.logging_status is not None:
+            live_options["logging_status_path"] = args.logging_status
+        if args.logging_initial_state is not None:
+            live_options["initial_logging_enabled"] = (
+                args.logging_initial_state == "enabled"
+            )
+        min_free_bytes = args.min_free_mb * 1024 * 1024
+        if min_free_bytes != DEFAULT_MIN_FREE_BYTES:
+            live_options["min_free_bytes"] = min_free_bytes
+        if args.disk_check_seconds != DEFAULT_DISK_CHECK_INTERVAL_SECONDS:
+            live_options["disk_check_interval_seconds"] = args.disk_check_seconds
+        if args.rotation_seconds != DEFAULT_ROTATION_INTERVAL_SECONDS:
+            live_options["rotation_interval_seconds"] = args.rotation_seconds
         return run_live(**live_options)
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
@@ -169,6 +202,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_live_arguments(live)
 
+    retry_debug = subparsers.add_parser(
+        "retry-debug",
+        help="Audit retry calculations from a saved PCAP/PCAPNG capture.",
+    )
+    retry_debug.add_argument(
+        "--input",
+        required=True,
+        type=Path,
+        help="Monitor-mode PCAP or PCAPNG file to analyze with TShark.",
+    )
+    retry_debug.add_argument(
+        "--output-csv",
+        required=False,
+        type=Path,
+        help="Write the audit CSV to this path instead of standard output.",
+    )
+
     return parser
 
 
@@ -202,7 +252,10 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         "--interval-seconds",
         default=1.0,
         type=float,
-        help="Terminal update interval and optional survey polling interval. Default: 1.",
+        help=(
+            "Optional survey polling interval. Display metrics remain aligned "
+            "to capture-second boundaries. Default: 1."
+        ),
     )
     parser.add_argument(
         "--survey-debug",
@@ -235,6 +288,50 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=Path("logs"),
         help="Directory for generated live log filenames. Default: logs.",
+    )
+    parser.add_argument(
+        "--logging-only",
+        action="store_true",
+        help=(
+            "Capture and write both log formats without rendering a terminal "
+            "or LCD display."
+        ),
+    )
+    parser.add_argument(
+        "--min-free-mb",
+        type=int,
+        default=DEFAULT_MIN_FREE_BYTES // (1024 * 1024),
+        help="Stop logging below this many free MiB. Default: 256.",
+    )
+    parser.add_argument(
+        "--disk-check-seconds",
+        type=float,
+        default=DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
+        help="Seconds between logging disk-space checks. Default: 30.",
+    )
+    parser.add_argument(
+        "--rotation-seconds",
+        type=float,
+        default=DEFAULT_ROTATION_INTERVAL_SECONDS,
+        help="Start new log files after this many seconds. Default: 3600.",
+    )
+    parser.add_argument(
+        "--logging-control",
+        type=Path,
+        required=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--logging-status",
+        type=Path,
+        required=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--logging-initial-state",
+        choices=("enabled", "disabled"),
+        required=False,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--lcd-frame",
@@ -302,6 +399,38 @@ def _run_replay(
             file=sys.stderr,
         )
 
+    return 0
+
+
+def _run_retry_debug_command(args: argparse.Namespace) -> int:
+    try:
+        capture = read_retry_debug_capture(args.input)
+    except RetryDebugCommandError as exc:
+        print(f"Command failed: {exc.command_text}", file=sys.stderr)
+        if exc.returncode is not None:
+            print(f"Exit status: {exc.returncode}", file=sys.stderr)
+        if exc.stderr:
+            print(exc.stderr, file=sys.stderr)
+        return 1
+
+    rows = analyze_retry_frames(capture.frames)
+    if args.output_csv is None:
+        write_retry_audit_csv(rows, sys.stdout)
+    else:
+        args.output_csv.parent.mkdir(parents=True, exist_ok=True)
+        with args.output_csv.open("w", encoding="utf-8", newline="") as output:
+            write_retry_audit_csv(rows, output)
+        print(f"Retry audit CSV: {args.output_csv}", file=sys.stderr)
+
+    channel_seconds = sum(row.scope == "channel" for row in rows)
+    print(
+        "Retry audit: "
+        f"decoded_frames={len(capture.frames)} "
+        f"tshark_rows={capture.tshark_row_count} "
+        f"malformed_rows={capture.malformed_row_count} "
+        f"seconds={channel_seconds}",
+        file=sys.stderr,
+    )
     return 0
 
 
@@ -394,6 +523,7 @@ def _format_header() -> str:
             "second",
             "unique_bssids",
             "qbss_station_sum",
+            "unique_client_macs",
             "selected_qbss_cu",
             "selected_qbss_ssid",
             "selected_qbss_bssid",
@@ -409,6 +539,7 @@ def _format_stats(stats: SecondStats) -> str:
             str(stats.second),
             str(stats.unique_bssid_count),
             str(stats.qbss_station_count_sum),
+            str(stats.unique_client_mac_count),
             _format_optional_float(stats.selected_qbss_cu_percent),
             stats.selected_qbss_ssid or "",
             stats.selected_qbss_bssid or "",

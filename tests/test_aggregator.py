@@ -12,7 +12,12 @@ def test_aggregator_selects_latest_qbss_from_strongest_rssi_bssid() -> None:
     assert aggregator.add(_record(1000.2, "Bravo", "bb", 50.0, 3, -50)) == []
     assert aggregator.add(_record(1000.9, "Alpha", "aa", 20.0, 4, -55)) == []
 
-    completed = aggregator.add(_record(1001.0, "Charlie", "cc", 5.0, 1, -60))
+    assert aggregator.add(
+        _record(1001.0, "Charlie", "cc", 5.0, 1, -60)
+    ) == []
+    completed = aggregator.add(
+        _record(1001.2, "Charlie", "cc", 5.0, 1, -60)
+    )
 
     assert len(completed) == 1
     stats = completed[0]
@@ -52,12 +57,13 @@ def test_strongest_rssi_selection_ignores_beacons_without_qbss() -> None:
     assert stats.selected_qbss_bssid == "bb"
 
 
-def test_rssi_tie_prefers_latest_beacon_then_latest_from_selected_bssid() -> None:
+def test_rssi_tie_uses_bssid_fallback_then_latest_within_selected_bssid() -> None:
     stats = aggregate_records(
         [
             _record(1000.1, "Alpha", "aa", 10.0, 1, -45),
             _record(1000.3, "Bravo", "bb", 20.0, 1, -45),
-            _record(1000.8, "Bravo", "bb", 30.0, 1, -60),
+            _record(1000.6, "Bravo", "bb", 30.0, 1, -60),
+            _record(1000.9, "Alpha", "aa", 40.0, 1, -60),
         ]
     )[0]
 

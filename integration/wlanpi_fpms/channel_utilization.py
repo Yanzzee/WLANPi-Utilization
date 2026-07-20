@@ -8,9 +8,12 @@ in the ``beacon_live`` package launched as a child process.
 from __future__ import annotations
 
 import json
+import re
 import signal
 import subprocess
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -18,6 +21,14 @@ EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live"
 FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = "wlan0"
+NAVIGATION_DEBOUNCE_SECONDS = 0.2
+LOGGING_STATUS_SECONDS = 1.0
+LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
+
+_WHITE = (255, 255, 255)
+_DEFAULT_METRIC_COLOR = (0, 220, 120)
+_TEXT_LINE_TOPS = (1, 17, 33, 49, 65, 81, 97, 113)
+_TEXT_WIDTH = 124
 
 _24_GHZ_CHANNELS = tuple(range(1, 15))
 _5_GHZ_CHANNELS = (
@@ -55,7 +66,13 @@ _6_GHZ_CHANNELS = tuple(range(1, 234, 4))
 _6_GHZ_PSC_CHANNELS = tuple(range(5, 230, 16))
 
 
-def build_launch_command(*, band: str, channel: int, logging: bool) -> list[str]:
+def build_launch_command(
+    *,
+    band: str,
+    channel: int,
+    logging: bool,
+    logging_only: bool = False,
+) -> list[str]:
     command = [
         EXECUTABLE,
         "--iface",
@@ -64,18 +81,25 @@ def build_launch_command(*, band: str, channel: int, logging: bool) -> list[str]
         band,
         "--channel",
         str(channel),
-        "--lcd-frame",
-        str(FRAME_PATH),
     ]
-    if logging:
-        command.extend(
-            [
-                "--stats-csv",
-                "--beacons-jsonl",
-                "--log-dir",
-                str(LOG_DIR),
-            ]
-        )
+    if logging_only:
+        command.append("--logging-only")
+    else:
+        command.extend(["--lcd-frame", str(FRAME_PATH)])
+    command.extend(
+        [
+            "--stats-csv",
+            "--beacons-jsonl",
+            "--log-dir",
+            str(LOG_DIR),
+            "--logging-control",
+            str(_logging_control_path()),
+            "--logging-status",
+            str(_logging_status_path()),
+            "--logging-initial-state",
+            "enabled" if logging else "disabled",
+        ]
+    )
     return command
 
 
@@ -123,6 +147,14 @@ def _band_menu(
                         "name": "Display + Log",
                         "action": _launch_action(app, band, channel, True),
                     },
+                    {
+                        "name": "Start Logging",
+                        "action": _logging_only_action(app, band, channel),
+                    },
+                    {
+                        "name": "Stop Logging",
+                        "action": _stop_logging_action(app),
+                    },
                 ],
             }
         )
@@ -141,6 +173,26 @@ def _launch_action(
     return launch
 
 
+def _logging_only_action(
+    app: "ChannelUtilizationApp",
+    band: str,
+    channel: int,
+) -> Callable[[], None]:
+    def start_logging_only() -> None:
+        app.start_logging_only(band=band, channel=channel)
+
+    return start_logging_only
+
+
+def _stop_logging_action(
+    app: "ChannelUtilizationApp",
+) -> Callable[[], None]:
+    def stop_logging() -> None:
+        app.stop_logging()
+
+    return stop_logging
+
+
 def _frequency_mhz(band: str, channel: int) -> int:
     if band == "2.4":
         return 2484 if channel == 14 else 2407 + channel * 5
@@ -157,13 +209,31 @@ class ChannelUtilizationApp:
         g_vars: dict[str, object],
         *,
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+        clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = datetime.now,
     ) -> None:
         self.g_vars = g_vars
         self.popen = popen
+        self.clock = clock
+        self.wall_clock = wall_clock
 
     def launch(self, *, band: str, channel: int, logging: bool) -> None:
+        logging_only_session = self.g_vars.get(
+            "channel_utilization_logging_session"
+        )
+        if isinstance(logging_only_session, _LoggingOnlySession):
+            if not logging_only_session.finished:
+                _display_error(
+                    self.g_vars,
+                    "Logging-only capture is active.\nStop logging first.",
+                )
+                return
+            self.g_vars.pop("channel_utilization_logging_session", None)
+
         session = self.g_vars.get("channel_utilization_session")
+        logging_started = False
         if not isinstance(session, _DisplaySession):
+            _write_logging_enabled(logging)
             session = _DisplaySession(
                 self.g_vars,
                 build_launch_command(
@@ -171,7 +241,12 @@ class ChannelUtilizationApp:
                     channel=channel,
                     logging=logging,
                 ),
+                band=band,
+                channel=channel,
+                logging_enabled=logging,
                 popen=self.popen,
+                clock=self.clock,
+                wall_clock=self.wall_clock,
             )
             self.g_vars["channel_utilization_session"] = session
             try:
@@ -180,13 +255,106 @@ class ChannelUtilizationApp:
                 self.g_vars.pop("channel_utilization_session", None)
                 _display_error(self.g_vars, "Unable to start capture.")
                 return
+            logging_started = logging
         elif session.finished and not session.exit_reported:
             session.exit_reported = True
             _display_error(self.g_vars, "Capture stopped.\nCheck journal.")
+        else:
+            logging_started = session.set_logging(logging)
 
         self.g_vars["page_exit_handler"] = session.stop
+        self.g_vars["page_up_handler"] = session.navigate_up
+        self.g_vars["page_down_handler"] = session.navigate_down
+        self.g_vars["page_key1_handler"] = session.ignore_auxiliary_button
+        self.g_vars["page_key2_handler"] = session.ignore_auxiliary_button
+        self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
+        if logging_started:
+            session.show_logging_status("Logging started")
+
+    def start_logging_only(self, *, band: str, channel: int) -> None:
+        display_session = self.g_vars.get("channel_utilization_session")
+        if isinstance(display_session, _DisplaySession) and not display_session.finished:
+            if display_session.set_logging(True):
+                display_session.show_logging_status("Logging started")
+            return
+
+        session = self.g_vars.get("channel_utilization_logging_session")
+        if isinstance(session, _LoggingOnlySession) and not session.finished:
+            _display_logging_status(
+                self.g_vars,
+                "Logging already active",
+                band=session.band,
+                channel=session.channel,
+            )
+            return
+
+        _write_logging_enabled(True)
+        session = _LoggingOnlySession(
+            self.g_vars,
+            build_launch_command(
+                band=band,
+                channel=channel,
+                logging=True,
+                logging_only=True,
+            ),
+            band=band,
+            channel=channel,
+            popen=self.popen,
+        )
+        self.g_vars["channel_utilization_logging_session"] = session
+        try:
+            session.start()
+        except OSError:
+            self.g_vars.pop("channel_utilization_logging_session", None)
+            _display_error(self.g_vars, "Unable to start logging.")
+            return
+
+        _display_logging_status(
+            self.g_vars,
+            "Logging started",
+            band=band,
+            channel=channel,
+        )
+
+    def stop_logging(self) -> None:
+        _write_logging_enabled(False)
+        stopped_channel: Optional[tuple[str, int]] = None
+        stopped_display_session: Optional[_DisplaySession] = None
+        display_session = self.g_vars.get("channel_utilization_session")
+        if isinstance(display_session, _DisplaySession):
+            if display_session.logging_enabled and not display_session.finished:
+                stopped_channel = (display_session.band, display_session.channel)
+                stopped_display_session = display_session
+            display_session.set_logging(False)
+
+        logging_session = self.g_vars.pop(
+            "channel_utilization_logging_session",
+            None,
+        )
+        if isinstance(logging_session, _LoggingOnlySession):
+            if not logging_session.finished:
+                stopped_channel = (logging_session.band, logging_session.channel)
+            logging_session.stop()
+
+        if stopped_channel is None:
+            _display_status(
+                self.g_vars,
+                f"Logging already stopped Log folder: {LOG_DIR}",
+            )
+            return
+
+        if stopped_display_session is not None:
+            stopped_display_session.show_logging_status("Logging stopped")
+            return
+
+        _display_logging_status(
+            self.g_vars,
+            "Logging stopped",
+            band=stopped_channel[0],
+            channel=stopped_channel[1],
+        )
 
 
 class _DisplaySession:
@@ -195,15 +363,30 @@ class _DisplaySession:
         g_vars: dict[str, object],
         command: list[str],
         *,
+        band: str,
+        channel: int,
+        logging_enabled: bool,
         popen: Callable[..., subprocess.Popen[bytes]],
+        clock: Callable[[], float],
+        wall_clock: Callable[[], datetime],
     ) -> None:
         self.g_vars = g_vars
         self.command = command
+        self.band = band
+        self.channel = channel
+        self.logging_enabled = logging_enabled
         self.popen = popen
+        self.clock = clock
+        self.wall_clock = wall_clock
         self.process: Optional[subprocess.Popen[bytes]] = None
         self.stop_event = threading.Event()
+        self.frame_lock = threading.Lock()
         self.thread: Optional[threading.Thread] = None
         self.exit_reported = False
+        self.screen_offset = 0
+        self.current_screen_name: Optional[str] = None
+        self.last_navigation_ts: Optional[float] = None
+        self.low_disk_stopped = False
 
     @property
     def finished(self) -> bool:
@@ -212,6 +395,9 @@ class _DisplaySession:
     def start(self) -> None:
         FRAME_PATH.parent.mkdir(parents=True, exist_ok=True)
         FRAME_PATH.unlink(missing_ok=True)
+        _screen_control_path(FRAME_PATH).unlink(missing_ok=True)
+        _logging_status_path().unlink(missing_ok=True)
+        self._write_screen_offset()
         self.process = self.popen(self.command)
         self.thread = threading.Thread(
             target=self._display_frames,
@@ -221,6 +407,8 @@ class _DisplaySession:
         self.thread.start()
 
     def stop(self) -> None:
+        was_logging = self.logging_enabled
+        self.set_logging(False)
         self.stop_event.set()
         process = self.process
         if process is not None and process.poll() is None:
@@ -236,8 +424,97 @@ class _DisplaySession:
                     process.wait(timeout=2)
         if self.thread is not None and self.thread is not threading.current_thread():
             self.thread.join(timeout=2)
+        if was_logging:
+            self.show_logging_status("Logging stopped")
         self.g_vars.pop("channel_utilization_session", None)
         self.g_vars.pop("page_exit_handler", None)
+        self.g_vars.pop("page_up_handler", None)
+        self.g_vars.pop("page_down_handler", None)
+        self.g_vars.pop("page_key1_handler", None)
+        self.g_vars.pop("page_key2_handler", None)
+        self.g_vars.pop("page_key3_handler", None)
+
+    def set_logging(self, enabled: bool) -> bool:
+        if enabled and self.low_disk_stopped:
+            return False
+        if enabled == self.logging_enabled:
+            return False
+        _write_logging_enabled(enabled)
+        self.logging_enabled = enabled
+        return True
+
+    def navigate_up(self) -> None:
+        self._navigate(-1)
+
+    def navigate_down(self) -> None:
+        self._navigate(1)
+
+    def ignore_auxiliary_button(self) -> None:
+        """Override an FPMS shortcut button while this page owns the display."""
+
+    def show_logging_status(self, message: str) -> None:
+        self.show_status(
+            _logging_status_message(
+                message,
+                band=self.band,
+                channel=self.channel,
+            )
+        )
+
+    def show_status(self, message: str) -> None:
+        """Overlay a message, then restore the same display screen and state."""
+        with self.frame_lock:
+            _display_page_status(self.g_vars, message)
+
+    def save_screenshot(self) -> Optional[Path]:
+        """Save the currently composed FPMS screen without changing runtime state."""
+        with self.frame_lock:
+            screen_name = self.current_screen_name
+            if screen_name is None:
+                return None
+            image = self.g_vars.get("image")
+            try:
+                screenshot = image.copy()  # type: ignore[union-attr]
+            except (AttributeError, OSError):
+                return None
+
+        timestamp = self.wall_clock().strftime("%Y%m%d-%H%M%S-%f")
+        frequency = _frequency_mhz(self.band, self.channel)
+        safe_screen_name = _filename_component(screen_name)
+        output = LOG_DIR / (
+            f"{timestamp}_{safe_screen_name}_{frequency}MHz.png"
+        )
+        temporary = output.with_name(f".{output.name}.tmp")
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            screenshot.save(temporary, format="PNG")
+            temporary.replace(output)
+        except (AttributeError, OSError, ValueError):
+            return None
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.show_status(f"Screenshot saved: {LOG_DIR}")
+        return output
+
+    def _navigate(self, offset: int) -> None:
+        now = self.clock()
+        if (
+            self.last_navigation_ts is not None
+            and now - self.last_navigation_ts < NAVIGATION_DEBOUNCE_SECONDS
+        ):
+            return
+        self.last_navigation_ts = now
+        self.screen_offset += offset
+        self._write_screen_offset()
+
+    def _write_screen_offset(self) -> None:
+        _atomic_write_text(
+            _screen_control_path(FRAME_PATH),
+            json.dumps(
+                {"active_screen_offset": self.screen_offset},
+                separators=(",", ":"),
+            ),
+        )
 
     def _display_frames(self) -> None:
         last_modified_ns: Optional[int] = None
@@ -245,17 +522,75 @@ class _DisplaySession:
             try:
                 modified_ns = FRAME_PATH.stat().st_mtime_ns
                 if modified_ns != last_modified_ns:
-                    _draw_frame(self.g_vars, FRAME_PATH)
+                    with self.frame_lock:
+                        state = _draw_frame(self.g_vars, FRAME_PATH)
+                        self.current_screen_name = str(state["screen_title"])
                     last_modified_ns = modified_ns
             except (FileNotFoundError, OSError):
                 pass
+
+            self._check_logging_status()
 
             if self.process is not None and self.process.poll() is not None:
                 return
             self.stop_event.wait(0.1)
 
+    def _check_logging_status(self) -> None:
+        if self.low_disk_stopped:
+            return
+        try:
+            payload = json.loads(
+                _logging_status_path().read_text(encoding="utf-8")
+            )
+        except (OSError, TypeError, ValueError, UnicodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        if payload.get("reason") != LOW_DISK_STATUS_REASON:
+            return
+        self.low_disk_stopped = True
+        self.logging_enabled = False
+        self.show_logging_status("Logging stopped - disk nearly full")
 
-def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
+
+class _LoggingOnlySession:
+    """Own the background form of the same live capture executable."""
+
+    def __init__(
+        self,
+        g_vars: dict[str, object],
+        command: list[str],
+        *,
+        band: str,
+        channel: int,
+        popen: Callable[..., subprocess.Popen[bytes]],
+    ) -> None:
+        self.g_vars = g_vars
+        self.command = command
+        self.band = band
+        self.channel = channel
+        self.popen = popen
+        self.process: Optional[subprocess.Popen[bytes]] = None
+
+    @property
+    def finished(self) -> bool:
+        return self.process is not None and self.process.poll() is not None
+
+    def start(self) -> None:
+        self.process = self.popen(
+            self.command,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+    def stop(self) -> None:
+        _stop_process(self.process)
+
+
+def _draw_frame(
+    g_vars: dict[str, object],
+    frame_path: Path,
+) -> dict[str, object]:
     from PIL import Image, ImageDraw, ImageFont
 
     import fpms.modules.wlanpi_oled as oled
@@ -265,28 +600,95 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         frame = source.convert("RGB").copy()
     state = _read_display_state(frame_path.with_suffix(".json"))
     draw = ImageDraw.Draw(frame)
-    font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
-    metadata = _select_metadata(draw, state, font)
-    _draw_text_top(draw, 1, 1, metadata, font, (255, 255, 255))
-    _draw_text_top(draw, 2, 17, state["summary"], font, (255, 220, 0))
+    fonts = _scanner_font_candidates(SMART_FONT, ImageFont)
+    metadata, metadata_font = _select_metadata_font(draw, state, fonts)
+    _draw_metric_text(
+        draw,
+        1,
+        _TEXT_LINE_TOPS[0],
+        metadata,
+        metadata_font,
+        state["metric_color"],
+        metric_token_count=state["metadata_metric_token_count"],
+        metric_tokens_at_end=True,
+        gap=3,
+    )
+    summary_font = _select_metric_line_font(
+        draw,
+        str(state["summary"]),
+        fonts,
+        max_width=_TEXT_WIDTH,
+        gap=3,
+    )
+    _draw_metric_text(
+        draw,
+        2,
+        _TEXT_LINE_TOPS[1],
+        state["summary"],
+        summary_font,
+        state["metric_color"],
+        metric_token_count=state["summary_metric_token_count"],
+        metric_tokens_at_end=False,
+        gap=3,
+        secondary_metric_color=state["secondary_metric_color"],
+        secondary_metric_token_start=(
+            state["summary_secondary_metric_token_start"]
+        ),
+        secondary_metric_token_count=(
+            state["summary_secondary_metric_token_count"]
+        ),
+    )
+    if state["text_only"]:
+        for top_y, detail_line in zip(
+            _TEXT_LINE_TOPS[2:6],
+            state["detail_lines"],
+        ):
+            detail_text = str(detail_line)
+            detail_font = _select_text_line_font(
+                draw,
+                detail_text,
+                fonts,
+                max_width=_TEXT_WIDTH,
+            )
+            _draw_text_top(
+                draw,
+                2,
+                top_y,
+                _truncate_text(
+                    draw,
+                    detail_text,
+                    detail_font,
+                    _TEXT_WIDTH,
+                ),
+                detail_font,
+                _WHITE,
+            )
+    ssid_font = fonts[0]
     _draw_left_right(
         draw,
         2,
-        98,
+        _TEXT_LINE_TOPS[6],
         state["ssid"],
         state["rssi"],
-        font,
-        (255, 255, 255),
+        ssid_font,
+        _WHITE,
         truncate_left=True,
+    )
+    bssid_font = _select_left_right_font(
+        draw,
+        str(state["bssid"]),
+        str(state["channel"]),
+        fonts,
+        max_width=_TEXT_WIDTH,
     )
     _draw_left_right(
         draw,
         2,
-        114,
+        _TEXT_LINE_TOPS[7],
         state["bssid"],
         state["channel"],
-        font,
-        (255, 255, 255),
+        bssid_font,
+        _WHITE,
         truncate_left=False,
     )
     g_vars["drawing_in_progress"] = True
@@ -297,13 +699,24 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         oled.drawImage(frame)
     finally:
         g_vars["drawing_in_progress"] = False
+    return state
 
 
 def _read_display_state(path: Path) -> dict[str, object]:
     defaults = {
-        "metadata": "?G STA -- SUM --",
-        "metadata_candidates": ["?G STA -- SUM --"],
+        "screen_id": "channel",
+        "screen_title": "Channel",
+        "metadata": "Channel",
+        "metadata_candidates": ["Channel"],
+        "metadata_metric_token_count": 1,
         "summary": "CU --% AVG --% MAX --%",
+        "summary_metric_token_count": 2,
+        "metric_color": _DEFAULT_METRIC_COLOR,
+        "secondary_metric_color": None,
+        "summary_secondary_metric_token_start": None,
+        "summary_secondary_metric_token_count": 0,
+        "text_only": False,
+        "detail_lines": [],
         "ssid": "--",
         "rssi": "--",
         "bssid": "--",
@@ -313,56 +726,285 @@ def _read_display_state(path: Path) -> dict[str, object]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeError):
         return defaults
+    string_keys = tuple(
+        key
+        for key in defaults
+        if key
+        not in {
+            "metadata_candidates",
+            "metadata_metric_token_count",
+            "summary_metric_token_count",
+            "metric_color",
+            "secondary_metric_color",
+            "summary_secondary_metric_token_start",
+            "summary_secondary_metric_token_count",
+            "text_only",
+            "detail_lines",
+        }
+    )
     state: dict[str, object] = {
         key: str(payload.get(key, default))
         for key, default in defaults.items()
-        if key != "metadata_candidates"
+        if key in string_keys
     }
     candidates = payload.get("metadata_candidates", defaults["metadata_candidates"])
     if not isinstance(candidates, list):
         candidates = defaults["metadata_candidates"]
     state["metadata_candidates"] = [str(value) for value in candidates]
+    state["metadata_metric_token_count"] = _read_metric_token_count(
+        payload.get("metadata_metric_token_count"),
+        default=1,
+    )
+    state["summary_metric_token_count"] = _read_metric_token_count(
+        payload.get("summary_metric_token_count"),
+        default=2,
+    )
+    state["metric_color"] = _read_metric_color(payload.get("metric_color"))
+    state["secondary_metric_color"] = _read_optional_metric_color(
+        payload.get("secondary_metric_color")
+    )
+    secondary_start = payload.get("summary_secondary_metric_token_start")
+    state["summary_secondary_metric_token_start"] = (
+        secondary_start
+        if isinstance(secondary_start, int) and secondary_start >= 0
+        else None
+    )
+    state["summary_secondary_metric_token_count"] = _read_metric_token_count(
+        payload.get("summary_secondary_metric_token_count"),
+        default=0,
+    )
+    state["text_only"] = payload.get("text_only") is True
+    detail_lines = payload.get("detail_lines", defaults["detail_lines"])
+    if not isinstance(detail_lines, list):
+        detail_lines = defaults["detail_lines"]
+    state["detail_lines"] = [str(value) for value in detail_lines[:4]]
     return state
 
 
-def _select_scanner_font(draw, state, smart_font, image_font_module):
-    """Use a stable 9 px Scanner font, with an 8 px safety fallback."""
+def _read_metric_token_count(value: object, *, default: int) -> int:
+    return value if isinstance(value, int) and value >= 0 else default
+
+
+def _read_metric_color(value: object) -> tuple[int, int, int]:
+    if _is_metric_color(value):
+        return tuple(value)  # type: ignore[return-value]
+    return _DEFAULT_METRIC_COLOR
+
+
+def _read_optional_metric_color(
+    value: object,
+) -> Optional[tuple[int, int, int]]:
+    if not _is_metric_color(value):
+        return None
+    return tuple(value)  # type: ignore[return-value]
+
+
+def _is_metric_color(value: object) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 3
+        and all(
+            isinstance(component, int) and 0 <= component <= 255
+            for component in value
+        )
+    )
+
+
+def _screen_control_path(frame_path: Path) -> Path:
+    return frame_path.with_suffix(".control.json")
+
+
+def _filename_component(value: str) -> str:
+    component = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
+    return component or "screen"
+
+
+def _logging_control_path() -> Path:
+    return FRAME_PATH.with_name("logging.control.json")
+
+
+def _logging_status_path() -> Path:
+    return FRAME_PATH.with_name("logging.status.json")
+
+
+def _write_logging_enabled(enabled: bool) -> None:
+    _atomic_write_text(
+        _logging_control_path(),
+        json.dumps({"logging_enabled": enabled}, separators=(",", ":")),
+    )
+
+
+def _stop_process(process: Optional[subprocess.Popen[bytes]]) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.send_signal(signal.SIGINT)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+
+
+def _atomic_write_text(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _scanner_font_candidates(smart_font, image_font_module):
+    """Return Scanner fonts in the preferred per-line size order."""
     font_path = getattr(smart_font, "path", None)
-    candidates = (
-        [image_font_module.truetype(font_path, size) for size in (9, 8)]
-        if font_path is not None
-        else [smart_font]
+    if font_path is None:
+        return (smart_font,)
+    return tuple(
+        image_font_module.truetype(font_path, size) for size in (10, 9, 8)
     )
 
-    for font in candidates:
-        if _font_fits(draw, state, font):
-            return font
-    return candidates[-1]
 
-
-def _font_fits(draw, state: dict[str, object], font) -> bool:
-    width = 124
-    if _text_width(draw, str(state["summary"]), font) > width:
-        return False
-    if not any(
-        _text_width(draw, candidate, font) <= 126
-        for candidate in state["metadata_candidates"]
-    ):
-        return False
-    footer_width = (
-        _text_width(draw, str(state["bssid"]), font)
-        + _text_width(draw, " ", font)
-        + _text_width(draw, str(state["channel"]), font)
-    )
-    return footer_width <= width
-
-
-def _select_metadata(draw, state: dict[str, object], font) -> str:
+def _select_metadata_font(draw, state: dict[str, object], fonts):
+    """Prefer a shorter metadata label at size 10 before shrinking it."""
     candidates = state["metadata_candidates"]
-    for candidate in candidates:
-        if _text_width(draw, candidate, font) <= 126:
-            return candidate
-    return str(candidates[-1])
+    for font in fonts:
+        for candidate in candidates:
+            if _compact_text_width(draw, candidate, font, gap=3) <= 126:
+                return candidate, font
+    return str(candidates[-1]), fonts[-1]
+
+
+def _select_metric_line_font(
+    draw,
+    text: str,
+    fonts,
+    *,
+    max_width: int,
+    gap: int,
+):
+    for font in fonts:
+        if _compact_text_width(draw, text, font, gap=gap) <= max_width:
+            return font
+    return fonts[-1]
+
+
+def _select_text_line_font(
+    draw,
+    text: str,
+    fonts,
+    *,
+    max_width: int,
+):
+    for font in fonts:
+        if _text_width(draw, text, font) <= max_width:
+            return font
+    return fonts[-1]
+
+
+def _select_left_right_font(
+    draw,
+    left: str,
+    right: str,
+    fonts,
+    *,
+    max_width: int,
+):
+    for font in fonts:
+        width = (
+            _text_width(draw, left, font)
+            + 4
+            + _text_width(draw, right, font)
+        )
+        if width <= max_width:
+            return font
+    return fonts[-1]
+
+
+def _draw_metric_text(
+    draw,
+    x: int,
+    y: int,
+    text: object,
+    font,
+    metric_color: object,
+    *,
+    metric_token_count: object,
+    metric_tokens_at_end: bool,
+    gap: int,
+    secondary_metric_color: object = None,
+    secondary_metric_token_start: object = None,
+    secondary_metric_token_count: object = 0,
+) -> None:
+    """Draw graph-associated leading or trailing fields in the graph color."""
+    color = (
+        metric_color
+        if isinstance(metric_color, tuple) and len(metric_color) == 3
+        else _DEFAULT_METRIC_COLOR
+    )
+    colored_tokens = (
+        metric_token_count
+        if isinstance(metric_token_count, int) and metric_token_count >= 0
+        else 2
+    )
+    tokens = str(text).split()
+    secondary_color = (
+        secondary_metric_color
+        if isinstance(secondary_metric_color, tuple)
+        and len(secondary_metric_color) == 3
+        else None
+    )
+    secondary_start = (
+        secondary_metric_token_start
+        if isinstance(secondary_metric_token_start, int)
+        and secondary_metric_token_start >= 0
+        else None
+    )
+    secondary_count = (
+        secondary_metric_token_count
+        if isinstance(secondary_metric_token_count, int)
+        and secondary_metric_token_count >= 0
+        else 0
+    )
+    trailing_start = max(0, len(tokens) - colored_tokens)
+    current_x = x
+    for index, token in enumerate(tokens):
+        is_metric = (
+            index >= trailing_start
+            if metric_tokens_at_end
+            else index < colored_tokens
+        )
+        is_secondary_metric = (
+            secondary_color is not None
+            and secondary_start is not None
+            and secondary_start <= index < secondary_start + secondary_count
+        )
+        _draw_text_top(
+            draw,
+            current_x,
+            y,
+            token,
+            font,
+            (
+                secondary_color
+                if is_secondary_metric
+                else color if is_metric else _WHITE
+            ),
+        )
+        current_x += _text_width(draw, token, font) + gap
+
+
+def _compact_text_width(draw, text: str, font, *, gap: int) -> int:
+    tokens = text.split()
+    if not tokens:
+        return 0
+    return sum(_text_width(draw, token, font) for token in tokens) + gap * (
+        len(tokens) - 1
+    )
 
 
 def _draw_left_right(
@@ -411,3 +1053,86 @@ def _display_error(g_vars: dict[str, object], message: str) -> None:
     from fpms.modules.pages.alert import Alert
 
     Alert(g_vars).display_alert_error(g_vars, message)
+
+
+def _display_logging_status(
+    g_vars: dict[str, object],
+    message: str,
+    *,
+    band: str,
+    channel: int,
+) -> None:
+    _display_status(
+        g_vars,
+        _logging_status_message(message, band=band, channel=channel),
+    )
+
+
+def _logging_status_message(message: str, *, band: str, channel: int) -> str:
+    frequency = _frequency_mhz(band, channel)
+    return (
+        f"{message}: Ch {channel} {frequency} MHz "
+        f"Log folder: {LOG_DIR}"
+    )
+
+
+def _display_status(g_vars: dict[str, object], message: str) -> None:
+    """Briefly overlay a status message, then restore the active FPMS menu."""
+    _display_overlay(
+        g_vars,
+        message,
+        restore_display_state="menu",
+        reset_result_cache=True,
+    )
+
+
+def _display_page_status(g_vars: dict[str, object], message: str) -> None:
+    """Briefly overlay a status message, then restore the active app page."""
+    _display_overlay(
+        g_vars,
+        message,
+        restore_display_state="page",
+        reset_result_cache=False,
+    )
+
+
+def _display_overlay(
+    g_vars: dict[str, object],
+    message: str,
+    *,
+    restore_display_state: str,
+    reset_result_cache: bool,
+) -> None:
+    image = g_vars.get("image")
+    draw = g_vars.get("draw")
+    saved_image = None
+    if image is not None and draw is not None:
+        try:
+            saved_image = image.copy()  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            saved_image = None
+
+    try:
+        if saved_image is not None:
+            from fpms.modules.pages.alert import Alert
+
+            Alert(g_vars).display_popup_alert(
+                g_vars,
+                message,
+                delay=LOGGING_STATUS_SECONDS,
+            )
+    finally:
+        try:
+            if saved_image is not None:
+                from PIL import ImageDraw
+
+                import fpms.modules.wlanpi_oled as oled
+
+                g_vars["image"] = saved_image
+                g_vars["draw"] = ImageDraw.Draw(saved_image)
+                oled.drawImage(saved_image)
+        finally:
+            g_vars["drawing_in_progress"] = False
+            g_vars["display_state"] = restore_display_state
+            if reset_result_cache:
+                g_vars["result_cache"] = False

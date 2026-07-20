@@ -75,19 +75,47 @@ def test_frequency_to_band_resolves_log_metadata() -> None:
     assert frequency_to_band(5975) == "6"
 
 
-def test_build_tshark_command_uses_line_buffered_beacon_fields() -> None:
+def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
     command = build_tshark_command("wlan9")
 
     assert command[:4] == ["tshark", "-l", "-i", "wlan9"]
-    assert "wlan.fc.type_subtype == 8" in command
+    assert command[4:6] == ["-B", "16"]
+    assert command[6:10] == [
+        "--disable-protocol",
+        "ALL",
+        "--enable-protocol",
+        "radiotap,wlan_radio,wlan,wlan_ext,wlan_aggregate",
+    ]
+    assert [
+        command[index + 1]
+        for index, value in enumerate(command)
+        if value == "-o"
+    ] == ["wlan.defragment:FALSE", "wlan.enable_decryption:FALSE"]
+    assert command[command.index("-N") + 1] == "m"
+    assert "wlan" in command
+    assert "wlan.fc.type_subtype == 8" not in command
+    assert "-s" not in command
     assert _field_args(command) == [
         "frame.time_epoch",
-        "wlan.ssid",
+        "wlan.fc.type",
+        "wlan.fc.subtype",
+        "wlan.fc.retry",
         "wlan.bssid",
+        "wlan.ta",
+        "wlan.ra",
+        "wlan.sa",
+        "wlan.da",
+        "wlan.ssid",
         "wlan.qbss.cu",
         "wlan.qbss.scount",
         "wlan.qbss.adc",
         "radiotap.dbm_antsignal",
+        "wlan.fixed.beacon",
+        "wlan.cisco.ccx1.name",
+        "wlan.vs.aruba.ap_name",
+        "wlan.vs.extreme.ap_name",
+        "wlan.vs.aerohive.hostname",
+        "wlan.bssid_resolved",
     ]
 
 
@@ -130,7 +158,7 @@ def test_configure_monitor_interface_stops_on_failed_command() -> None:
     ]
 
 
-def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
+def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -181,6 +209,10 @@ def test_beacon_only_live_mode_skips_survey_and_keeps_logging(
     )
     assert stats_rows[0]["unique_bssid_count"] == "1"
     assert stats_rows[0]["selected_qbss_cu_percent"] == "25.10"
+    assert stats_rows[0]["received_frame_count"] == "3"
+    assert stats_rows[0]["retry_eligible_frame_count"] == "2"
+    assert stats_rows[0]["retry_frame_count"] == "1"
+    assert stats_rows[0]["retry_percent"] == "50.00"
     assert stats_rows[0]["local_cu_percent"] == ""
 
     beacons = [
@@ -209,6 +241,9 @@ def test_survey_enabled_live_mode_uses_available_data(
             [SurveySample(1.0, 1000, 100, 0, 0, None, 5180, True)],
             [SurveySample(2.0, 2000, 300, 0, 0, None, 5180, True)],
             [SurveySample(3.0, 3000, 500, 0, 0, None, 5180, True)],
+            [SurveySample(4.0, 4000, 700, 0, 0, None, 5180, True)],
+            [SurveySample(5.0, 5000, 900, 0, 0, None, 5180, True)],
+            [SurveySample(6.0, 6000, 1100, 0, 0, None, 5180, True)],
         ]
     )
     monkeypatch.setattr(
@@ -312,6 +347,64 @@ def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
     assert "Stopping live capture" in capsys.readouterr().err
 
 
+def test_low_disk_stops_display_logging_but_capture_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stats_csv = tmp_path / "display-stats.csv"
+    beacons_jsonl = tmp_path / "display-beacons.jsonl"
+    logging_status = tmp_path / "logging.status.json"
+    _prepare_one_interval_live_run(monkeypatch)
+
+    assert run_live(
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+        logging_status_path=logging_status,
+        min_free_bytes=10**30,
+    ) == 0
+
+    rows = [
+        json.loads(line)
+        for line in beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1]["record_type"] == "end_of_log"
+    assert rows[-1]["reason"] == "disk_space_nearly_full"
+    assert sum(row.get("record_type") == "end_of_log" for row in rows) == 1
+    assert json.loads(logging_status.read_text(encoding="utf-8")) == {
+        "reason": "disk_space_nearly_full"
+    }
+    # The terminal dashboard still receives later analyzed seconds after the
+    # logging service has closed.
+    assert "Alpha/aa:aa:aa:aa:aa:aa" in capsys.readouterr().out
+
+
+def test_low_disk_cleanly_exits_logging_only_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stats_csv = tmp_path / "only-stats.csv"
+    beacons_jsonl = tmp_path / "only-beacons.jsonl"
+    _prepare_one_interval_live_run(monkeypatch)
+
+    assert run_live(
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+        logging_only=True,
+        min_free_bytes=10**30,
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "below the safety threshold" in captured.err
+    rows = [
+        json.loads(line)
+        for line in beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1]["record_type"] == "end_of_log"
+
+
 def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
     warmup_filter = LiveWarmupFilter()
     stats = SecondStats(
@@ -325,6 +418,8 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
         local_cu_percent=None,
     )
 
+    assert warmup_filter.filter([]) == []
+    assert warmup_filter.remaining_cycles == 1
     assert warmup_filter.filter([stats]) == []
     assert warmup_filter.filter([stats]) == [stats]
 
@@ -332,8 +427,11 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
 class _FakeTsharkProcess:
     def __init__(self) -> None:
         self.stdout = io.StringIO(
-            "1000.100\tAlpha\taa:aa:aa:aa:aa:aa\t128\t2\t0\t-45\n"
-            "1001.100\tAlpha\taa:aa:aa:aa:aa:aa\t64\t3\t0\t-44\n"
+            "1000.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\tAlpha\t128\t2\t0\t-45\t256\t100\n"
+            "1001.100\t0\t8\t0\taa:aa:aa:aa:aa:aa\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\taa:aa:aa:aa:aa:aa\tff:ff:ff:ff:ff:ff\tAlpha\t64\t3\t0\t-44\t256\t100\n"
+            "1001.200\t2\t0\t1\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t\t\t\t\t-50\t100\t\n"
+            "1001.300\t2\t0\t0\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:10\taa:aa:aa:aa:aa:aa\t\t\t\t\t-50\t100\t\n"
+            "1002.100\t2\t0\t0\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:12\taa:aa:aa:aa:aa:aa\t10:11:11:11:11:12\taa:aa:aa:aa:aa:aa\t\t\t\t\t-50\t100\t\n"
         )
         self.stderr = io.StringIO("")
 
@@ -357,7 +455,6 @@ class _FakeSelector:
 
 def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monotonic_value = -1.0
-    wall_times = iter([1001.0, 1002.0])
 
     def fake_monotonic() -> float:
         nonlocal monotonic_value
@@ -378,7 +475,6 @@ def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("beacon_live.live.selectors.DefaultSelector", _FakeSelector)
     monkeypatch.setattr("beacon_live.live.time.monotonic", fake_monotonic)
-    monkeypatch.setattr("beacon_live.live.time.time", lambda: next(wall_times))
 
 
 def _field_args(command: list[str]) -> list[str]:
