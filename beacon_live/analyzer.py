@@ -412,6 +412,9 @@ class Analyzer:
             top_retry_bssid=self._current_retry_bssid,
             retry_bssids=retry_states,
             composition=composition,
+            window_unique_client_mac_count=len(
+                _unique_client_macs(frames, states)
+            ),
         )
 
     def _composition_snapshot(
@@ -811,7 +814,73 @@ def _stats_from_states(
             else None
         ),
         top_retry_bssid=retry_bssid,
+        unique_client_mac_count=len(_unique_client_macs(frames, states)),
     )
+
+
+def _unique_client_macs(
+    frames: tuple[FrameRecord, ...],
+    beacon_states: tuple[BssidState, ...],
+) -> frozenset[str]:
+    """Return unicast station endpoints seen in BSSID-linked data frames.
+
+    Only TA/RA link endpoints are considered. SA/DA can identify hosts behind
+    a distribution system and therefore are not sufficient evidence that a
+    MAC belongs to a wireless client associated on the monitored channel.
+    """
+    known_bssids = {
+        _canonical_address(state.bssid) for state in beacon_states
+    }
+    clients: set[str] = set()
+    for frame in frames:
+        if frame.frame_type != 2:
+            continue
+
+        frame_bssid = _known_frame_bssid(frame, known_bssids)
+        if frame_bssid is None:
+            continue
+
+        link_addresses = tuple(
+            _canonical_address(address)
+            for address in (
+                frame.transmitter_address,
+                frame.receiver_address,
+            )
+            if address is not None
+        )
+        if frame_bssid not in link_addresses:
+            continue
+
+        for address in link_addresses:
+            if (
+                address != frame_bssid
+                and address not in known_bssids
+                and _is_unicast_mac(address)
+            ):
+                clients.add(address)
+    return frozenset(clients)
+
+
+def _known_frame_bssid(
+    frame: FrameRecord,
+    known_bssids: set[str],
+) -> Optional[str]:
+    for address in frame.mac_addresses:
+        canonical = _canonical_address(address)
+        if canonical in known_bssids:
+            return canonical
+    return None
+
+
+def _is_unicast_mac(address: str) -> bool:
+    octets = address.split(":")
+    if len(octets) != 6 or any(len(octet) != 2 for octet in octets):
+        return False
+    try:
+        values = tuple(int(octet, 16) for octet in octets)
+    except ValueError:
+        return False
+    return any(values) and not bool(values[0] & 1)
 
 
 def _retry_states_from_frames(

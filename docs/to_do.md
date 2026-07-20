@@ -58,7 +58,7 @@ Features & changes
 19. DONE    make the text dynamic per line - only decrease size on the line needed, otherwise size 10 font.
         this should only ever affect line 2 if there is 100%
         line 3 for SSID should just be trunkated
-20. on the Stations screen - instead of Max station count, include the locally detected station count from frames
+20. DONE    on the Stations screen - instead of Max station count, include the locally detected station count from frames
         do not include probe requests or other frames that are not from an associated client
         include clients that were detected within the last 2 minutes
         can call this MAC or stay with MAX
@@ -77,4 +77,3 @@ Features & changes
         add confirmation that logging has stopped - logging channel X has started... etc
 25. unify app name - beacon-live and Utilization
         update log path if necessary
-        

@@ -153,6 +153,7 @@ class SecondStats:
     retry_percent: Optional[float] = None
     selected_beacon_rate_percent: Optional[float] = None
     top_retry_bssid: Optional[str] = None
+    unique_client_mac_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -289,6 +290,7 @@ class MetricsSnapshot:
     composition: CompositionSnapshot = field(
         default_factory=CompositionSnapshot.empty
     )
+    window_unique_client_mac_count: int = 0
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":
@@ -314,6 +316,7 @@ class MetricsSnapshot:
             top_retry_bssid=None,
             retry_bssids=(),
             composition=CompositionSnapshot.empty(),
+            window_unique_client_mac_count=0,
         )
 
     @property

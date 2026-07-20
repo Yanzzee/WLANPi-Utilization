@@ -91,7 +91,7 @@ def test_total_station_count_uses_shared_history_and_highest_station_bssid() -> 
     view = TotalStationCountScreen().render(snapshot)
 
     assert view.title == "Total Station Count"
-    assert view.summary == "SUM 15 MAX 15 TOP 10"
+    assert view.summary == "SUM 15 MAC 0 TOP 10"
     assert view.metadata_tokens == ("Stations",)
     assert view.graph_maximum == STATION_GRAPH_MAXIMUM
     assert snapshot.selected_bssid == "aa"
@@ -99,6 +99,8 @@ def test_total_station_count_uses_shared_history_and_highest_station_bssid() -> 
     assert view.identity.bssid == "bb"
     assert [point.second for point in view.graph_points] == [1000, 1001]
     assert [point.value for point in view.graph_points] == [3, 15]
+    assert [point.value for point in view.secondary_graph_points] == [0, 0]
+    assert view.secondary_graph_label == "Unique client MACs per second"
 
 
 def test_total_station_graph_keeps_fixed_64_count_scale() -> None:
@@ -120,6 +122,52 @@ def test_total_station_graph_keeps_fixed_64_count_scale() -> None:
 
     assert view.graph_maximum == 64
     assert [point.value for point in view.graph_points] == [65]
+
+
+def test_total_station_screen_shows_window_mac_total_and_per_second_series() -> None:
+    bssid = "02:00:00:00:00:01"
+    client_a = "02:00:00:00:10:01"
+    client_b = "02:00:00:00:10:02"
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.0,
+            ssid="Alpha",
+            bssid=bssid,
+            cu_raw=64,
+            station_count=7,
+            admission_capacity=10_000,
+            rssi_dbm=-40,
+        )
+    )
+    for timestamp, client in ((1000.1, client_a), (1000.2, client_b)):
+        analyzer.ingest(
+            FrameRecord(
+                timestamp=timestamp,
+                bssid=bssid,
+                frame_type=2,
+                frame_subtype=0,
+                transmitter_address=client,
+                receiver_address=bssid,
+            )
+        )
+    analyzer.advance(1001, None)
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1001.1,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            transmitter_address=client_a,
+            receiver_address=bssid,
+        )
+    )
+    analyzer.advance(1002, None)
+
+    view = TotalStationCountScreen().render(analyzer.snapshot)
+
+    assert view.summary == "SUM 7 MAC 2 TOP 7"
+    assert [point.value for point in view.secondary_graph_points] == [2, 1]
 
 
 def test_cu_screen_uses_utilization_top_line_label() -> None:

@@ -193,14 +193,17 @@ Apps
 2. Confirm the Utilization graph gains samples as new capture seconds complete.
 3. Use up/down to visit Utilization, Admission, Stations, Retries, and
    Composition.
-4. Return to earlier screens and confirm their two-minute histories continued
+4. On Stations, generate traffic from one or more associated clients. Confirm
+   `MAC` increases only for newly seen client MACs in the two-minute window,
+   and confirm cyan per-second bars overlay the amber advertised-count bars.
+5. Return to earlier screens and confirm their two-minute histories continued
    while inactive.
-5. Press left and confirm capture exits and the selected channel menu returns.
-6. While a display is active, confirm the first two auxiliary buttons do
+6. Press left and confirm capture exits and the selected channel menu returns.
+7. While a display is active, confirm the first two auxiliary buttons do
    nothing. Press the third auxiliary button and confirm a timestamped PNG for
    the active screen appears in `/var/log/wlanpi-beacon-live`. Confirm the
    brief saved-folder message clears back to the same screen.
-7. Open `Display + Log`; confirm its brief start message includes the log
+8. Open `Display + Log`; confirm its brief start message includes the log
    folder. Wait several seconds, exit left, confirm the stop message, and
    confirm a CSV and JSONL file exist:
 
@@ -208,16 +211,18 @@ Apps
    sudo ls -l /var/log/wlanpi-beacon-live
    ```
 
-8. Use `Start Logging`; confirm no graph page opens. Then use `Stop Logging` and
+9. Inspect the stats CSV and confirm `unique_client_mac_count` contains the
+   unique eligible client count for each emitted second.
+10. Use `Start Logging`; confirm no graph page opens. Then use `Stop Logging` and
    confirm both messages include the log folder, the child exits, and files are
    closed.
-9. Confirm no unexpected capture child remains:
+11. Confirm no unexpected capture child remains:
 
    ```bash
    pgrep -af 'wlanpi-beacon-live|tshark'
    ```
 
-10. Inspect FPMS service output for errors:
+12. Inspect FPMS service output for errors:
 
    ```bash
    sudo journalctl -u wlanpi-fpms -n 100 --no-pager

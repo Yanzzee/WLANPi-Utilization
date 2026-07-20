@@ -541,6 +541,101 @@ def test_no_retries_selects_the_strongest_beacon_for_footer() -> None:
     assert analyzer.snapshot.top_retry_bssid == "aa"
 
 
+def test_unique_client_macs_count_data_endpoints_per_second_and_window() -> None:
+    bssid = "02:00:00:00:00:01"
+    client_a = "02:00:00:00:10:01"
+    client_b = "02:00:00:00:10:02"
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, bssid, "Alpha", -40, retry=False))
+    analyzer.ingest(_client_data_frame(1000.1, bssid, client_a, from_ap=False))
+    analyzer.ingest(_client_data_frame(1000.2, bssid, client_a, from_ap=True))
+    analyzer.ingest(_client_data_frame(1000.3, bssid, client_b, from_ap=True))
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.history[-1].unique_client_mac_count == 2
+    assert analyzer.snapshot.window_unique_client_mac_count == 2
+
+    analyzer.ingest(_client_data_frame(1001.1, bssid, client_a, from_ap=False))
+    analyzer.advance(1002, None)
+
+    assert analyzer.snapshot.history[-1].unique_client_mac_count == 1
+    assert analyzer.snapshot.window_unique_client_mac_count == 2
+
+
+def test_unique_client_macs_exclude_management_group_and_unlinked_frames() -> None:
+    bssid = "02:00:00:00:00:01"
+    other_bssid = "02:00:00:00:00:02"
+    client = "02:00:00:00:10:01"
+    analyzer = Analyzer()
+    analyzer.ingest(_beacon_frame(1000.0, bssid, "Alpha", -40, retry=False))
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.1,
+            bssid=bssid,
+            frame_type=0,
+            frame_subtype=11,
+            transmitter_address=client,
+            receiver_address=bssid,
+        )
+    )
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.2,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            transmitter_address=bssid,
+            receiver_address="ff:ff:ff:ff:ff:ff",
+        )
+    )
+    analyzer.ingest(_client_data_frame(1000.3, other_bssid, client, from_ap=False))
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.4,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            transmitter_address="02:00:00:00:20:01",
+            receiver_address="02:00:00:00:20:02",
+        )
+    )
+    analyzer.advance(1001, None)
+
+    assert analyzer.snapshot.history[-1].unique_client_mac_count == 0
+    assert analyzer.snapshot.window_unique_client_mac_count == 0
+
+
+def test_unique_client_mac_window_expires_old_clients() -> None:
+    bssid = "02:00:00:00:00:01"
+    analyzer = Analyzer(window_seconds=2)
+    analyzer.ingest(_beacon_frame(1000.0, bssid, "Alpha", -40, retry=False))
+    analyzer.ingest(
+        _client_data_frame(
+            1000.1,
+            bssid,
+            "02:00:00:00:10:01",
+            from_ap=False,
+        )
+    )
+    analyzer.advance(1001, None)
+    analyzer.ingest(_beacon_frame(1001.5, bssid, "Alpha", -40, retry=False))
+    analyzer.ingest(
+        _client_data_frame(
+            1001.6,
+            bssid,
+            "02:00:00:00:10:02",
+            from_ap=False,
+        )
+    )
+    analyzer.advance(1002, None)
+
+    assert analyzer.snapshot.window_unique_client_mac_count == 2
+
+    analyzer.advance(1003, None)
+
+    assert analyzer.snapshot.window_unique_client_mac_count == 1
+
+
 def _record(
     timestamp: float,
     *,
@@ -629,4 +724,24 @@ def _beacon_frame(
         qbss_cu_percent=64 / 255 * 100,
         qbss_station_count=3,
         qbss_admission_capacity=10_000,
+    )
+
+
+def _client_data_frame(
+    timestamp: float,
+    bssid: str,
+    client: str,
+    *,
+    from_ap: bool,
+) -> FrameRecord:
+    return FrameRecord(
+        timestamp=timestamp,
+        bssid=bssid,
+        frame_type=2,
+        frame_subtype=0,
+        retry_flag=False,
+        transmitter_address=bssid if from_ap else client,
+        receiver_address=client if from_ap else bssid,
+        source_address=bssid if from_ap else client,
+        destination_address=client if from_ap else bssid,
     )

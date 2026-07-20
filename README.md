@@ -85,14 +85,16 @@ Changing screens never restarts capture or clears graph history.
 | --- | --- |
 | Utilization | Channel utilization advertised by the automatically selected QBSS BSSID. |
 | Admission | The selected BSSID's advertised admission capacity as a percentage. |
-| Stations | The sum of AP-advertised QBSS station counts and the BSSID reporting the highest count. |
+| Stations | AP-advertised QBSS station counts plus unique client MACs observed in BSSID-linked data frames. |
 | Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
 | Composition | BSSID and QBSS counts plus best-effort physical-radio, AP name, and vendor information. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are
-shown as gaps or `--`. AP-advertised station counts are not observed-client
-counts, and AP QBSS utilization is separate from optional local survey
-utilization.
+shown as gaps or `--`. On Stations, the amber series is the AP-advertised QBSS
+sum and the cyan overlay is the unique client-MAC count detected in each
+second. `MAC` is the deduplicated client total for the full rolling window;
+it remains separate from the advertised station count. AP QBSS utilization is
+also separate from optional local survey utilization.
 
 See the [screen reference](docs/screens.md) for metric definitions, selection
 rules, and display details.

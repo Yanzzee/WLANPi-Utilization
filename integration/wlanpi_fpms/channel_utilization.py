@@ -630,6 +630,13 @@ def _draw_frame(
         metric_token_count=state["summary_metric_token_count"],
         metric_tokens_at_end=False,
         gap=3,
+        secondary_metric_color=state["secondary_metric_color"],
+        secondary_metric_token_start=(
+            state["summary_secondary_metric_token_start"]
+        ),
+        secondary_metric_token_count=(
+            state["summary_secondary_metric_token_count"]
+        ),
     )
     if state["text_only"]:
         for top_y, detail_line in zip(
@@ -705,6 +712,9 @@ def _read_display_state(path: Path) -> dict[str, object]:
         "summary": "CU --% AVG --% MAX --%",
         "summary_metric_token_count": 2,
         "metric_color": _DEFAULT_METRIC_COLOR,
+        "secondary_metric_color": None,
+        "summary_secondary_metric_token_start": None,
+        "summary_secondary_metric_token_count": 0,
         "text_only": False,
         "detail_lines": [],
         "ssid": "--",
@@ -725,6 +735,9 @@ def _read_display_state(path: Path) -> dict[str, object]:
             "metadata_metric_token_count",
             "summary_metric_token_count",
             "metric_color",
+            "secondary_metric_color",
+            "summary_secondary_metric_token_start",
+            "summary_secondary_metric_token_count",
             "text_only",
             "detail_lines",
         }
@@ -747,6 +760,19 @@ def _read_display_state(path: Path) -> dict[str, object]:
         default=2,
     )
     state["metric_color"] = _read_metric_color(payload.get("metric_color"))
+    state["secondary_metric_color"] = _read_optional_metric_color(
+        payload.get("secondary_metric_color")
+    )
+    secondary_start = payload.get("summary_secondary_metric_token_start")
+    state["summary_secondary_metric_token_start"] = (
+        secondary_start
+        if isinstance(secondary_start, int) and secondary_start >= 0
+        else None
+    )
+    state["summary_secondary_metric_token_count"] = _read_metric_token_count(
+        payload.get("summary_secondary_metric_token_count"),
+        default=0,
+    )
     state["text_only"] = payload.get("text_only") is True
     detail_lines = payload.get("detail_lines", defaults["detail_lines"])
     if not isinstance(detail_lines, list):
@@ -760,16 +786,28 @@ def _read_metric_token_count(value: object, *, default: int) -> int:
 
 
 def _read_metric_color(value: object) -> tuple[int, int, int]:
-    if (
-        isinstance(value, list)
+    if _is_metric_color(value):
+        return tuple(value)  # type: ignore[return-value]
+    return _DEFAULT_METRIC_COLOR
+
+
+def _read_optional_metric_color(
+    value: object,
+) -> Optional[tuple[int, int, int]]:
+    if not _is_metric_color(value):
+        return None
+    return tuple(value)  # type: ignore[return-value]
+
+
+def _is_metric_color(value: object) -> bool:
+    return (
+        isinstance(value, (list, tuple))
         and len(value) == 3
         and all(
             isinstance(component, int) and 0 <= component <= 255
             for component in value
         )
-    ):
-        return tuple(value)  # type: ignore[return-value]
-    return _DEFAULT_METRIC_COLOR
+    )
 
 
 def _screen_control_path(frame_path: Path) -> Path:
@@ -898,6 +936,9 @@ def _draw_metric_text(
     metric_token_count: object,
     metric_tokens_at_end: bool,
     gap: int,
+    secondary_metric_color: object = None,
+    secondary_metric_token_start: object = None,
+    secondary_metric_token_count: object = 0,
 ) -> None:
     """Draw graph-associated leading or trailing fields in the graph color."""
     color = (
@@ -911,6 +952,24 @@ def _draw_metric_text(
         else 2
     )
     tokens = str(text).split()
+    secondary_color = (
+        secondary_metric_color
+        if isinstance(secondary_metric_color, tuple)
+        and len(secondary_metric_color) == 3
+        else None
+    )
+    secondary_start = (
+        secondary_metric_token_start
+        if isinstance(secondary_metric_token_start, int)
+        and secondary_metric_token_start >= 0
+        else None
+    )
+    secondary_count = (
+        secondary_metric_token_count
+        if isinstance(secondary_metric_token_count, int)
+        and secondary_metric_token_count >= 0
+        else 0
+    )
     trailing_start = max(0, len(tokens) - colored_tokens)
     current_x = x
     for index, token in enumerate(tokens):
@@ -919,13 +978,22 @@ def _draw_metric_text(
             if metric_tokens_at_end
             else index < colored_tokens
         )
+        is_secondary_metric = (
+            secondary_color is not None
+            and secondary_start is not None
+            and secondary_start <= index < secondary_start + secondary_count
+        )
         _draw_text_top(
             draw,
             current_x,
             y,
             token,
             font,
-            color if is_metric else _WHITE,
+            (
+                secondary_color
+                if is_secondary_metric
+                else color if is_metric else _WHITE
+            ),
         )
         current_x += _text_width(draw, token, font) + gap
 

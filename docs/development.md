@@ -55,7 +55,8 @@ suggestions but does not run `apt install` itself.
 - The newest beacon supplies beacon-derived values within each retained BSSID.
 - BSSID selection is automatic and never uses timing as a tie-breaker.
 - Keep AP QBSS CU separate from local survey CU.
-- Keep advertised station counts separate from future observed-client counts.
+- Keep advertised station counts separate from locally observed unique client
+  MAC counts.
 - Keep hardware calls at the live/survey/integration boundaries.
 - Do not add pandas to the live capture path.
 
@@ -79,9 +80,10 @@ Useful focused groups:
 .venv/bin/python -m pytest -q tests/test_fpms_integration.py tests/test_fpms_patch.py
 ```
 
-Parser, selection, aggregation, retry eligibility, grouping, logging safety,
-screen navigation, and FPMS command wiring are expected to have pytest
-coverage. Most tests must run without Wi-Fi or display hardware.
+Parser, selection, aggregation, client-MAC eligibility, retry eligibility,
+grouping, logging safety, screen navigation, and FPMS command wiring are
+expected to have pytest coverage. Most tests must run without Wi-Fi or display
+hardware.
 
 ## Hardware-free replay
 

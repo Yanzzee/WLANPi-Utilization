@@ -149,11 +149,23 @@ class TerminalDashboard:
             else _bar_for_value(point.value, view.graph_maximum)
             for point in view.graph_points
         )
+        secondary_graph = "".join(
+            "·"
+            if point.value is None
+            else _bar_for_value(point.value, view.graph_maximum)
+            for point in view.secondary_graph_points
+        )
+        graph_lines = [f"{view.graph_label} graph: {graph or '--'}"]
+        if view.secondary_graph_points:
+            graph_lines.append(
+                f"{view.secondary_graph_label} graph: "
+                f"{secondary_graph or '--'}"
+            )
         return "\n".join(
             [
                 title,
                 view.summary,
-                f"{view.graph_label} graph: {graph or '--'}",
+                *graph_lines,
                 f"Source: {_format_identity(view.identity)}",
             ]
         )

@@ -13,6 +13,7 @@ from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _ADMISSION_GRAPH
 from beacon_live.lcd_dashboard import _COMPOSITION_TEXT
 from beacon_live.lcd_dashboard import _CU_GRAPH
+from beacon_live.lcd_dashboard import _MAC_GRAPH
 from beacon_live.lcd_dashboard import _OVERFLOW_GRAPH
 from beacon_live.lcd_dashboard import _RETRY_GRAPH
 from beacon_live.lcd_dashboard import _STATION_GRAPH
@@ -135,6 +136,57 @@ def test_station_counts_map_one_to_one_to_64_graph_pixels() -> None:
     assert _value_to_graph_height(65, 64) == 64
 
 
+def test_station_graph_overlays_nonzero_mac_count_in_matching_color(
+    tmp_path: Path,
+) -> None:
+    dashboard = LcdDashboard(
+        tmp_path / "display.ppm",
+        band="5",
+        channel="36",
+    )
+    snapshot = MetricsSnapshot(
+        generated_at=1001.0,
+        window_seconds=120,
+        bssids=(),
+        selected_bssid=None,
+        current=_stats(
+            1000,
+            25.0,
+            64,
+            station_count=10,
+            unique_client_mac_count=4,
+        ),
+        history=(
+            _stats(
+                1000,
+                25.0,
+                64,
+                station_count=10,
+                unique_client_mac_count=4,
+            ),
+        ),
+        window_unique_client_mac_count=4,
+    )
+    dashboard.update(snapshot)
+    dashboard.set_active_screen(2)
+    dashboard.refresh()
+
+    pixels = dashboard.render().split(b"\n", 3)[3]
+    latest_x = GRAPH_X + GRAPH_WIDTH - 1
+    baseline = GRAPH_Y + GRAPH_HEIGHT - 1
+
+    assert dashboard.text_lines[1] == "SUM 10 MAC 4 TOP --"
+    assert dashboard.secondary_metric_color == _MAC_GRAPH
+    assert _pixel(pixels, latest_x, baseline) == _MAC_GRAPH
+    assert _pixel(pixels, latest_x, baseline - 5) == _STATION_GRAPH
+    state = json.loads(
+        dashboard.frame_path.with_suffix(".json").read_text(encoding="utf-8")
+    )
+    assert state["secondary_metric_color"] == list(_MAC_GRAPH)
+    assert state["summary_secondary_metric_token_start"] == 2
+    assert state["summary_secondary_metric_token_count"] == 2
+
+
 def test_station_sum_supports_three_digit_values(
     tmp_path: Path,
 ) -> None:
@@ -157,7 +209,7 @@ def test_station_sum_supports_three_digit_values(
     dashboard.set_active_screen(2)
 
     assert dashboard.text_lines[0] == "Stations"
-    assert dashboard.text_lines[1] == "SUM 999 MAX 999 TOP --"
+    assert dashboard.text_lines[1] == "SUM 999 MAC 0 TOP --"
 
 
 def test_station_count_above_999_uses_infinity_symbol_in_text() -> None:
@@ -243,12 +295,13 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert dashboard.metric_color == _STATION_GRAPH
     assert dashboard.text_lines[0] == "5180MHz Stations"
-    assert dashboard.text_lines[1] == "SUM 15 MAX 15 TOP 10"
+    assert dashboard.text_lines[1] == "SUM 15 MAC 0 TOP 10"
     assert dashboard.text_lines[2] == "Bravo"
     assert dashboard.graph_data == ((1000, 3), (1001, 15))
+    assert dashboard.secondary_graph_data == ((1000, 0), (1001, 0))
     station_pixels = dashboard.render().split(b"\n", 3)[3]
     assert _pixel(station_pixels, latest_x, baseline) == _STATION_GRAPH
-    assert len({_CU_GRAPH, _ADMISSION_GRAPH, _STATION_GRAPH}) == 3
+    assert len({_CU_GRAPH, _ADMISSION_GRAPH, _STATION_GRAPH, _MAC_GRAPH}) == 4
 
     assert dashboard.navigate_down(now=1.6)
     assert dashboard.active_screen_id == RETRY_SCREEN_ID
@@ -408,6 +461,7 @@ def _stats(
     station_count: int = 12,
     bssid_station_count: Optional[int] = None,
     admission_capacity: Optional[int] = None,
+    unique_client_mac_count: int = 0,
 ) -> SecondStats:
     return SecondStats(
         second=second,
@@ -424,6 +478,7 @@ def _stats(
         ),
         selected_qbss_strongest_rssi_dbm=-45,
         selected_qbss_admission_capacity=admission_capacity,
+        unique_client_mac_count=unique_client_mac_count,
     )
 
 

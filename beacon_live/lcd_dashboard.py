@@ -28,6 +28,7 @@ _DIM = (48, 64, 64)
 _CU_GRAPH = (0, 220, 120)
 _ADMISSION_GRAPH = (0, 160, 255)
 _STATION_GRAPH = (255, 190, 0)
+_MAC_GRAPH = (0, 220, 220)
 _RETRY_GRAPH = (210, 90, 255)
 _COMPOSITION_TEXT = (255, 255, 255)
 _OVERFLOW_GRAPH = (255, 0, 0)
@@ -103,6 +104,14 @@ class LcdDashboard:
         )
 
     @property
+    def secondary_graph_data(self) -> tuple[tuple[int, Optional[float]], ...]:
+        """Return an optional overlaid series on the shared time base."""
+        return tuple(
+            (point.second, point.value)
+            for point in self.screen_manager.view.secondary_graph_points
+        )
+
+    @property
     def text_lines(self) -> tuple[str, str, str, str, str, str]:
         view = self.screen_manager.view
         metric_fields = " ".join(view.metadata_tokens)
@@ -147,6 +156,12 @@ class LcdDashboard:
         """Color shared by the active screen's graph and primary value."""
         return _GRAPH_COLORS[self.active_screen_id]
 
+    @property
+    def secondary_metric_color(self) -> Optional[tuple[int, int, int]]:
+        if self.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID:
+            return _MAC_GRAPH
+        return None
+
     def render(self) -> bytes:
         canvas = _Canvas(LCD_WIDTH, LCD_HEIGHT)
         view = self.screen_manager.view
@@ -179,25 +194,52 @@ class LcdDashboard:
             )
 
         graph_data = self.graph_data[-GRAPH_WIDTH:]
+        secondary_by_second = dict(self.secondary_graph_data[-GRAPH_WIDTH:])
         start_x = GRAPH_X + GRAPH_WIDTH - len(graph_data)
         baseline = GRAPH_Y + GRAPH_HEIGHT - 1
         graph_color = _GRAPH_COLORS[view.screen_id]
         for offset, (_, value) in enumerate(graph_data):
-            if value is None:
-                continue
-            height = _value_to_graph_height(value, view.graph_maximum)
-            bar_color = (
-                _OVERFLOW_GRAPH
-                if view.screen_id == TOTAL_STATION_COUNT_SCREEN_ID
-                and value > view.graph_maximum
-                else graph_color
-            )
-            canvas.vertical_line(
-                start_x + offset,
-                baseline - height + 1,
-                baseline,
-                bar_color,
-            )
+            second = graph_data[offset][0]
+            bars: list[tuple[int, tuple[int, int, int]]] = []
+            if value is not None:
+                bar_color = (
+                    _OVERFLOW_GRAPH
+                    if view.screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+                    and value > view.graph_maximum
+                    else graph_color
+                )
+                bars.append(
+                    (
+                        _value_to_graph_height(value, view.graph_maximum),
+                        bar_color,
+                    )
+                )
+            secondary_value = secondary_by_second.get(second)
+            if (
+                secondary_value is not None
+                and secondary_value > 0
+                and self.secondary_metric_color is not None
+            ):
+                bars.append(
+                    (
+                        _value_to_graph_height(
+                            secondary_value,
+                            view.graph_maximum,
+                        ),
+                        self.secondary_metric_color,
+                    )
+                )
+            for height, bar_color in sorted(
+                bars,
+                key=lambda item: item[0],
+                reverse=True,
+            ):
+                canvas.vertical_line(
+                    start_x + offset,
+                    baseline - height + 1,
+                    baseline,
+                    bar_color,
+                )
 
         return canvas.ppm()
 
@@ -218,6 +260,13 @@ class LcdDashboard:
             "summary": summary,
             "summary_metric_token_count": view.summary_metric_token_count,
             "metric_color": self.metric_color,
+            "secondary_metric_color": self.secondary_metric_color,
+            "summary_secondary_metric_token_start": (
+                view.summary_secondary_metric_token_start
+            ),
+            "summary_secondary_metric_token_count": (
+                view.summary_secondary_metric_token_count
+            ),
             "text_only": view.text_only,
             "detail_lines": view.detail_lines,
             "ssid": ssid,

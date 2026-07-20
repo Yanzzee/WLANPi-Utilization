@@ -21,8 +21,9 @@ behavior lives in [screens.md](screens.md) and [logging.md](logging.md).
 - Keep the live path free of pandas.
 - Users never select an SSID or BSSID.
 - Treat AP QBSS utilization and local survey utilization as separate metrics.
-- Treat advertised QBSS station count and any future observed-client count as
-  separate metrics. Do not call observed clients an associated-station count.
+- Treat advertised QBSS station count and locally observed unique client-MAC
+  count as separate metrics. Do not call observed clients an associated-station
+  count.
 
 ## Data flow
 
@@ -81,6 +82,7 @@ maintains:
 - the latest authoritative beacon for each BSSID;
 - per-second history rows;
 - per-BSSID and channel retry counts;
+- per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
 - best-effort radio groups; and
 - channel-composition state.
@@ -136,6 +138,21 @@ retry percentage. It keeps the current footer on a percentage tie and falls
 back to the strongest beacon RSSI when no retries occurred. Timing is never a
 tie-breaker.
 
+### Unique client-MAC counts
+
+Client-MAC detection uses only data frames associated with a retained,
+on-channel beacon BSSID. The candidate client is the unicast TA/RA link
+endpoint opposite that BSSID. Known BSSID addresses, group addresses,
+management/control/extension frames, unlinked data frames, and SA/DA-only
+addresses are excluded. This prevents authentication and probe traffic, other
+APs, and hosts behind the distribution system from being presented as observed
+wireless clients.
+
+Each completed `SecondStats` contains the deduplicated count for that capture
+second. `MetricsSnapshot` additionally contains the deduplicated union across
+the retained 120-second frame window for the Stations summary. Retry copies of
+a frame do not inflate either unique count.
+
 ### Radio grouping
 
 Radio grouping is deliberately conservative and best-effort. A BSSID is not
@@ -157,7 +174,8 @@ The immutable snapshot contains:
 - the generated/reference time and window length;
 - current and historical `SecondStats`;
 - current `BssidState` and `RetryBssidState` collections;
-- selected QBSS, station, and retry BSSIDs; and
+- selected QBSS, station, and retry BSSIDs;
+- the rolling unique client-MAC count; and
 - a `CompositionSnapshot`.
 
 UI code reads the snapshot and formats a view. It must not independently parse
@@ -182,6 +200,9 @@ overrides all three FPMS auxiliary buttons: the first two are no-ops and the
 third atomically saves a PNG copy of the current composed screen in the FPMS
 log directory. Screenshot capture does not change the active renderer or
 analyzer state.
+
+The Stations renderer overlays the advertised QBSS sum and per-second unique
+client-MAC series from that snapshot. It does not inspect frames itself.
 
 See [screens.md](screens.md) for exact metric and presentation behavior.
 

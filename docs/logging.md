@@ -90,13 +90,17 @@ recursively. Live format flags do not accept custom filenames.
 The stats file contains one row for each emitted capture second. Columns cover:
 
 - local timestamp, interface, channel, resolved frequency, and band;
-- retained BSSID count and summed latest QBSS station counts;
+- retained BSSID count, summed latest QBSS station counts, and the unique
+  eligible client-MAC count detected during that one-second period;
 - selected QBSS utilization and source identity/RSSI;
 - received, Retry-bit-readable, retry-eligible, and retry-frame counts;
 - retry percentage, selected beacon-rate percentage, and retry footer BSSID;
 - optional local survey utilization.
 
 Rows use local ISO-8601 timestamps with offsets and are flushed immediately.
+The client field is named `unique_client_mac_count`. It is a per-second count,
+matching the cyan Stations graph sample; it is not the 120-second `MAC` summary
+total and does not contain a list of addresses.
 
 ## Beacon JSONL
 

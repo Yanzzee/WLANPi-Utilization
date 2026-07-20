@@ -47,6 +47,10 @@ class ScreenView:
     summary_metric_token_count: int = 2
     text_only: bool = False
     detail_lines: tuple[str, ...] = ()
+    secondary_graph_label: str = ""
+    secondary_graph_points: tuple[GraphPoint, ...] = ()
+    summary_secondary_metric_token_start: Optional[int] = None
+    summary_secondary_metric_token_count: int = 0
 
 
 class ScreenDefinition(Protocol):
@@ -172,8 +176,13 @@ class TotalStationCountScreen:
             )
             for stats in snapshot.history
         )
-        values = tuple(
-            point.value for point in graph_points if point.value is not None
+        mac_graph_points = tuple(
+            GraphPoint(
+                second=stats.second,
+                value=stats.unique_client_mac_count,
+                display_value=float(stats.unique_client_mac_count),
+            )
+            for stats in snapshot.history
         )
         current_sum = snapshot.current.qbss_station_count_sum
         top_station_state = (
@@ -192,16 +201,20 @@ class TotalStationCountScreen:
             metadata_tokens=("Stations",),
             summary=(
                 f"SUM {_station_count(current_sum)} "
-                f"MAX {_station_count(max(values) if values else None)} "
+                f"MAC {_station_count(snapshot.window_unique_client_mac_count)} "
                 f"TOP {_station_count(top_station_count)}"
             ),
-            graph_label="Total QBSS station count",
+            graph_label="Total QBSS station count per second",
             graph_points=graph_points,
             graph_maximum=STATION_GRAPH_MAXIMUM,
             identity=_identity_from_state(
                 top_station_state,
                 unavailable_text="<No Station Counts>",
             ),
+            secondary_graph_label="Unique client MACs per second",
+            secondary_graph_points=mac_graph_points,
+            summary_secondary_metric_token_start=2,
+            summary_secondary_metric_token_count=2,
         )
 
 

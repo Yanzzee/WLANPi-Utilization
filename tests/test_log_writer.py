@@ -67,6 +67,7 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
         second=1000,
         unique_bssid_count=1,
         qbss_station_count_sum=3,
+        unique_client_mac_count=2,
         selected_qbss_cu_percent=128 / 255 * 100,
         selected_qbss_ssid="Test AP",
         selected_qbss_bssid="aa:bb:cc:dd:ee:ff",
@@ -108,6 +109,7 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert stats_rows[0]["selected_qbss_cu_percent"] == "50.20"
     assert stats_rows[0]["selected_qbss_bssid"] == "aa:bb:cc:dd:ee:ff"
     assert stats_rows[0]["selected_qbss_rssi_dbm"] == "-47"
+    assert stats_rows[0]["unique_client_mac_count"] == "2"
 
     assert len(beacon_rows) == 1
     assert "record_type" not in beacon_rows[0]

@@ -61,20 +61,43 @@ Unavailable values remain gaps and do not become zero.
 ## 3. Stations
 
 Stations sums the latest QBSS station count advertised by every retained BSSID.
-It does not count client MAC addresses observed over the air.
+It also reports unique client MAC addresses observed in eligible data frames.
+These remain separate metrics: the displayed QBSS sum is AP-advertised, while
+the MAC count is locally observed.
 
 Summary fields:
 
 - `SUM`: current sum of latest advertised station counts;
-- `MAX`: highest channel-wide sum in the rolling history;
+- `MAC`: unique client MAC addresses detected anywhere on the channel during
+  the current 120-second window;
 - `TOP`: latest advertised count from the current highest-count BSSID.
 
 The footer identifies the same BSSID represented by `TOP`. If multiple BSSIDs
 have the same highest count, deterministic BSSID ordering is used.
 
-The graph uses a fixed 0–64 station scale. Values above 64 reach the graph
-ceiling and use the overflow color. Counts above 999 display as `∞` in the
-compact text layout, while snapshots and logs retain the uncapped number.
+Two per-second bar series share the fixed 0–64 station scale and are overlaid:
+the amber series is the summed advertised QBSS count and the cyan series is
+the number of unique eligible client MACs detected in that second. The `MAC`
+text uses the same cyan as its graph series. Advertised sums above 64 reach the
+graph ceiling and use the overflow color. Counts above 999 display as `∞` in
+the compact text layout, while snapshots and logs retain the uncapped number.
+
+### Client-MAC eligibility
+
+A MAC is counted only when it is the unicast non-BSSID TA/RA endpoint of a data
+frame linked to a BSSID whose beacon is retained on the monitored channel.
+Repeated frames, retries, and traffic in both directions count that client only
+once in each one-second sample and once in the rolling-window total.
+
+The analyzer excludes:
+
+- all known BSSID MAC addresses;
+- authentication, probe, and every other management frame;
+- control and extension frames;
+- broadcast and multicast addresses;
+- data frames that cannot be linked to a retained on-channel BSSID; and
+- SA/DA-only addresses, which may identify hosts behind the distribution
+  system rather than wireless clients.
 
 ## 4. Retries
 

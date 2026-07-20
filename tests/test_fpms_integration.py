@@ -479,7 +479,7 @@ def test_launch_failure_is_reported_without_leaving_session(
     [
         ("2484MHz Utilization", "CU 99% AVG 99% MAX 99%"),
         ("2484MHz Admission", "ADC 99% AVG 99% MIN 99%"),
-        ("2484MHz Stations", "SUM 999 MAX 999 TOP 999"),
+        ("2484MHz Stations", "SUM 999 MAC 999 TOP 999"),
         ("2484MHz Retries", "RET 99% AVG 99% MAX 99%"),
         ("2484MHz Retries", "RET <1% AVG <1% MAX <1%"),
     ],
@@ -645,6 +645,36 @@ def test_metric_text_colors_summary_prefix_and_metadata_suffix() -> None:
         (255, 255, 255),
         (255, 255, 255),
         metric_color,
+    ]
+
+
+def test_metric_text_uses_secondary_color_for_station_mac_field() -> None:
+    draw = _FakeDraw()
+    station_color = (255, 190, 0)
+    mac_color = (0, 220, 220)
+
+    channel_utilization._draw_metric_text(
+        draw,
+        2,
+        17,
+        "SUM 15 MAC 3 TOP 10",
+        _FakeFont(size=10, path="scanner.ttf", character_width=6),
+        station_color,
+        metric_token_count=2,
+        metric_tokens_at_end=False,
+        gap=3,
+        secondary_metric_color=mac_color,
+        secondary_metric_token_start=2,
+        secondary_metric_token_count=2,
+    )
+
+    assert [call[1] for call in draw.text_calls] == [
+        station_color,
+        station_color,
+        mac_color,
+        mac_color,
+        (255, 255, 255),
+        (255, 255, 255),
     ]
 
 
