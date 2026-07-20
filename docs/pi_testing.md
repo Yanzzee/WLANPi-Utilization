@@ -276,7 +276,7 @@ Apps
   Utilization
     2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
       <channel and center frequency>
-        Display | Display + Log
+        Display | Display + Log | Start Logging | Stop Logging
 ```
 
 PSC channels are marked in the `6 GHz All` list. Selecting `Display` or
@@ -286,18 +286,24 @@ close any enabled logs, and return to the FPMS menu. Use up/down to navigate the
 shared Utilization, Admission, Stations, and Retries views without restarting
 capture or graph history.
 
+`Start Logging` runs the same capture and analyzer without LCD rendering.
+`Stop Logging` ends that background session. All active logging modes check
+free space every 30 seconds, stop below 256 MiB free with an `END_OF_LOG`
+disk-pressure marker, and roll to a new file pair every hour. A display session
+keeps capture and analysis running if its logging service stops for low disk.
+
 `Utilization` appears after the existing entries at the bottom of Apps.
 
 The exact command behind `5 GHz > Ch 36 5180 MHz > Display` is:
 
 ```text
-/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm
+/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm --stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live --logging-control /run/wlanpi-beacon-live/logging.control.json --logging-initial-state disabled
 ```
 
-`Display + Log` uses the same command plus:
+`Display + Log` uses the same command with:
 
 ```text
---stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
+--logging-initial-state enabled
 ```
 
 The 128x128 screen contains a centered 120x64 graph. It displays the latest 120
@@ -360,6 +366,11 @@ After installation:
    pgrep -af 'wlanpi-beacon-live|tshark'
    sudo journalctl -u wlanpi-fpms -n 100 --no-pager
    ```
+
+5. Use `Start Logging`, confirm there is no graph page, then use `Stop Logging`
+   and verify the two current log files are closed. For disk-pressure testing,
+   temporarily use the terminal command with a threshold above current free
+   space and confirm both logs end with the low-disk marker.
 
 The automated tests cover log local-time formatting, recursive frame/log
 directory creation, one-second window updates, FPMS command construction,

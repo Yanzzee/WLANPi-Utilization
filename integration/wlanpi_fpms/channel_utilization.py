@@ -62,7 +62,13 @@ _6_GHZ_CHANNELS = tuple(range(1, 234, 4))
 _6_GHZ_PSC_CHANNELS = tuple(range(5, 230, 16))
 
 
-def build_launch_command(*, band: str, channel: int, logging: bool) -> list[str]:
+def build_launch_command(
+    *,
+    band: str,
+    channel: int,
+    logging: bool,
+    logging_only: bool = False,
+) -> list[str]:
     command = [
         EXECUTABLE,
         "--iface",
@@ -71,18 +77,23 @@ def build_launch_command(*, band: str, channel: int, logging: bool) -> list[str]
         band,
         "--channel",
         str(channel),
-        "--lcd-frame",
-        str(FRAME_PATH),
     ]
-    if logging:
-        command.extend(
-            [
-                "--stats-csv",
-                "--beacons-jsonl",
-                "--log-dir",
-                str(LOG_DIR),
-            ]
-        )
+    if logging_only:
+        command.append("--logging-only")
+    else:
+        command.extend(["--lcd-frame", str(FRAME_PATH)])
+    command.extend(
+        [
+            "--stats-csv",
+            "--beacons-jsonl",
+            "--log-dir",
+            str(LOG_DIR),
+            "--logging-control",
+            str(_logging_control_path()),
+            "--logging-initial-state",
+            "enabled" if logging else "disabled",
+        ]
+    )
     return command
 
 
@@ -130,6 +141,14 @@ def _band_menu(
                         "name": "Display + Log",
                         "action": _launch_action(app, band, channel, True),
                     },
+                    {
+                        "name": "Start Logging",
+                        "action": _logging_only_action(app, band, channel),
+                    },
+                    {
+                        "name": "Stop Logging",
+                        "action": app.stop_logging,
+                    },
                 ],
             }
         )
@@ -146,6 +165,17 @@ def _launch_action(
         app.launch(band=band, channel=channel, logging=logging)
 
     return launch
+
+
+def _logging_only_action(
+    app: "ChannelUtilizationApp",
+    band: str,
+    channel: int,
+) -> Callable[[], None]:
+    def start_logging_only() -> None:
+        app.start_logging_only(band=band, channel=channel)
+
+    return start_logging_only
 
 
 def _frequency_mhz(band: str, channel: int) -> int:
@@ -171,8 +201,21 @@ class ChannelUtilizationApp:
         self.clock = clock
 
     def launch(self, *, band: str, channel: int, logging: bool) -> None:
+        logging_only_session = self.g_vars.get(
+            "channel_utilization_logging_session"
+        )
+        if isinstance(logging_only_session, _LoggingOnlySession):
+            if not logging_only_session.finished:
+                _display_error(
+                    self.g_vars,
+                    "Logging-only capture is active.\nStop logging first.",
+                )
+                return
+            self.g_vars.pop("channel_utilization_logging_session", None)
+
         session = self.g_vars.get("channel_utilization_session")
         if not isinstance(session, _DisplaySession):
+            _write_logging_enabled(logging)
             session = _DisplaySession(
                 self.g_vars,
                 build_launch_command(
@@ -193,12 +236,55 @@ class ChannelUtilizationApp:
         elif session.finished and not session.exit_reported:
             session.exit_reported = True
             _display_error(self.g_vars, "Capture stopped.\nCheck journal.")
+        else:
+            session.set_logging(logging)
 
         self.g_vars["page_exit_handler"] = session.stop
         self.g_vars["page_up_handler"] = session.navigate_up
         self.g_vars["page_down_handler"] = session.navigate_down
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
+
+    def start_logging_only(self, *, band: str, channel: int) -> None:
+        display_session = self.g_vars.get("channel_utilization_session")
+        if isinstance(display_session, _DisplaySession) and not display_session.finished:
+            display_session.set_logging(True)
+            return
+
+        session = self.g_vars.get("channel_utilization_logging_session")
+        if isinstance(session, _LoggingOnlySession) and not session.finished:
+            return
+
+        _write_logging_enabled(True)
+        session = _LoggingOnlySession(
+            self.g_vars,
+            build_launch_command(
+                band=band,
+                channel=channel,
+                logging=True,
+                logging_only=True,
+            ),
+            popen=self.popen,
+        )
+        self.g_vars["channel_utilization_logging_session"] = session
+        try:
+            session.start()
+        except OSError:
+            self.g_vars.pop("channel_utilization_logging_session", None)
+            _display_error(self.g_vars, "Unable to start logging.")
+
+    def stop_logging(self) -> None:
+        _write_logging_enabled(False)
+        display_session = self.g_vars.get("channel_utilization_session")
+        if isinstance(display_session, _DisplaySession):
+            display_session.set_logging(False)
+
+        logging_session = self.g_vars.pop(
+            "channel_utilization_logging_session",
+            None,
+        )
+        if isinstance(logging_session, _LoggingOnlySession):
+            logging_session.stop()
 
 
 class _DisplaySession:
@@ -239,6 +325,7 @@ class _DisplaySession:
         self.thread.start()
 
     def stop(self) -> None:
+        self.set_logging(False)
         self.stop_event.set()
         process = self.process
         if process is not None and process.poll() is None:
@@ -258,6 +345,9 @@ class _DisplaySession:
         self.g_vars.pop("page_exit_handler", None)
         self.g_vars.pop("page_up_handler", None)
         self.g_vars.pop("page_down_handler", None)
+
+    def set_logging(self, enabled: bool) -> None:
+        _write_logging_enabled(enabled)
 
     def navigate_up(self) -> None:
         self._navigate(-1)
@@ -299,6 +389,32 @@ class _DisplaySession:
             if self.process is not None and self.process.poll() is not None:
                 return
             self.stop_event.wait(0.1)
+
+
+class _LoggingOnlySession:
+    """Own the background form of the same live capture executable."""
+
+    def __init__(
+        self,
+        g_vars: dict[str, object],
+        command: list[str],
+        *,
+        popen: Callable[..., subprocess.Popen[bytes]],
+    ) -> None:
+        self.g_vars = g_vars
+        self.command = command
+        self.popen = popen
+        self.process: Optional[subprocess.Popen[bytes]] = None
+
+    @property
+    def finished(self) -> bool:
+        return self.process is not None and self.process.poll() is not None
+
+    def start(self) -> None:
+        self.process = self.popen(self.command)
+
+    def stop(self) -> None:
+        _stop_process(self.process)
 
 
 def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
@@ -482,6 +598,32 @@ def _read_metric_color(value: object) -> tuple[int, int, int]:
 
 def _screen_control_path(frame_path: Path) -> Path:
     return frame_path.with_suffix(".control.json")
+
+
+def _logging_control_path() -> Path:
+    return FRAME_PATH.with_name("logging.control.json")
+
+
+def _write_logging_enabled(enabled: bool) -> None:
+    _atomic_write_text(
+        _logging_control_path(),
+        json.dumps({"logging_enabled": enabled}, separators=(",", ":")),
+    )
+
+
+def _stop_process(process: Optional[subprocess.Popen[bytes]]) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.send_signal(signal.SIGINT)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
 
 
 def _atomic_write_text(path: Path, payload: str) -> None:

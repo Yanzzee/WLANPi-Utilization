@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import selectors
 import subprocess
 import sys
@@ -13,8 +14,13 @@ from typing import Callable, Optional, Protocol
 from beacon_live.analyzer import Analyzer
 from beacon_live.dashboard import TerminalDashboard
 from beacon_live.lcd_dashboard import LcdDashboard
-from beacon_live.log_writer import CaptureLogWriter
+from beacon_live.log_writer import DEFAULT_DISK_CHECK_INTERVAL_SECONDS
+from beacon_live.log_writer import DEFAULT_MIN_FREE_BYTES
+from beacon_live.log_writer import DEFAULT_ROTATION_INTERVAL_SECONDS
+from beacon_live.log_writer import LiveLogPaths
 from beacon_live.log_writer import LogMetadata
+from beacon_live.log_writer import LoggingEvent
+from beacon_live.log_writer import LoggingService
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
@@ -28,11 +34,19 @@ TSHARK_CAPTURE_FIELDS = list(TSHARK_FRAME_FIELD_NAMES)
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
 LIVE_WARMUP_CYCLES = 1
+LOGGING_CONTROL_POLL_SECONDS = 0.5
 
 
 class LiveDashboard(Protocol):
     def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
         ...
+
+
+class NullDashboard:
+    """Disable rendering while retaining the normal live analyzer path."""
+
+    def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -305,7 +319,15 @@ def run_live(
     stats_csv: Optional[Path] = None,
     beacons_jsonl: Optional[Path] = None,
     lcd_frame: Optional[Path] = None,
+    logging_only: bool = False,
+    logging_control_path: Optional[Path] = None,
+    initial_logging_enabled: Optional[bool] = None,
+    min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
+    disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
+    rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
 ) -> int:
+    if logging_only and stats_csv is None and beacons_jsonl is None:
+        raise ValueError("logging-only mode requires at least one log format")
     local_cu = local_cu or survey_debug
     resolved_frequency_mhz = resolve_survey_target_frequency_mhz(
         channel,
@@ -321,46 +343,84 @@ def run_live(
         band=band,
     )
     analyzer = Analyzer()
-    dashboard: LiveDashboard = (
-        LcdDashboard(
+    dashboard: LiveDashboard
+    if logging_only:
+        dashboard = NullDashboard()
+    elif lcd_frame is not None:
+        dashboard = LcdDashboard(
             lcd_frame,
             band=resolved_band,
             channel=channel,
             frequency_mhz=resolved_frequency_mhz,
         )
-        if lcd_frame is not None
-        else TerminalDashboard(include_local_cu=local_cu)
-    )
+    else:
+        dashboard = TerminalDashboard(include_local_cu=local_cu)
+    logging_service: Optional[LoggingService] = None
+    if stats_csv is not None or beacons_jsonl is not None:
+        first_log_path = stats_csv if stats_csv is not None else beacons_jsonl
+        assert first_log_path is not None
+        log_dir = first_log_path.parent
+        logging_service = LoggingService(
+            metadata=LogMetadata(
+                interface=iface,
+                channel=channel,
+                frequency_mhz=resolved_frequency_mhz,
+                band=resolved_band,
+            ),
+            log_dir=log_dir,
+            write_stats_csv=stats_csv is not None,
+            write_beacons_jsonl=beacons_jsonl is not None,
+            initial_paths=(
+                None
+                if initial_logging_enabled is False
+                else LiveLogPaths(stats_csv, beacons_jsonl)
+            ),
+            min_free_bytes=min_free_bytes,
+            disk_check_interval_seconds=disk_check_interval_seconds,
+            rotation_interval_seconds=rotation_interval_seconds,
+            monotonic=time.monotonic,
+        )
     process = start_tshark_process(iface)
     selector = selectors.DefaultSelector()
     warmup_filter = LiveWarmupFilter()
-    log_writer = CaptureLogWriter(
-        metadata=LogMetadata(
-            interface=iface,
-            channel=channel,
-            frequency_mhz=resolved_frequency_mhz,
-            band=resolved_band,
-        ),
-        stats_csv=stats_csv,
-        beacons_jsonl=beacons_jsonl,
+
+    initial_logging_requested = (
+        logging_service is not None
+        if initial_logging_enabled is None
+        else initial_logging_enabled and logging_service is not None
     )
+    if logging_control_path is not None:
+        requested = _read_logging_control(logging_control_path)
+        if requested is not None:
+            initial_logging_requested = requested
+
     previous_survey_samples = _read_survey_samples_safely(iface) if local_cu else None
     latest_local_cu_percent: Optional[float] = None
     next_survey_poll = time.monotonic() + interval_seconds
+    next_logging_control_poll = time.monotonic()
     survey_warning_printed = False
+    low_disk_latched = False
 
     try:
-        log_writer.open()
-        if stats_csv is not None:
-            print(f"Stats CSV log: {stats_csv}", file=sys.stderr, flush=True)
-        if beacons_jsonl is not None:
-            print(f"Beacon JSONL log: {beacons_jsonl}", file=sys.stderr, flush=True)
+        if logging_service is not None and initial_logging_requested:
+            if logging_service.start():
+                _print_logging_started(logging_service)
         if process.stdout is None:
             raise LiveCommandError(build_tshark_command(iface), stderr="missing stdout")
         selector.register(process.stdout, selectors.EVENT_READ)
 
         while True:
-            timeout = max(0.0, next_survey_poll - time.monotonic())
+            loop_now = time.monotonic()
+            timeout_deadlines = [next_survey_poll]
+            if logging_control_path is not None:
+                timeout_deadlines.append(next_logging_control_poll)
+            if logging_service is not None:
+                maintenance_wait = logging_service.seconds_until_maintenance(
+                    now=loop_now
+                )
+                if maintenance_wait is not None:
+                    timeout_deadlines.append(loop_now + maintenance_wait)
+            timeout = max(0.0, min(timeout_deadlines) - loop_now)
             events = selector.select(timeout)
             for key, _ in events:
                 line = _read_tshark_line(key.fileobj)
@@ -369,8 +429,8 @@ def run_live(
                 frame = parse_tshark_frame_row(line)
                 if frame is not None:
                     beacon = frame.beacon_record()
-                    if beacon is not None:
-                        log_writer.write_beacon(beacon)
+                    if beacon is not None and logging_service is not None:
+                        logging_service.write_beacon(beacon)
                     # Defer frame-level snapshots. The capture-watermark call
                     # below publishes only when this frame crosses a second
                     # boundary, avoiding a rebuild for every busy-channel row.
@@ -382,12 +442,54 @@ def run_live(
                     )
                     _publish_live_stats(
                         warmup_filter.filter(completed_stats),
-                        stats_writer=log_writer.write_stats,
+                        stats_writer=(
+                            logging_service.write_stats
+                            if logging_service is not None
+                            else _discard_stats
+                        ),
                         dashboard=dashboard,
                         snapshot=analyzer.snapshot,
                     )
 
-            if time.monotonic() >= next_survey_poll:
+            current = time.monotonic()
+            if (
+                logging_control_path is not None
+                and current >= next_logging_control_poll
+            ):
+                requested = _read_logging_control(logging_control_path)
+                if requested is False:
+                    low_disk_latched = False
+                if logging_service is not None and requested is not None:
+                    if requested and not logging_service.active and not low_disk_latched:
+                        if logging_service.start():
+                            _print_logging_started(logging_service)
+                    elif not requested and logging_service.active:
+                        logging_service.stop()
+                        print("Logging stopped.", file=sys.stderr, flush=True)
+                        if logging_only:
+                            return 0
+                next_logging_control_poll = _advance_interval_deadline(
+                    next_logging_control_poll,
+                    LOGGING_CONTROL_POLL_SECONDS,
+                    current,
+                )
+
+            if logging_service is not None:
+                logging_event = logging_service.maintain(now=current)
+                if logging_event is LoggingEvent.LOW_DISK_STOP:
+                    low_disk_latched = True
+                    print(
+                        "Logging stopped: free disk space is below the safety "
+                        "threshold.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    if logging_only:
+                        return 0
+                elif logging_event is LoggingEvent.ROTATED:
+                    _print_logging_started(logging_service, prefix="Log rollover")
+
+            if current >= next_survey_poll:
                 if local_cu:
                     current_survey_samples = _read_survey_samples_safely(iface)
                     if current_survey_samples is None:
@@ -430,9 +532,10 @@ def run_live(
                                 survey_warning_printed = True
                         previous_survey_samples = current_survey_samples
 
-                next_survey_poll = _next_interval_deadline(
+                next_survey_poll = _advance_interval_deadline(
                     next_survey_poll,
                     interval_seconds,
+                    current,
                 )
     except KeyboardInterrupt:
         print("\nStopping live capture...", file=sys.stderr, flush=True)
@@ -440,13 +543,18 @@ def run_live(
         pending_stats = analyzer.flush(include_history=include_history)
         _publish_live_stats(
             warmup_filter.filter(pending_stats),
-            stats_writer=log_writer.write_stats,
+            stats_writer=(
+                logging_service.write_stats
+                if logging_service is not None
+                else _discard_stats
+            ),
             dashboard=dashboard,
             snapshot=analyzer.snapshot,
         )
         return 0
     finally:
-        log_writer.close()
+        if logging_service is not None:
+            logging_service.stop()
         selector.close()
         terminate_tshark_process(process)
 
@@ -494,12 +602,46 @@ def _publish_live_stats(
     dashboard.refresh(snapshot)
 
 
-def _next_interval_deadline(previous_deadline: float, interval_seconds: float) -> float:
-    next_deadline = previous_deadline + interval_seconds
-    now = time.monotonic()
-    while next_deadline <= now:
+def _advance_interval_deadline(
+    previous_deadline: float,
+    interval_seconds: float,
+    current: float,
+) -> float:
+    next_deadline = previous_deadline
+    while next_deadline <= current:
         next_deadline += interval_seconds
     return next_deadline
+
+
+def _read_logging_control(path: Path) -> Optional[bool]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        value = payload["logging_enabled"]
+    except (KeyError, OSError, TypeError, ValueError, UnicodeError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
+def _print_logging_started(
+    logging_service: LoggingService,
+    *,
+    prefix: str = "Logging started",
+) -> None:
+    paths = logging_service.current_paths
+    if paths is None:
+        return
+    if paths.stats_csv is not None:
+        print(f"{prefix} - Stats CSV log: {paths.stats_csv}", file=sys.stderr, flush=True)
+    if paths.beacons_jsonl is not None:
+        print(
+            f"{prefix} - Beacon JSONL log: {paths.beacons_jsonl}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def _discard_stats(stats: SecondStats) -> None:
+    return None
 
 
 def _format_optional_percent(value: Optional[float]) -> str:

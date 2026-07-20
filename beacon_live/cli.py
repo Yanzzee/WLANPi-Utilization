@@ -18,6 +18,9 @@ from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.log_writer import CaptureLogWriter
+from beacon_live.log_writer import DEFAULT_DISK_CHECK_INTERVAL_SECONDS
+from beacon_live.log_writer import DEFAULT_MIN_FREE_BYTES
+from beacon_live.log_writer import DEFAULT_ROTATION_INTERVAL_SECONDS
 from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import build_live_log_paths
 from beacon_live.retry_debug import RetryDebugCommandError
@@ -84,10 +87,16 @@ def _run_live_command(
             f"{command_prefix}accepts --frequency-mhz or --band/--channel, "
             "not both"
         )
+    if args.logging_only and args.lcd_frame is not None:
+        parser.error(
+            f"{command_prefix}--logging-only cannot be combined with --lcd-frame"
+        )
+    write_stats_csv = args.stats_csv or args.logging_only
+    write_beacons_jsonl = args.beacons_jsonl or args.logging_only
     log_paths = build_live_log_paths(
         args.log_dir,
-        write_stats_csv=args.stats_csv,
-        write_beacons_jsonl=args.beacons_jsonl,
+        write_stats_csv=write_stats_csv,
+        write_beacons_jsonl=write_beacons_jsonl,
     )
     try:
         live_options = dict(
@@ -103,6 +112,21 @@ def _run_live_command(
         )
         if args.lcd_frame is not None:
             live_options["lcd_frame"] = args.lcd_frame
+        if args.logging_only:
+            live_options["logging_only"] = True
+        if args.logging_control is not None:
+            live_options["logging_control_path"] = args.logging_control
+        if args.logging_initial_state is not None:
+            live_options["initial_logging_enabled"] = (
+                args.logging_initial_state == "enabled"
+            )
+        min_free_bytes = args.min_free_mb * 1024 * 1024
+        if min_free_bytes != DEFAULT_MIN_FREE_BYTES:
+            live_options["min_free_bytes"] = min_free_bytes
+        if args.disk_check_seconds != DEFAULT_DISK_CHECK_INTERVAL_SECONDS:
+            live_options["disk_check_interval_seconds"] = args.disk_check_seconds
+        if args.rotation_seconds != DEFAULT_ROTATION_INTERVAL_SECONDS:
+            live_options["rotation_interval_seconds"] = args.rotation_seconds
         return run_live(**live_options)
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
@@ -262,6 +286,44 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=Path("logs"),
         help="Directory for generated live log filenames. Default: logs.",
+    )
+    parser.add_argument(
+        "--logging-only",
+        action="store_true",
+        help=(
+            "Capture and write both log formats without rendering a terminal "
+            "or LCD display."
+        ),
+    )
+    parser.add_argument(
+        "--min-free-mb",
+        type=int,
+        default=DEFAULT_MIN_FREE_BYTES // (1024 * 1024),
+        help="Stop logging below this many free MiB. Default: 256.",
+    )
+    parser.add_argument(
+        "--disk-check-seconds",
+        type=float,
+        default=DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
+        help="Seconds between logging disk-space checks. Default: 30.",
+    )
+    parser.add_argument(
+        "--rotation-seconds",
+        type=float,
+        default=DEFAULT_ROTATION_INTERVAL_SECONDS,
+        help="Start new log files after this many seconds. Default: 3600.",
+    )
+    parser.add_argument(
+        "--logging-control",
+        type=Path,
+        required=False,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--logging-initial-state",
+        choices=("enabled", "disabled"),
+        required=False,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--lcd-frame",

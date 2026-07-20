@@ -104,7 +104,7 @@ Apps
   Utilization
     2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
       <channel and center frequency>
-        Display | Display + Log
+        Display | Display + Log | Start Logging | Stop Logging
 ```
 
 The four band menus contain the application's static, unbonded 20 MHz channel
@@ -114,6 +114,15 @@ PSC entries are prefixed `PSC`; other entries are prefixed `Ch`.
 Selecting `Display` starts capture immediately without log files. Selecting
 `Display + Log` starts the same display and writes both per-second CSV stats and
 raw valid-beacon JSONL records under `/var/log/wlanpi-beacon-live`.
+`Start Logging` runs the same capture and analyzer without rendering a
+screen. `Stop Logging` stops a background logging-only session; if used against
+an active display session, capture, analysis, and graph history continue.
+
+Every active logging session checks free space every 30 seconds. Logging stops
+at less than 256 MiB free and appends an `END_OF_LOG` disk-pressure marker to
+each enabled format. Display capture continues after that safety stop;
+logging-only capture exits cleanly. Long-running logs roll to a new timestamped
+file pair every hour.
 
 Press the control stick left while the display is open to stop capture and
 return to the menu. FPMS sends SIGINT to the foreground application, which
@@ -126,13 +135,13 @@ only the active screen; capture, analysis, and graph history continue.
 For `5 GHz > Ch 36 5180 MHz > Display`, FPMS runs:
 
 ```text
-/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm
+/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm --stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live --logging-control /run/wlanpi-beacon-live/logging.control.json --logging-initial-state disabled
 ```
 
 For `5 GHz > Ch 36 5180 MHz > Display + Log`, FPMS runs:
 
 ```text
-/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm --stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live
+/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 --lcd-frame /run/wlanpi-beacon-live/display.ppm --stats-csv --beacons-jsonl --log-dir /var/log/wlanpi-beacon-live --logging-control /run/wlanpi-beacon-live/logging.control.json --logging-initial-state enabled
 ```
 
 Other menu selections use the same commands with the selected band and channel.
@@ -350,6 +359,16 @@ local-time run prefix containing a UTC offset, for example
 ISO-8601 timestamps with offsets. CSV is flushed per stats row and JSONL per
 beacon record.
 
+All live logging uses the same disk guard and rollover policy as FPMS. Override
+the defaults with `--min-free-mb`, `--disk-check-seconds`, and
+`--rotation-seconds`. For terminal logging without rendering, use
+`--logging-only`; it enables both CSV and JSONL automatically:
+
+```bash
+sudo .venv/bin/beacon-live live --iface wlan0 --channel 36 \
+  --logging-only --log-dir logs
+```
+
 Stats CSV columns are local time, interface, channel, resolved frequency/band,
 unique BSSID count, uncapped QBSS station-count sum, selected QBSS CU,
 SSID/BSSID/RSSI, and optional local survey CU. Beacon JSONL stores every valid
@@ -448,6 +467,6 @@ front-panel graph. It includes:
 - clean Ctrl-C and FPMS left-stick shutdown; and
 - optional terminal-only local survey CU diagnostics.
 
-Version 1.0 does not include observed-client tracking, station-count graphing,
-Parquet output, selectable graph duration, background logging-only operation,
-an information page, or debug options in the hardware menu.
+Version 1.0 does not include observed-client tracking, Parquet output,
+selectable graph duration, an information page, or debug options in the
+hardware menu.

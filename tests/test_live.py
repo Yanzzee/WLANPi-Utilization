@@ -335,6 +335,59 @@ def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
     assert "Stopping live capture" in capsys.readouterr().err
 
 
+def test_low_disk_stops_display_logging_but_capture_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stats_csv = tmp_path / "display-stats.csv"
+    beacons_jsonl = tmp_path / "display-beacons.jsonl"
+    _prepare_one_interval_live_run(monkeypatch)
+
+    assert run_live(
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+        min_free_bytes=10**30,
+    ) == 0
+
+    rows = [
+        json.loads(line)
+        for line in beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1]["record_type"] == "end_of_log"
+    assert rows[-1]["reason"] == "disk_space_nearly_full"
+    assert sum(row.get("record_type") == "end_of_log" for row in rows) == 1
+    # The terminal dashboard still receives later analyzed seconds after the
+    # logging service has closed.
+    assert "Alpha/aa:aa:aa:aa:aa:aa" in capsys.readouterr().out
+
+
+def test_low_disk_cleanly_exits_logging_only_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    stats_csv = tmp_path / "only-stats.csv"
+    beacons_jsonl = tmp_path / "only-beacons.jsonl"
+    _prepare_one_interval_live_run(monkeypatch)
+
+    assert run_live(
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+        logging_only=True,
+        min_free_bytes=10**30,
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "below the safety threshold" in captured.err
+    rows = [
+        json.loads(line)
+        for line in beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[-1]["record_type"] == "end_of_log"
+
+
 def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
     warmup_filter = LiveWarmupFilter()
     stats = SecondStats(

@@ -1,12 +1,16 @@
 import csv
 import json
+from collections import namedtuple
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 from pathlib import Path
 
 from beacon_live.log_writer import CaptureLogWriter
+from beacon_live.log_writer import LOW_DISK_END_MESSAGE
 from beacon_live.log_writer import LogMetadata
+from beacon_live.log_writer import LoggingEvent
+from beacon_live.log_writer import LoggingService
 from beacon_live.log_writer import build_live_log_paths
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
@@ -118,3 +122,135 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert beacon_rows[0]["band"] == "6"
     assert beacon_rows[0]["bssid"] == "aa:bb:cc:dd:ee:ff"
     assert beacon_rows[0]["rssi_dbm"] == -47
+
+
+def test_logging_service_starts_and_stops_without_writing_while_inactive(
+    tmp_path: Path,
+) -> None:
+    service = _logging_service(tmp_path)
+
+    assert service.active is False
+    assert service.start() is True
+    first_paths = service.current_paths
+    assert first_paths is not None
+    assert service.active is True
+    assert service.start() is False
+
+    service.write_beacon(_beacon())
+    assert service.stop() is True
+    assert service.active is False
+    assert service.stop() is False
+    service.write_beacon(_beacon(timestamp=1001.0))
+
+    assert first_paths.beacons_jsonl is not None
+    assert len(first_paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def test_logging_service_checks_disk_only_at_periodic_deadlines(
+    tmp_path: Path,
+) -> None:
+    usage = namedtuple("usage", "total used free")
+    checks: list[Path] = []
+
+    def disk_usage(path: Path) -> object:
+        checks.append(path)
+        return usage(1000, 100, 900)
+
+    service = _logging_service(
+        tmp_path,
+        disk_usage=disk_usage,
+        disk_check_interval_seconds=10.0,
+        min_free_bytes=500,
+    )
+    service.start()
+
+    assert service.maintain(now=0.0) is None
+    assert service.maintain(now=9.99) is None
+    assert service.maintain(now=10.0) is None
+    assert checks == [tmp_path, tmp_path]
+
+
+def test_low_disk_stops_logging_and_writes_markers_to_both_formats(
+    tmp_path: Path,
+) -> None:
+    usage = namedtuple("usage", "total used free")
+    service = _logging_service(
+        tmp_path,
+        min_free_bytes=500,
+        disk_usage=lambda path: usage(1000, 600, 400),
+    )
+    service.start()
+    paths = service.current_paths
+    assert paths is not None
+    service.write_beacon(_beacon())
+
+    assert service.maintain(now=0.0) is LoggingEvent.LOW_DISK_STOP
+    assert service.active is False
+    assert paths.stats_csv is not None
+    assert paths.beacons_jsonl is not None
+
+    with paths.stats_csv.open(encoding="utf-8", newline="") as stats_file:
+        stats_rows = list(csv.DictReader(stats_file))
+    jsonl_rows = [
+        json.loads(line)
+        for line in paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert LOW_DISK_END_MESSAGE in stats_rows[-1]["selected_qbss_ssid"]
+    assert jsonl_rows[-1]["record_type"] == "end_of_log"
+    assert jsonl_rows[-1]["reason"] == "disk_space_nearly_full"
+    assert LOW_DISK_END_MESSAGE in jsonl_rows[-1]["message"]
+    assert jsonl_rows[-1]["free_bytes"] == 400
+    assert jsonl_rows[-1]["threshold_bytes"] == 500
+
+
+def test_logging_service_rolls_to_predictable_new_files(
+    tmp_path: Path,
+) -> None:
+    fixed_time = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+    service = _logging_service(
+        tmp_path,
+        now=lambda: fixed_time,
+        rotation_interval_seconds=60.0,
+    )
+    service.start()
+    first_paths = service.current_paths
+    service.write_beacon(_beacon())
+    assert service.maintain(now=0.0) is None
+
+    assert service.maintain(now=60.0) is LoggingEvent.ROTATED
+    second_paths = service.current_paths
+    assert first_paths is not None
+    assert second_paths is not None
+    assert second_paths != first_paths
+    assert second_paths.beacons_jsonl is not None
+    assert second_paths.beacons_jsonl.name.endswith("_part0002_beacons.jsonl")
+    service.write_beacon(_beacon(timestamp=1001.0))
+    service.stop()
+
+    assert first_paths.beacons_jsonl is not None
+    assert len(first_paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(second_paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()) == 1
+
+
+def _logging_service(tmp_path: Path, **kwargs: object) -> LoggingService:
+    return LoggingService(
+        metadata=LogMetadata(interface="wlan0", channel="36"),
+        log_dir=tmp_path,
+        write_stats_csv=True,
+        write_beacons_jsonl=True,
+        monotonic=lambda: 0.0,
+        **kwargs,
+    )
+
+
+def _beacon(*, timestamp: float = 1000.25) -> BeaconRecord:
+    return BeaconRecord(
+        timestamp=timestamp,
+        ssid="Test AP",
+        bssid="aa:bb:cc:dd:ee:ff",
+        qbss_cu_raw=128,
+        qbss_cu_percent=128 / 255 * 100,
+        qbss_station_count=3,
+        qbss_admission_capacity=0,
+        rssi_dbm=-47,
+    )

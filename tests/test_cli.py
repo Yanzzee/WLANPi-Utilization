@@ -323,6 +323,35 @@ def test_live_generates_log_filenames_in_configured_directory(
     assert calls[0]["channel"] == "44"
 
 
+def test_live_logging_only_enables_both_formats_and_disables_rendering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(
+        [
+            "live",
+            "--logging-only",
+            "--log-dir",
+            str(tmp_path),
+        ]
+    ) == 0
+
+    assert calls[0]["logging_only"] is True
+    assert isinstance(calls[0]["stats_csv"], Path)
+    assert isinstance(calls[0]["beacons_jsonl"], Path)
+    assert calls[0]["stats_csv"].parent == tmp_path
+    assert calls[0]["beacons_jsonl"].parent == tmp_path
+    assert "lcd_frame" not in calls[0]
+
+
 def test_live_wires_hidden_lcd_frame_for_fpms_launcher(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

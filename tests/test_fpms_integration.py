@@ -27,6 +27,8 @@ def test_fpms_menu_is_band_channel_then_display_mode() -> None:
     assert [item["name"] for item in six_all[1]["action"]] == [
         "Display",
         "Display + Log",
+        "Start Logging",
+        "Stop Logging",
     ]
     five_ghz = bands[1]["action"]
     assert five_ghz[-1]["name"] == "Ch 181 5905 MHz"
@@ -40,7 +42,7 @@ def test_fpms_launch_command_enables_both_logs_together() -> None:
         band="6", channel=5, logging=True
     )
 
-    assert display_only == [
+    assert display_only[:9] == [
         "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live",
         "--iface",
         "wlan0",
@@ -51,12 +53,92 @@ def test_fpms_launch_command_enables_both_logs_together() -> None:
         "--lcd-frame",
         "/run/wlanpi-beacon-live/display.ppm",
     ]
+    assert "--stats-csv" in display_only
+    assert "--beacons-jsonl" in display_only
+    assert "--logging-control" in display_only
     assert "--stats-csv" in display_and_log
     assert "--beacons-jsonl" in display_and_log
-    assert display_and_log[-2:] == [
+    assert display_and_log[display_and_log.index("--log-dir") :][:2] == [
         "--log-dir",
         "/var/log/wlanpi-beacon-live",
     ]
+
+
+def test_fpms_logging_only_command_uses_same_runtime_without_lcd() -> None:
+    command = channel_utilization.build_launch_command(
+        band="5",
+        channel=36,
+        logging=True,
+        logging_only=True,
+    )
+
+    assert "--logging-only" in command
+    assert "--lcd-frame" not in command
+    assert "--stats-csv" in command
+    assert "--beacons-jsonl" in command
+    assert "--logging-control" in command
+
+
+def test_start_and_stop_logging_only_owns_one_background_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    processes: list[_FakeProcess] = []
+
+    def fake_popen(command: list[str]) -> _FakeProcess:
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    app = channel_utilization.ChannelUtilizationApp({}, popen=fake_popen)
+    app.start_logging_only(band="5", channel=36)
+    app.start_logging_only(band="5", channel=36)
+
+    assert len(processes) == 1
+    assert "--logging-only" in processes[0].command
+    control = json.loads(
+        frame.with_name("logging.control.json").read_text(encoding="utf-8")
+    )
+    assert control == {"logging_enabled": True}
+
+    app.stop_logging()
+
+    assert processes[0].signal_received == signal.SIGINT
+    assert "channel_utilization_logging_session" not in app.g_vars
+    control = json.loads(
+        frame.with_name("logging.control.json").read_text(encoding="utf-8")
+    )
+    assert control == {"logging_enabled": False}
+
+
+def test_stop_logging_with_display_keeps_capture_process_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    processes: list[_FakeProcess] = []
+
+    def fake_popen(command: list[str]) -> _FakeProcess:
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    app = channel_utilization.ChannelUtilizationApp({}, popen=fake_popen)
+    app.launch(band="5", channel=36, logging=True)
+    app.stop_logging()
+
+    assert len(processes) == 1
+    assert processes[0].poll() is None
+    assert "channel_utilization_session" in app.g_vars
+    assert json.loads(
+        frame.with_name("logging.control.json").read_text(encoding="utf-8")
+    ) == {"logging_enabled": False}
+
+    session = app.g_vars["channel_utilization_session"]
+    session.stop()
 
 
 def test_left_exit_handler_interrupts_child_and_clears_session(
