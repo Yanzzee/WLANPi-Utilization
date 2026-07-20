@@ -12,7 +12,12 @@ def test_aggregator_selects_latest_qbss_from_strongest_rssi_bssid() -> None:
     assert aggregator.add(_record(1000.2, "Bravo", "bb", 50.0, 3, -50)) == []
     assert aggregator.add(_record(1000.9, "Alpha", "aa", 20.0, 4, -55)) == []
 
-    completed = aggregator.add(_record(1001.0, "Charlie", "cc", 5.0, 1, -60))
+    assert aggregator.add(
+        _record(1001.0, "Charlie", "cc", 5.0, 1, -60)
+    ) == []
+    completed = aggregator.add(
+        _record(1001.2, "Charlie", "cc", 5.0, 1, -60)
+    )
 
     assert len(completed) == 1
     stats = completed[0]

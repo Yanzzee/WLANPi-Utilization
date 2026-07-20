@@ -154,8 +154,9 @@ completed capture second for the strongest estimated radio.
 Summary fields:
 
 - `BL`: aggregate loss percentage;
-- `REC`: actual beacons received; and
-- `EXP`: beacons expected.
+- `AVG`: average available beacon-loss percentage in the 120-second history;
+  and
+- `MAX`: maximum available beacon-loss percentage in that history.
 
 The analyzer applies the existing best-effort radio grouping to every retained
 BSSID, including hidden-SSID BSSIDs and BSSIDs without QBSS information. It
@@ -163,12 +164,20 @@ sums `REC` and `EXP` for all BSSIDs in the strongest group and calculates
 `BL = (EXP - REC) / EXP × 100`. The footer uses the same two-second member
 rotation as Composition.
 
-Expected timing assumes a 102.4 ms interval for every BSSID. The last beacon
-before the capture second establishes the schedule phase, so a wall-clock
-second may contain nine or ten expected transmissions. For a newly observed
-BSSID, accounting begins with its first received beacon. Gaps in the inferred
-schedule increase `EXP` without increasing `REC`; capture jitter cannot make
-the displayed percentage exceed 100%.
+Expected timing assumes a 102.4 ms interval for every BSSID. Retained capture
+timestamps establish the latest schedule phase consistent with no more than
+102.4 ms of delay, so a wall-clock second may contain nine or ten expected
+transmissions. For a newly observed BSSID, accounting begins with its first
+received beacon. Gaps in the inferred schedule increase `EXP` without
+increasing `REC`; capture jitter cannot make the displayed percentage exceed
+100%.
+
+A completed second remains open for one additional 102.4 ms of ordered capture
+time. The analyzer matches each received beacon to at most one inferred
+transmission slot and accepts arrival delays from zero through 102.4 ms. A
+beacon scheduled before the wall-clock boundary can therefore arrive just
+after it and still count in the earlier second. An arrival beyond that grace
+does not fill the earlier slot.
 
 ## 6. Composition
 

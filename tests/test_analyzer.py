@@ -24,6 +24,7 @@ def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:
             )
         )
         analyzer.advance(second + 1, None)
+    analyzer.flush()
 
     snapshot = analyzer.snapshot
     state = snapshot.state_for("aa")
@@ -61,7 +62,7 @@ def test_latest_beacon_wins_even_when_an_older_beacon_arrives_late() -> None:
         )
     )
 
-    analyzer.advance(1001, None)
+    analyzer.advance(1002, None)
     state = analyzer.snapshot.state_for("aa")
 
     assert state is not None
@@ -144,7 +145,7 @@ def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
         )
     )
 
-    analyzer.advance(1001, 12.5)
+    analyzer.advance(1002, 12.5)
     snapshot = analyzer.snapshot
 
     assert snapshot.selected_bssid == "aa"
@@ -327,7 +328,7 @@ def test_retry_samples_use_independent_one_second_windows() -> None:
 
     analyzer.ingest(_beacon_frame(1002.0, "aa", "Alpha", -40, retry=False))
     analyzer.ingest(_frame(1002.1, "aa", retry=False))
-    analyzer.advance(1003, None)
+    analyzer.flush()
 
     assert analyzer.snapshot.current.received_frame_count == 2
     assert analyzer.snapshot.current.retry_eligible_frame_count == 1
@@ -353,10 +354,17 @@ def test_capture_publication_waits_until_all_rows_for_second_are_ingested() -> N
     )
     assert analyzer.publish_capture_complete(None) == []
 
-    # The first ordered frame from second 1001 is the capture watermark that
-    # proves every second-1000 row has already passed through stdout.
+    # Crossing the wall-clock boundary alone is not enough because a beacon
+    # scheduled in second 1000 may arrive up to 102.4 ms late.
     analyzer.ingest(
         _frame(1001.0, "aa", retry=False), publish_snapshot=False
+    )
+    assert analyzer.publish_capture_complete(None) == []
+
+    # Once the ordered capture watermark passes the beacon-delay grace, the
+    # second is immutable for both retry and beacon-loss accounting.
+    analyzer.ingest(
+        _frame(1001.11, "aa", retry=False), publish_snapshot=False
     )
     published = analyzer.publish_capture_complete(None)
 
@@ -451,6 +459,58 @@ def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop()
         interval_start=1001.0,
         interval_end=1002.0,
     ) == (10, 10)
+
+
+def test_beacon_delayed_across_second_boundary_is_credited_within_grace() -> None:
+    bssid = "00:11:22:33:44:50"
+    analyzer = Analyzer()
+    scheduled = [1000.05 + slot * 0.1024 for slot in range(10)]
+
+    for timestamp in scheduled[:-1]:
+        analyzer.ingest(
+            _radio_beacon(timestamp, bssid, "Alpha", -35, "Room-101"),
+            publish_snapshot=False,
+        )
+
+    analyzer.advance(1001, None)
+    assert analyzer.snapshot.history == ()
+    analyzer.ingest(
+        _radio_beacon(
+            scheduled[-1] + 0.1024,
+            bssid,
+            "Alpha",
+            -35,
+            "Room-101",
+        ),
+        publish_snapshot=False,
+    )
+    assert analyzer.publish_capture_complete(None) == []
+    analyzer.ingest(
+        _frame(1001.1024, bssid, retry=False),
+        publish_snapshot=False,
+    )
+    assert analyzer.publish_capture_complete(None) == []
+    analyzer.ingest(
+        _frame(1001.11, bssid, retry=False),
+        publish_snapshot=False,
+    )
+    published = analyzer.publish_capture_complete(None)
+
+    assert [row.second for row in published] == [1000]
+    assert published[0].beacon_received_count == 10
+    assert published[0].beacon_expected_count == 10
+    assert published[0].beacon_loss_percent == 0.0
+
+
+def test_beacon_delayed_beyond_one_interval_does_not_fill_previous_slot() -> None:
+    scheduled = [1000.05 + slot * 0.1024 for slot in range(10)]
+    timestamps = tuple([*scheduled[:-1], scheduled[-1] + 0.1025])
+
+    assert _beacon_reception_counts(
+        timestamps,
+        interval_start=1000.0,
+        interval_end=1001.0,
+    ) == (9, 10)
 
 
 def test_missing_retry_flag_degrades_to_unavailable() -> None:
@@ -618,11 +678,11 @@ def test_unique_client_macs_count_data_endpoints_per_second_and_window() -> None
     analyzer.ingest(_client_data_frame(1000.3, bssid, client_b, from_ap=True))
     analyzer.advance(1001, None)
 
-    assert analyzer.snapshot.history[-1].unique_client_mac_count == 2
+    assert analyzer.snapshot.current.unique_client_mac_count == 2
     assert analyzer.snapshot.window_unique_client_mac_count == 2
 
     analyzer.ingest(_client_data_frame(1001.1, bssid, client_a, from_ap=False))
-    analyzer.advance(1002, None)
+    analyzer.flush()
 
     assert analyzer.snapshot.history[-1].unique_client_mac_count == 1
     assert analyzer.snapshot.window_unique_client_mac_count == 2
@@ -665,7 +725,7 @@ def test_unique_client_macs_exclude_management_group_and_unlinked_frames() -> No
             receiver_address="02:00:00:00:20:02",
         )
     )
-    analyzer.advance(1001, None)
+    analyzer.flush()
 
     assert analyzer.snapshot.history[-1].unique_client_mac_count == 0
     assert analyzer.snapshot.window_unique_client_mac_count == 0

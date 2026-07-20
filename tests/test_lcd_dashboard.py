@@ -530,7 +530,7 @@ def _phase_two_snapshot() -> MetricsSnapshot:
             -60,
         )
     )
-    analyzer.advance(1002, None)
+    analyzer.flush()
     return analyzer.snapshot
 
 
@@ -546,7 +546,7 @@ def _retry_snapshot() -> MetricsSnapshot:
     analyzer.advance(1001, None)
     analyzer.ingest(_retry_frame(1001.1, "aa", False))
     analyzer.ingest(_retry_frame(1001.2, "bb", True))
-    analyzer.advance(1002, None)
+    analyzer.flush()
     return analyzer.snapshot
 
 

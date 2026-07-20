@@ -84,13 +84,14 @@ maintains:
 - per-BSSID and channel retry counts;
 - per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
-- best-effort radio groups; and
+- best-effort radio groups;
 - per-second strongest-radio beacon loss; and
 - channel-composition state.
 
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
-for every busy-channel frame. It publishes when capture timestamps cross a
-second boundary and when pending data is flushed during shutdown.
+for every busy-channel frame. It publishes a second after ordered capture time
+passes that boundary by the 102.4 ms beacon-delay allowance, and when pending
+data is flushed during shutdown.
 
 ### Rolling-window and latest-beacon rules
 
@@ -123,8 +124,9 @@ Users cannot override this selection.
 ### Retry buckets and selection
 
 Retry samples are independent one-second channel ratios. A live second closes
-only after an ordered capture timestamp enters a later second; a wall-clock UI
-refresh must not finalize it while older TShark rows may still be buffered.
+only after an ordered capture timestamp passes the boundary plus the 102.4 ms
+beacon-delay allowance; a wall-clock UI refresh must not finalize it while
+older TShark rows may still be buffered.
 
 The denominator contains frames eligible for Retry-bit retransmission:
 unicast data plus retry-capable unicast management frames with a readable Retry

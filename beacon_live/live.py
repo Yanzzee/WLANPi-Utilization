@@ -426,6 +426,22 @@ def run_live(
             for key, _ in events:
                 line = _read_tshark_line(key.fileobj)
                 if line == "":
+                    include_history = warmup_filter.remaining_cycles <= 0
+                    completed_stats = analyzer.publish_capture_complete(
+                        latest_local_cu_percent,
+                        include_history=include_history,
+                        capture_ended=True,
+                    )
+                    _publish_live_stats(
+                        warmup_filter.filter(completed_stats),
+                        stats_writer=(
+                            logging_service.write_stats
+                            if logging_service is not None
+                            else _discard_stats
+                        ),
+                        dashboard=dashboard,
+                        snapshot=analyzer.snapshot,
+                    )
                     return _handle_tshark_exit(process)
                 frame = parse_tshark_frame_row(line)
                 if frame is not None:
@@ -433,8 +449,9 @@ def run_live(
                     if beacon is not None and logging_service is not None:
                         logging_service.write_beacon(beacon)
                     # Defer frame-level snapshots. The capture-watermark call
-                    # below publishes only when this frame crosses a second
-                    # boundary, avoiding a rebuild for every busy-channel row.
+                    # below publishes only after this frame passes a second
+                    # boundary plus beacon-delay grace, avoiding a rebuild for
+                    # every busy-channel row.
                     analyzer.ingest(frame, publish_snapshot=False)
                     include_history = warmup_filter.remaining_cycles <= 0
                     completed_stats = analyzer.publish_capture_complete(

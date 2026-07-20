@@ -63,7 +63,7 @@ Features & changes
         include clients that were detected within the last 2 minutes
         can call this MAC or stay with MAX
         possibly overlay this as a line or bar on the graph
-21. additional screen - Beacons
+21. DONE    additional screen - Beacons
         for all BSSIDs associated with the strongest radio, count all received beacons and divide by the number of expected beacons
         this may need to track beacon timing instead of a simple 10 beacons per second, because it is actually one beacon per 102.4ms. or 10 beacons per 1.024 seconds, or 9.765625 beacons per second. sometimes there will be 9 per second and often there will be 10 per second. this graph may need to be delayed by one second in order to see if the additional beacons were received in the following window
         alternatively, we could look at all BSSIDs collectively, including those that are far away, but there will be a higher probability that beacons are not received because they are too weak to be demodulated, not because they were dropped because of contention.
@@ -79,3 +79,4 @@ Features & changes
         update log path if necessary
 26. update the stations TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
         as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS
+27. DONE    include beacons in logging, or remove it if it's useless

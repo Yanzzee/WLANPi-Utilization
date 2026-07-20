@@ -84,7 +84,7 @@ def test_admission_capacity_31250_is_100_percent() -> None:
             rssi_dbm=-40,
         )
     )
-    analyzer.advance(1001, None)
+    analyzer.flush()
 
     view = AdmissionCapacityScreen().render(analyzer.snapshot)
 
@@ -123,7 +123,7 @@ def test_total_station_graph_keeps_fixed_64_count_scale() -> None:
             rssi_dbm=-40,
         )
     )
-    analyzer.advance(1001, None)
+    analyzer.flush()
 
     view = TotalStationCountScreen().render(analyzer.snapshot)
 
@@ -169,7 +169,7 @@ def test_total_station_screen_shows_window_mac_total_and_per_second_series() -> 
             receiver_address=bssid,
         )
     )
-    analyzer.advance(1002, None)
+    analyzer.flush()
 
     view = TotalStationCountScreen().render(analyzer.snapshot)
 
@@ -303,7 +303,7 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
     assert view.title == "Beacon Loss"
     assert view.metadata_tokens == ("Beacon Loss",)
     assert view.metadata_metric_token_count == 2
-    assert view.summary == "BL 5% REC 19 EXP 20"
+    assert view.summary == "BL 5% AVG 12% MAX 20%"
     assert view.graph_label == "Strongest-radio beacon loss"
     assert view.graph_maximum == 100
     assert [point.value for point in view.graph_points] == [20.0, 5.0]
@@ -330,7 +330,7 @@ def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:
             rssi_dbm=-40,
         )
     )
-    analyzer.advance(1003, None)
+    analyzer.flush()
     manager.update(analyzer.snapshot)
 
     assert id(analyzer) == analyzer_identity
@@ -377,7 +377,7 @@ def _analyzer_with_history() -> Analyzer:
             rssi_dbm=-60,
         )
     )
-    analyzer.advance(1002, None)
+    analyzer.flush()
     return analyzer
 
 
@@ -393,7 +393,7 @@ def _retry_analyzer_with_history() -> Analyzer:
     analyzer.advance(1001, None)
     analyzer.ingest(_retry_frame(1001.1, "aa", False))
     analyzer.ingest(_retry_frame(1001.2, "bb", True))
-    analyzer.advance(1002, None)
+    analyzer.flush()
     return analyzer
 
 

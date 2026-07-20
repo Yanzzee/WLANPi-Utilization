@@ -274,6 +274,11 @@ class BeaconsScreen:
             )
             for stats in snapshot.history
         )
+        values = tuple(
+            point.display_value
+            for point in graph_points
+            if point.display_value is not None
+        )
         beacons = snapshot.beacons
         return ScreenView(
             screen_id=self.screen_id,
@@ -281,8 +286,8 @@ class BeaconsScreen:
             metadata_tokens=("Beacon Loss",),
             summary=(
                 f"BL {_whole_percent(beacons.loss_percent)}% "
-                f"REC {beacons.received_count} "
-                f"EXP {beacons.expected_count}"
+                f"AVG {_whole_percent(_mean(values))}% "
+                f"MAX {_whole_percent(max(values) if values else None)}%"
             ),
             graph_label="Strongest-radio beacon loss",
             graph_points=graph_points,

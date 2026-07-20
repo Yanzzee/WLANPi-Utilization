@@ -5,6 +5,7 @@ from __future__ import annotations
 from bisect import insort
 from dataclasses import replace
 from math import ceil
+from math import floor
 from typing import Optional, Union
 
 from beacon_live.models import BeaconRecord
@@ -138,7 +139,7 @@ class Analyzer:
     ) -> None:
         """Analyze one record, optionally deferring immutable publication."""
         record_second = int(record.timestamp)
-        self._finalize_pending_before(record_second)
+        self._finalize_pending_after_beacon_grace(record.timestamp)
 
         if self._is_expired_late_record(record.timestamp):
             return
@@ -186,7 +187,7 @@ class Analyzer:
 
     def pop_completed_before(self, second: int) -> list[SecondStats]:
         """Publish all observed samples whose seconds precede ``second``."""
-        self._finalize_pending_before(second)
+        self._finalize_pending_after_beacon_grace(float(second))
         return self._publish_ready(before_second=second)
 
     def advance(
@@ -196,12 +197,10 @@ class Analyzer:
         *,
         include_history: bool = True,
     ) -> list[SecondStats]:
-        """Advance live analysis and publish the previous whole-second sample."""
+        """Advance analysis without closing a delayed-beacon grace period."""
         self._latest_local_cu_percent = local_cu_percent
-        self._finalize_pending_before(wall_second)
-        target_second = wall_second - 1
-        if target_second not in self._completed_seconds:
-            self._complete_second(target_second)
+        self._finalize_pending_after_beacon_grace(float(wall_second))
+        current_second = wall_second - 1
 
         published = self._publish_ready(
             before_second=wall_second,
@@ -215,10 +214,13 @@ class Analyzer:
             else float(wall_second),
         )
         self._expire_records(self._reference_timestamp)
-        self._prune_completed_seconds(target_second)
+        latest_finalizable_second = floor(
+            wall_second - 1 - ASSUMED_BEACON_INTERVAL_SECONDS
+        )
+        self._prune_completed_seconds(latest_finalizable_second)
         self._refresh_current_snapshot(
             reference_timestamp=float(wall_second),
-            current_second=target_second,
+            current_second=current_second,
             upper_exclusive=float(wall_second),
         )
         return published
@@ -228,20 +230,26 @@ class Analyzer:
         local_cu_percent: Optional[float],
         *,
         include_history: bool = True,
+        capture_ended: bool = False,
     ) -> list[SecondStats]:
         """Publish seconds completed by the ordered capture stream.
 
         TShark can have many rows buffered when a wall-clock refresh fires. A
-        second is therefore complete only after a frame from a later capture
-        second has been ingested. This prevents live publication from making
-        an incomplete retry bucket immutable while older rows are still being
-        drained from TShark stdout.
+        second is therefore complete only after ordered capture time passes
+        its boundary plus the delayed-beacon allowance. This prevents live
+        publication from making retry or beacon-loss data immutable while
+        older rows are still being drained from TShark stdout.
         """
         self._latest_local_cu_percent = local_cu_percent
         if self._reference_timestamp is None:
             return []
 
         capture_second = int(self._reference_timestamp)
+        if capture_ended:
+            # EOF proves stdout is fully drained even when capture stopped
+            # during the 102.4 ms delayed-beacon grace period. Keep the final
+            # partial capture second pending, matching normal live behavior.
+            self._finalize_pending_before(capture_second)
         published = self._publish_ready(
             before_second=capture_second,
             default_local_cu_percent=local_cu_percent,
@@ -272,6 +280,21 @@ class Analyzer:
     def _finalize_pending_before(self, second: int) -> None:
         for pending_second in sorted(
             value for value in self._pending_seconds if value < second
+        ):
+            self._complete_second(pending_second)
+
+    def _finalize_pending_after_beacon_grace(
+        self,
+        reference_timestamp: float,
+    ) -> None:
+        """Close seconds only after their delayed-beacon grace has passed."""
+        tolerance = 1e-9
+        for pending_second in sorted(
+            value
+            for value in self._pending_seconds
+            if reference_timestamp
+            - (value + 1 + ASSUMED_BEACON_INTERVAL_SECONDS)
+            > tolerance
         ):
             self._complete_second(pending_second)
 
@@ -1103,63 +1126,75 @@ def _beacon_reception_counts(
     interval_end: float,
     beacon_interval_seconds: float = ASSUMED_BEACON_INTERVAL_SECONDS,
 ) -> tuple[int, int]:
-    """Count received and phase-aware expected beacons in one interval.
+    """Count expected slots and slots received within one interval of delay.
 
-    The last observation before the interval provides the schedule phase. For
-    a newly observed BSSID, accounting begins with its first beacon so time
-    before discovery is not treated as loss. A tiny tolerance keeps a beacon
-    scheduled exactly at the exclusive interval end in the adjacent bucket.
+    Capture timestamps do not expose the beacon's scheduled transmit time. We
+    therefore infer the latest schedule requiring the fewest missing slots
+    while allowing every observation to arrive from zero through one complete
+    beacon interval late. This lets an observation after ``interval_end``
+    satisfy a slot before it, without counting that observation twice.
     """
     if beacon_interval_seconds <= 0:
         raise ValueError("beacon_interval_seconds must be greater than zero")
     if interval_end <= interval_start:
         return (0, 0)
 
-    received_timestamps = tuple(
-        timestamp
-        for timestamp in timestamps
-        if interval_start <= timestamp < interval_end
-    )
-    received_count = len(received_timestamps)
-    previous_timestamp = next(
-        (
-            timestamp
-            for timestamp in reversed(timestamps)
-            if timestamp < interval_start
-        ),
-        None,
-    )
-
     tolerance = 1e-9
-    if previous_timestamp is not None:
-        first_slot = ceil(
-            (interval_start - previous_timestamp)
-            / beacon_interval_seconds
-            - tolerance
-        )
-        end_slot = ceil(
-            (interval_end - previous_timestamp)
-            / beacon_interval_seconds
-            - tolerance
-        )
-        expected_count = max(0, end_slot - max(1, first_slot))
-    elif received_timestamps:
-        first_timestamp = received_timestamps[0]
-        expected_count = max(
-            1,
-            ceil(
-                (interval_end - first_timestamp)
-                / beacon_interval_seconds
-                - tolerance
-            ),
-        )
-    else:
-        expected_count = 0
+    observations = tuple(
+        timestamp
+        for timestamp in sorted(timestamps)
+        if timestamp < interval_end + beacon_interval_seconds + tolerance
+    )
+    if not observations:
+        return (0, 0)
 
-    # Capture jitter can place an observation just across an inferred slot.
-    # Such a row is received evidence, so aggregate percentages never exceed
-    # 100 percent merely because the inferred schedule phase shifted.
-    return received_count, max(received_count, expected_count)
+    # The first observation is logical slot zero. Its actual schedule can be
+    # anywhere from one interval before its capture time through that time.
+    phase_low = observations[0] - beacon_interval_seconds
+    phase_high = observations[0]
+    assigned_slots = [0]
+    previous_slot = 0
+
+    for timestamp in observations[1:]:
+        first_candidate = previous_slot + 1
+        last_candidate = floor(
+            (timestamp - phase_low) / beacon_interval_seconds + tolerance
+        )
+        for candidate in range(first_candidate, last_candidate + 1):
+            candidate_phase_low = max(
+                phase_low,
+                timestamp - (candidate + 1) * beacon_interval_seconds,
+            )
+            candidate_phase_high = min(
+                phase_high,
+                timestamp - candidate * beacon_interval_seconds,
+            )
+            if candidate_phase_low <= candidate_phase_high + tolerance:
+                phase_low = candidate_phase_low
+                phase_high = candidate_phase_high
+                assigned_slots.append(candidate)
+                previous_slot = candidate
+                break
+
+    # The latest feasible phase minimizes inferred delay without changing the
+    # already minimized number of missing logical slots.
+    phase = phase_high
+    first_expected_slot = max(
+        0,
+        ceil(
+            (interval_start - phase) / beacon_interval_seconds - tolerance
+        ),
+    )
+    end_expected_slot = max(
+        first_expected_slot,
+        ceil((interval_end - phase) / beacon_interval_seconds - tolerance),
+    )
+    expected_count = end_expected_slot - first_expected_slot
+    received_count = sum(
+        first_expected_slot <= slot < end_expected_slot
+        for slot in assigned_slots
+    )
+    return received_count, expected_count
 
 
 def _beacon_rate_percent(
