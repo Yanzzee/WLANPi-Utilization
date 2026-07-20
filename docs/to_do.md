@@ -77,3 +77,5 @@ Features & changes
         add confirmation that logging has stopped - logging channel X has started... etc
 25. unify app name - beacon-live and Utilization
         update log path if necessary
+26. update the stations TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
+        as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS

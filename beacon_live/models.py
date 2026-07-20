@@ -154,6 +154,9 @@ class SecondStats:
     selected_beacon_rate_percent: Optional[float] = None
     top_retry_bssid: Optional[str] = None
     unique_client_mac_count: int = 0
+    beacon_received_count: int = 0
+    beacon_expected_count: int = 0
+    beacon_received_percent: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -239,6 +242,7 @@ class CompositionSnapshot:
     qbss_bssid_count: int
     estimated_radio_count: int
     strongest_radio_bssid_count: int
+    strongest_radio_bssids: tuple[str, ...]
     strongest_radio_ap_name: Optional[str]
     strongest_radio_vendor: Optional[str]
     displayed_ssid: Optional[str]
@@ -252,8 +256,46 @@ class CompositionSnapshot:
             qbss_bssid_count=0,
             estimated_radio_count=0,
             strongest_radio_bssid_count=0,
+            strongest_radio_bssids=(),
             strongest_radio_ap_name=None,
             strongest_radio_vendor=None,
+            displayed_ssid=None,
+            displayed_bssid=None,
+            displayed_rssi_dbm=None,
+        )
+
+
+@dataclass(frozen=True)
+class BeaconBssidReception:
+    """One BSSID's fixed-interval beacon accounting for a capture interval."""
+
+    bssid: str
+    received_count: int
+    expected_count: int
+    received_percent: Optional[float]
+
+
+@dataclass(frozen=True)
+class BeaconReceptionSnapshot:
+    """Analyzer-derived strongest-radio state for the Beacons screen."""
+
+    strongest_radio_bssids: tuple[str, ...]
+    bssids: tuple[BeaconBssidReception, ...]
+    received_count: int
+    expected_count: int
+    received_percent: Optional[float]
+    displayed_ssid: Optional[str]
+    displayed_bssid: Optional[str]
+    displayed_rssi_dbm: Optional[int]
+
+    @classmethod
+    def empty(cls) -> "BeaconReceptionSnapshot":
+        return cls(
+            strongest_radio_bssids=(),
+            bssids=(),
+            received_count=0,
+            expected_count=0,
+            received_percent=None,
             displayed_ssid=None,
             displayed_bssid=None,
             displayed_rssi_dbm=None,
@@ -291,6 +333,9 @@ class MetricsSnapshot:
         default_factory=CompositionSnapshot.empty
     )
     window_unique_client_mac_count: int = 0
+    beacons: BeaconReceptionSnapshot = field(
+        default_factory=BeaconReceptionSnapshot.empty
+    )
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":
@@ -317,6 +362,7 @@ class MetricsSnapshot:
             retry_bssids=(),
             composition=CompositionSnapshot.empty(),
             window_unique_client_mac_count=0,
+            beacons=BeaconReceptionSnapshot.empty(),
         )
 
     @property

@@ -1,14 +1,19 @@
+from dataclasses import replace
 from typing import Optional
 
 import pytest
 
 from beacon_live.analyzer import Analyzer
 from beacon_live.models import BeaconRecord
+from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import FrameRecord
+from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import AdmissionCapacityScreen
+from beacon_live.screens import BEACONS_SCREEN_ID
+from beacon_live.screens import BeaconsScreen
 from beacon_live.screens import COMPOSITION_SCREEN_ID
 from beacon_live.screens import CompositionScreen
 from beacon_live.screens import CU_SCREEN_ID
@@ -36,10 +41,12 @@ def test_screen_navigation_wraps_and_debounces_without_changing_snapshot() -> No
     assert manager.navigate_down(now=10.6)
     assert manager.active_screen_id == RETRY_SCREEN_ID
     assert manager.navigate_down(now=10.9)
-    assert manager.active_screen_id == COMPOSITION_SCREEN_ID
+    assert manager.active_screen_id == BEACONS_SCREEN_ID
     assert manager.navigate_down(now=11.2)
+    assert manager.active_screen_id == COMPOSITION_SCREEN_ID
+    assert manager.navigate_down(now=11.5)
     assert manager.active_screen_id == CU_SCREEN_ID
-    assert manager.navigate_up(now=11.5)
+    assert manager.navigate_up(now=11.8)
     assert manager.active_screen_id == COMPOSITION_SCREEN_ID
 
     assert manager.snapshot is snapshot
@@ -253,6 +260,55 @@ def test_retry_screen_uses_shared_history_and_highest_retry_bssid() -> None:
 def test_retry_screen_distinguishes_sub_one_percent_from_zero() -> None:
     assert _retry_percent(0.0) == "0"
     assert _retry_percent(0.4) == "<1"
+
+
+def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
+    empty = MetricsSnapshot.empty()
+    first = replace(
+        empty.current,
+        second=1000,
+        beacon_received_count=8,
+        beacon_expected_count=10,
+        beacon_received_percent=80.0,
+    )
+    current = replace(
+        empty.current,
+        second=1001,
+        beacon_received_count=19,
+        beacon_expected_count=20,
+        beacon_received_percent=95.0,
+    )
+    snapshot = replace(
+        empty,
+        generated_at=1002.0,
+        current=current,
+        history=(first, current),
+        beacons=BeaconReceptionSnapshot(
+            strongest_radio_bssids=(
+                "00:11:22:33:44:50",
+                "00:11:22:33:44:51",
+            ),
+            bssids=(),
+            received_count=19,
+            expected_count=20,
+            received_percent=95.0,
+            displayed_ssid="Alpha",
+            displayed_bssid="00:11:22:33:44:50",
+            displayed_rssi_dbm=-35,
+        ),
+    )
+
+    view = BeaconsScreen().render(snapshot)
+
+    assert view.title == "Beacons"
+    assert view.metadata_tokens == ("Beacons",)
+    assert view.summary == "BC 95% REC 19 EXP 20"
+    assert view.graph_label == "Strongest-radio beacon reception"
+    assert view.graph_maximum == 100
+    assert [point.value for point in view.graph_points] == [80.0, 95.0]
+    assert view.identity.ssid == "Alpha"
+    assert view.identity.bssid == "00:11:22:33:44:50"
+    assert view.identity.rssi_dbm == -35
 
 
 def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:

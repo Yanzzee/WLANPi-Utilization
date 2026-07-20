@@ -1,7 +1,9 @@
 """WLAN Pi beacon analysis helpers."""
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.models import BeaconBssidReception
 from beacon_live.models import BeaconRecord
+from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import BssidState
 from beacon_live.models import CompositionSnapshot
 from beacon_live.models import FrameRecord
@@ -12,7 +14,9 @@ from beacon_live.models import SurveySample
 
 __all__ = [
     "Analyzer",
+    "BeaconBssidReception",
     "BeaconRecord",
+    "BeaconReceptionSnapshot",
     "BssidState",
     "CompositionSnapshot",
     "FrameRecord",

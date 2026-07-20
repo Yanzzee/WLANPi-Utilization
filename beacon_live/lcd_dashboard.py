@@ -11,6 +11,7 @@ from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.screen_manager import ScreenManager
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import BEACONS_SCREEN_ID
 from beacon_live.screens import COMPOSITION_SCREEN_ID
 from beacon_live.screens import CU_SCREEN_ID
 from beacon_live.screens import RETRY_SCREEN_ID
@@ -30,6 +31,7 @@ _ADMISSION_GRAPH = (0, 160, 255)
 _STATION_GRAPH = (255, 190, 0)
 _MAC_GRAPH = (0, 220, 220)
 _RETRY_GRAPH = (210, 90, 255)
+_BEACONS_GRAPH = (255, 110, 60)
 _COMPOSITION_TEXT = (255, 255, 255)
 _OVERFLOW_GRAPH = (255, 0, 0)
 _GRAPH_COLORS = {
@@ -38,6 +40,7 @@ _GRAPH_COLORS = {
     COMPOSITION_SCREEN_ID: _COMPOSITION_TEXT,
     TOTAL_STATION_COUNT_SCREEN_ID: _STATION_GRAPH,
     RETRY_SCREEN_ID: _RETRY_GRAPH,
+    BEACONS_SCREEN_ID: _BEACONS_GRAPH,
 }
 
 

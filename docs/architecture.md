@@ -85,6 +85,7 @@ maintains:
 - per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
 - best-effort radio groups; and
+- per-second strongest-radio beacon reception; and
 - channel-composition state.
 
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
@@ -165,7 +166,8 @@ prevent grouping. Complete-link compatibility prevents a chain of weak matches
 from collapsing clearly different radios.
 
 AP names and vendor-specific fields are clues, not standardized identities.
-Composition counts must therefore be labeled as estimates.
+Composition counts and Beacons-screen radio membership must therefore be
+treated as estimates.
 
 ## Snapshot model
 
@@ -176,7 +178,8 @@ The immutable snapshot contains:
 - current `BssidState` and `RetryBssidState` collections;
 - selected QBSS, station, and retry BSSIDs;
 - the rolling unique client-MAC count; and
-- a `CompositionSnapshot`.
+- `BeaconReceptionSnapshot` and `CompositionSnapshot` views of the selected
+  strongest radio.
 
 UI code reads the snapshot and formats a view. It must not independently parse
 frames, select BSSIDs, or compute metrics.
@@ -184,13 +187,14 @@ frames, select BSSIDs, or compute metrics.
 ## Display layer
 
 `ScreenManager` owns only the active screen index and navigation debounce. The
-five screen definitions are pure renderers over a snapshot:
+six screen definitions are pure renderers over a snapshot:
 
 1. Utilization
 2. Admission
 3. Stations
 4. Retries
-5. Composition
+5. Beacons
+6. Composition
 
 Up/down navigation changes the index with wraparound and a 0.2-second debounce.
 It does not reset analyzer state. The LCD renderer writes a PPM frame and JSON

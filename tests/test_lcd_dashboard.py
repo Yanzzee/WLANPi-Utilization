@@ -11,6 +11,7 @@ from beacon_live.lcd_dashboard import GRAPH_X
 from beacon_live.lcd_dashboard import GRAPH_Y
 from beacon_live.lcd_dashboard import LcdDashboard
 from beacon_live.lcd_dashboard import _ADMISSION_GRAPH
+from beacon_live.lcd_dashboard import _BEACONS_GRAPH
 from beacon_live.lcd_dashboard import _COMPOSITION_TEXT
 from beacon_live.lcd_dashboard import _CU_GRAPH
 from beacon_live.lcd_dashboard import _MAC_GRAPH
@@ -26,6 +27,7 @@ from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.models import SecondStats
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
+from beacon_live.screens import BEACONS_SCREEN_ID
 from beacon_live.screens import COMPOSITION_SCREEN_ID
 from beacon_live.screens import RETRY_SCREEN_ID
 from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
@@ -306,6 +308,11 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.navigate_down(now=1.6)
     assert dashboard.active_screen_id == RETRY_SCREEN_ID
     assert dashboard.navigate_down(now=1.9)
+    assert dashboard.active_screen_id == BEACONS_SCREEN_ID
+    assert dashboard.metric_color == _BEACONS_GRAPH
+    assert dashboard.text_lines[0] == "5180MHz Beacons"
+    assert dashboard.text_lines[1].startswith("BC ")
+    assert dashboard.navigate_down(now=2.2)
     assert dashboard.active_screen_id == COMPOSITION_SCREEN_ID
     assert dashboard.metric_color == _COMPOSITION_TEXT
     assert dashboard.text_lines[0] == "5180MHz Composition"
@@ -352,7 +359,7 @@ def test_lcd_composition_screen_writes_eight_line_text_state_without_graph(
             vendor="Example Wireless",
         )
     )
-    dashboard.set_active_screen(4)
+    dashboard.set_active_screen(5)
     dashboard.refresh(analyzer.snapshot)
 
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
@@ -450,7 +457,7 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
     assert state["screen_id"] == TOTAL_STATION_COUNT_SCREEN_ID
     assert state["screen_index"] == 2
-    assert state["screen_count"] == 5
+    assert state["screen_count"] == 6
 
 
 def _stats(

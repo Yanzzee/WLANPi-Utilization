@@ -70,7 +70,7 @@ exit left.
 
 While a display is open:
 
-- move up or down to cycle through the five screens;
+- move up or down to cycle through the six screens;
 - press left to stop capture and return to the menu;
 - the first two auxiliary buttons are disabled; and
 - the third auxiliary button saves the current screen as a timestamped PNG in
@@ -87,6 +87,7 @@ Changing screens never restarts capture or clears graph history.
 | Admission | The selected BSSID's advertised admission capacity as a percentage. |
 | Stations | AP-advertised QBSS station counts plus unique client MACs observed in BSSID-linked data frames. |
 | Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
+| Beacons | Beacons received versus phase-aware expected beacons for all BSSIDs on the strongest estimated radio. |
 | Composition | BSSID and QBSS counts plus best-effort physical-radio, AP name, and vendor information. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are

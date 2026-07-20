@@ -12,6 +12,7 @@ from beacon_live.models import RetryBssidState
 
 CU_SCREEN_ID = "cu"
 ADMISSION_CAPACITY_SCREEN_ID = "admission_capacity"
+BEACONS_SCREEN_ID = "beacons"
 COMPOSITION_SCREEN_ID = "composition"
 TOTAL_STATION_COUNT_SCREEN_ID = "total_station_count"
 RETRY_SCREEN_ID = "retry"
@@ -260,11 +261,47 @@ class RetryScreen:
         )
 
 
+@dataclass(frozen=True)
+class BeaconsScreen:
+    screen_id: str = BEACONS_SCREEN_ID
+
+    def render(self, snapshot: MetricsSnapshot) -> ScreenView:
+        graph_points = tuple(
+            GraphPoint(
+                second=stats.second,
+                value=stats.beacon_received_percent,
+                display_value=stats.beacon_received_percent,
+            )
+            for stats in snapshot.history
+        )
+        beacons = snapshot.beacons
+        return ScreenView(
+            screen_id=self.screen_id,
+            title="Beacons",
+            metadata_tokens=("Beacons",),
+            summary=(
+                f"BC {_whole_percent(beacons.received_percent)}% "
+                f"REC {beacons.received_count} "
+                f"EXP {beacons.expected_count}"
+            ),
+            graph_label="Strongest-radio beacon reception",
+            graph_points=graph_points,
+            graph_maximum=100,
+            identity=DisplayIdentity(
+                ssid=beacons.displayed_ssid,
+                bssid=beacons.displayed_bssid,
+                rssi_dbm=beacons.displayed_rssi_dbm,
+                unavailable_text="<No Beacons>",
+            ),
+        )
+
+
 DEFAULT_SCREENS: tuple[ScreenDefinition, ...] = (
     CuScreen(),
     AdmissionCapacityScreen(),
     TotalStationCountScreen(),
     RetryScreen(),
+    BeaconsScreen(),
     CompositionScreen(),
 )
 

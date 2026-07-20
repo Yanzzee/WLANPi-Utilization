@@ -1,6 +1,6 @@
 # Screen Reference
 
-This document explains the five WLANPi Beacon Live screens and their metric
+This document explains the six WLANPi Beacon Live screens and their metric
 selection rules. For a short operational overview, start with the
 [README](../README.md). For analyzer invariants, see
 [architecture.md](architecture.md).
@@ -11,7 +11,7 @@ All screens render from the same immutable analyzer snapshot and the same
 120-second history.
 
 - Up/down changes only the active screen.
-- Navigation wraps through all five screens and is debounced.
+- Navigation wraps through all six screens and is debounced.
 - Capture, analysis, logging, and inactive-screen history continue while a
   different screen is visible.
 - Returning to a screen immediately shows the newest shared state.
@@ -146,7 +146,31 @@ DA fields. The footer chooses the BSSID with the highest retry percentage for
 the second. It keeps the prior footer if percentages tie and uses the strongest
 beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 
-## 5. Composition
+## 5. Beacons
+
+Beacons graphs the percentage of expected beacons received during each
+completed capture second for the strongest estimated radio.
+
+Summary fields:
+
+- `BC`: aggregate received percentage;
+- `REC`: actual beacons received; and
+- `EXP`: beacons expected.
+
+The analyzer applies the existing best-effort radio grouping to every retained
+BSSID, including hidden-SSID BSSIDs and BSSIDs without QBSS information. It
+sums `REC` and `EXP` for all BSSIDs in the strongest group and calculates
+`BC = REC / EXP × 100`. The footer uses the same two-second member rotation as
+Composition.
+
+Expected timing assumes a 102.4 ms interval for every BSSID. The last beacon
+before the capture second establishes the schedule phase, so a wall-clock
+second may contain nine or ten expected transmissions. For a newly observed
+BSSID, accounting begins with its first received beacon. Gaps in the inferred
+schedule increase `EXP` without increasing `REC`; capture jitter cannot make
+the displayed percentage exceed 100%.
+
+## 6. Composition
 
 Composition is a text screen describing the channel rather than a graph.
 

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from bisect import insort
 from dataclasses import replace
+from math import ceil
 from typing import Optional, Union
 
 from beacon_live.models import BeaconRecord
+from beacon_live.models import BeaconBssidReception
+from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import BssidState
 from beacon_live.models import CompositionSnapshot
 from beacon_live.models import FrameRecord
@@ -19,6 +22,7 @@ from beacon_live.radio_grouping import select_strongest_radio
 DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
 COMPOSITION_ROTATION_SECONDS = 2
+ASSUMED_BEACON_INTERVAL_SECONDS = 0.1024
 
 
 def select_bssid(
@@ -114,6 +118,7 @@ class Analyzer:
         self._history_retry_bssid: Optional[str] = None
         self._composition_rotation_second: Optional[int] = None
         self._strongest_radio_bssids: tuple[str, ...] = ()
+        self._history_strongest_radio_bssids: tuple[str, ...] = ()
         self._composition_display_bssid: Optional[str] = None
         self._snapshot = MetricsSnapshot.empty(window_seconds=window_seconds)
 
@@ -297,6 +302,19 @@ class Analyzer:
             states,
             self._history_retry_bssid,
         )
+        strongest_radio = select_strongest_radio(
+            estimate_radio_groups(states),
+            self._history_strongest_radio_bssids,
+        )
+        strongest_radio_bssids = (
+            strongest_radio.bssids if strongest_radio is not None else ()
+        )
+        self._history_strongest_radio_bssids = strongest_radio_bssids
+        beacon_reception = self._beacon_reception_snapshot(
+            second=second,
+            interval_end=float(second + 1),
+            strongest_radio_bssids=strongest_radio_bssids,
+        )
         self._ready_stats.append(
             _stats_from_states(
                 second,
@@ -305,6 +323,7 @@ class Analyzer:
                 self._local_cu_by_second.get(second),
                 second_frames,
                 self._history_retry_bssid,
+                beacon_reception,
             )
         )
         self._completed_seconds.add(second)
@@ -388,6 +407,25 @@ class Analyzer:
             states,
             self._current_retry_bssid,
         )
+        composition = self._composition_snapshot(states, current_second)
+        interval_end = min(
+            float(current_second + 1),
+            (
+                upper_exclusive
+                if upper_exclusive is not None
+                else reference_timestamp + 1e-9
+            ),
+        )
+        beacon_reception = self._beacon_reception_snapshot(
+            second=current_second,
+            interval_end=interval_end,
+            strongest_radio_bssids=(
+                composition.strongest_radio_bssids
+            ),
+            displayed_ssid=composition.displayed_ssid,
+            displayed_bssid=composition.displayed_bssid,
+            displayed_rssi_dbm=composition.displayed_rssi_dbm,
+        )
         current = _stats_from_states(
             current_second,
             states,
@@ -395,12 +433,12 @@ class Analyzer:
             self._latest_local_cu_percent,
             second_frames,
             self._current_retry_bssid,
+            beacon_reception,
         )
         history = tuple(
             self._history_by_second[second]
             for second in sorted(self._history_by_second)
         )
-        composition = self._composition_snapshot(states, current_second)
         self._snapshot = MetricsSnapshot(
             generated_at=reference_timestamp,
             window_seconds=self.window_seconds,
@@ -415,6 +453,50 @@ class Analyzer:
             window_unique_client_mac_count=len(
                 _unique_client_macs(frames, states)
             ),
+            beacons=beacon_reception,
+        )
+
+    def _beacon_reception_snapshot(
+        self,
+        *,
+        second: int,
+        interval_end: float,
+        strongest_radio_bssids: tuple[str, ...],
+        displayed_ssid: Optional[str] = None,
+        displayed_bssid: Optional[str] = None,
+        displayed_rssi_dbm: Optional[int] = None,
+    ) -> BeaconReceptionSnapshot:
+        members: list[BeaconBssidReception] = []
+        for bssid in strongest_radio_bssids:
+            timestamps = tuple(
+                entry[0]
+                for entry in self._records_by_bssid.get(bssid, ())
+            )
+            received, expected = _beacon_reception_counts(
+                timestamps,
+                interval_start=float(second),
+                interval_end=interval_end,
+            )
+            members.append(
+                BeaconBssidReception(
+                    bssid=bssid,
+                    received_count=received,
+                    expected_count=expected,
+                    received_percent=_percentage(received, expected),
+                )
+            )
+
+        received_count = sum(member.received_count for member in members)
+        expected_count = sum(member.expected_count for member in members)
+        return BeaconReceptionSnapshot(
+            strongest_radio_bssids=strongest_radio_bssids,
+            bssids=tuple(members),
+            received_count=received_count,
+            expected_count=expected_count,
+            received_percent=_percentage(received_count, expected_count),
+            displayed_ssid=displayed_ssid,
+            displayed_bssid=displayed_bssid,
+            displayed_rssi_dbm=displayed_rssi_dbm,
         )
 
     def _composition_snapshot(
@@ -442,6 +524,7 @@ class Analyzer:
                 ),
                 estimated_radio_count=len(groups),
                 strongest_radio_bssid_count=0,
+                strongest_radio_bssids=(),
                 strongest_radio_ap_name=None,
                 strongest_radio_vendor=None,
                 displayed_ssid=None,
@@ -490,6 +573,7 @@ class Analyzer:
             ),
             estimated_radio_count=len(groups),
             strongest_radio_bssid_count=len(strongest.members),
+            strongest_radio_bssids=strongest.bssids,
             strongest_radio_ap_name=strongest.ap_name,
             strongest_radio_vendor=strongest.vendor,
             displayed_ssid=displayed_state.ssid,
@@ -759,6 +843,7 @@ def _stats_from_states(
     local_cu_percent: Optional[float],
     frames: tuple[FrameRecord, ...],
     retry_bssid: Optional[str],
+    beacon_reception: Optional[BeaconReceptionSnapshot] = None,
 ) -> SecondStats:
     selected = next(
         (state for state in states if state.bssid == selected_bssid),
@@ -815,6 +900,21 @@ def _stats_from_states(
         ),
         top_retry_bssid=retry_bssid,
         unique_client_mac_count=len(_unique_client_macs(frames, states)),
+        beacon_received_count=(
+            beacon_reception.received_count
+            if beacon_reception is not None
+            else 0
+        ),
+        beacon_expected_count=(
+            beacon_reception.expected_count
+            if beacon_reception is not None
+            else 0
+        ),
+        beacon_received_percent=(
+            beacon_reception.received_percent
+            if beacon_reception is not None
+            else None
+        ),
     )
 
 
@@ -981,6 +1081,72 @@ def _percentage(numerator: int, denominator: int) -> Optional[float]:
     if denominator <= 0:
         return None
     return numerator / denominator * 100
+
+
+def _beacon_reception_counts(
+    timestamps: tuple[float, ...],
+    *,
+    interval_start: float,
+    interval_end: float,
+    beacon_interval_seconds: float = ASSUMED_BEACON_INTERVAL_SECONDS,
+) -> tuple[int, int]:
+    """Count received and phase-aware expected beacons in one interval.
+
+    The last observation before the interval provides the schedule phase. For
+    a newly observed BSSID, accounting begins with its first beacon so time
+    before discovery is not treated as loss. A tiny tolerance keeps a beacon
+    scheduled exactly at the exclusive interval end in the adjacent bucket.
+    """
+    if beacon_interval_seconds <= 0:
+        raise ValueError("beacon_interval_seconds must be greater than zero")
+    if interval_end <= interval_start:
+        return (0, 0)
+
+    received_timestamps = tuple(
+        timestamp
+        for timestamp in timestamps
+        if interval_start <= timestamp < interval_end
+    )
+    received_count = len(received_timestamps)
+    previous_timestamp = next(
+        (
+            timestamp
+            for timestamp in reversed(timestamps)
+            if timestamp < interval_start
+        ),
+        None,
+    )
+
+    tolerance = 1e-9
+    if previous_timestamp is not None:
+        first_slot = ceil(
+            (interval_start - previous_timestamp)
+            / beacon_interval_seconds
+            - tolerance
+        )
+        end_slot = ceil(
+            (interval_end - previous_timestamp)
+            / beacon_interval_seconds
+            - tolerance
+        )
+        expected_count = max(0, end_slot - max(1, first_slot))
+    elif received_timestamps:
+        first_timestamp = received_timestamps[0]
+        expected_count = max(
+            1,
+            ceil(
+                (interval_end - first_timestamp)
+                / beacon_interval_seconds
+                - tolerance
+            ),
+        )
+    else:
+        expected_count = 0
+
+    # Capture jitter can place an observation just across an inferred slot.
+    # Such a row is received evidence, so aggregate percentages never exceed
+    # 100 percent merely because the inferred schedule phase shifted.
+    return received_count, max(received_count, expected_count)
 
 
 def _beacon_rate_percent(

@@ -4,6 +4,7 @@ from typing import Optional
 import pytest
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.analyzer import _beacon_reception_counts
 from beacon_live.analyzer import select_bssid
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
@@ -387,6 +388,71 @@ def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:
     )
 
 
+def test_beacon_reception_uses_all_bssids_on_strongest_radio_including_hidden() -> None:
+    analyzer = Analyzer()
+    visible = "00:11:22:33:44:50"
+    hidden = "00:11:22:33:44:51"
+    weaker = "00:11:23:33:44:50"
+    records = [
+        _radio_beacon(999.95, visible, "Alpha", -35, "Room-101"),
+        _radio_beacon(999.95, hidden, None, -37, "Room-101"),
+        _radio_beacon(999.95, weaker, "Weaker", -65, "Room-202"),
+    ]
+    for slot in range(1, 11):
+        timestamp = 999.95 + slot * 0.1024
+        records.append(
+            _radio_beacon(timestamp, visible, "Alpha", -35, "Room-101")
+        )
+        if slot != 5:
+            records.append(
+                _radio_beacon(timestamp, hidden, None, -37, "Room-101")
+            )
+        records.append(
+            _radio_beacon(timestamp, weaker, "Weaker", -65, "Room-202")
+        )
+
+    for record in sorted(records, key=lambda item: item.timestamp):
+        analyzer.ingest(record)
+    analyzer.advance(1001, None)
+
+    beacons = analyzer.snapshot.beacons
+    assert beacons.strongest_radio_bssids == (visible, hidden)
+    assert tuple(member.bssid for member in beacons.bssids) == (visible, hidden)
+    assert [(member.received_count, member.expected_count) for member in beacons.bssids] == [
+        (10, 10),
+        (9, 10),
+    ]
+    assert [member.received_percent for member in beacons.bssids] == pytest.approx(
+        [100.0, 90.0]
+    )
+    assert beacons.received_count == 19
+    assert beacons.expected_count == 20
+    assert beacons.received_percent == pytest.approx(95.0)
+    assert analyzer.snapshot.current.beacon_received_percent == pytest.approx(95.0)
+
+
+def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop() -> None:
+    first_window = tuple(
+        [999.99]
+        + [999.99 + slot * 0.1024 for slot in range(1, 10) if slot != 5]
+    )
+    second_window = tuple(
+        [1000.9116]
+        + [1000.9116 + slot * 0.1024 for slot in range(1, 11)]
+    )
+
+    assert _beacon_reception_counts(
+        first_window,
+        interval_start=1000.0,
+        interval_end=1001.0,
+    ) == (8, 9)
+    assert _beacon_reception_counts(
+        second_window,
+        interval_start=1001.0,
+        interval_end=1002.0,
+    ) == (10, 10)
+
+
 def test_missing_retry_flag_degrades_to_unavailable() -> None:
     analyzer = Analyzer()
     analyzer.ingest(_beacon_frame(1000.0, "aa", "Alpha", -40, retry=None))
@@ -724,6 +790,27 @@ def _beacon_frame(
         qbss_cu_percent=64 / 255 * 100,
         qbss_station_count=3,
         qbss_admission_capacity=10_000,
+    )
+
+
+def _radio_beacon(
+    timestamp: float,
+    bssid: str,
+    ssid: Optional[str],
+    rssi_dbm: int,
+    ap_name: str,
+) -> BeaconRecord:
+    return BeaconRecord(
+        timestamp=timestamp,
+        ssid=ssid,
+        bssid=bssid,
+        qbss_cu_raw=None,
+        qbss_cu_percent=None,
+        qbss_station_count=None,
+        qbss_admission_capacity=None,
+        rssi_dbm=rssi_dbm,
+        beacon_interval_tu=200,
+        ap_name=ap_name,
     )
 
 
