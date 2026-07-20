@@ -168,8 +168,14 @@ def test_logging_only_actions_return_to_menu_and_stop_from_another_channel(
     assert processes[0].signal_received == signal.SIGINT
     assert "channel_utilization_logging_session" not in g_vars
     assert messages == [
-        "Logging started: Ch 36 5180 MHz",
-        "Logging stopped: Ch 36 5180 MHz",
+        (
+            "Logging started: Ch 36 5180 MHz "
+            "Log folder: /var/log/wlanpi-beacon-live"
+        ),
+        (
+            "Logging stopped: Ch 36 5180 MHz "
+            "Log folder: /var/log/wlanpi-beacon-live"
+        ),
     ]
 
 
@@ -246,11 +252,23 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
     monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
     monkeypatch.setattr(channel_utilization, "LOG_DIR", log_dir)
     processes: list[_FakeProcess] = []
+    messages: list[str] = []
+    original_page_status = channel_utilization._display_page_status
 
     def fake_popen(command: list[str]) -> _FakeProcess:
         process = _FakeProcess(command)
         processes.append(process)
         return process
+
+    def capture_page_status(g_vars: dict[str, object], message: str) -> None:
+        messages.append(message)
+        original_page_status(g_vars, message)
+
+    monkeypatch.setattr(
+        channel_utilization,
+        "_display_page_status",
+        capture_page_status,
+    )
 
     g_vars: dict[str, object] = {
         "display_state": "menu",
@@ -264,6 +282,7 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
     app.launch(band="5", channel=36, logging=True)
     session = g_vars["channel_utilization_session"]
     session.current_screen_name = "Retry Percentage"
+    session.navigate_down()
 
     key1 = g_vars["page_key1_handler"]
     key2 = g_vars["page_key2_handler"]
@@ -284,12 +303,27 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
     assert screenshots[0].read_bytes() == b"current-screen"
     assert g_vars["display_state"] == "page"
     assert processes[0].poll() is None
-    assert session.screen_offset == 0
+    assert session.screen_offset == 1
+    assert json.loads(
+        frame.with_suffix(".control.json").read_text(encoding="utf-8")
+    ) == {"active_screen_offset": 1}
     assert json.loads(
         frame.with_name("logging.control.json").read_text(encoding="utf-8")
     ) == {"logging_enabled": True}
+    assert messages == [
+        (
+            "Logging started: Ch 36 5180 MHz "
+            f"Log folder: {log_dir}"
+        ),
+        f"Screenshot saved: {log_dir}",
+    ]
 
     session.stop()
+    assert messages[-1] == (
+        "Logging stopped: Ch 36 5180 MHz "
+        f"Log folder: {log_dir}"
+    )
+    assert g_vars["display_state"] == "page"
 
 
 def test_up_down_navigation_keeps_one_capture_process_and_debounces(

@@ -19,7 +19,8 @@ All screens render from the same immutable analyzer snapshot and the same
 - Footer identities are selected automatically. Users never choose an SSID or
   BSSID.
 - The first two auxiliary buttons are disabled while a display is active. The
-  third saves a PNG of the current screen without changing display state.
+  third saves a PNG of the current screen and briefly confirms the destination
+  folder without changing the active screen or navigation offset.
 
 The first two rows show the tuned frequency/screen name and a metric summary.
 Graph screens use the middle 120×64 region. The bottom rows show the selected

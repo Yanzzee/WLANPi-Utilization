@@ -64,13 +64,18 @@ Apps
 - `Start Logging` captures and logs in the background without opening a graph.
 - `Stop Logging` stops the background logging session.
 
+Logging start/stop messages briefly show the tuned channel, frequency, and log
+folder. `Display + Log` shows the same information when it starts and when you
+exit left.
+
 While a display is open:
 
 - move up or down to cycle through the five screens;
 - press left to stop capture and return to the menu;
 - the first two auxiliary buttons are disabled; and
 - the third auxiliary button saves the current screen as a timestamped PNG in
-  `/var/log/wlanpi-beacon-live`.
+  `/var/log/wlanpi-beacon-live`, then briefly confirms the folder without
+  changing the active screen.
 
 Changing screens never restarts capture or clears graph history.
 

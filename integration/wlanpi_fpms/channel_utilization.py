@@ -265,17 +265,14 @@ class ChannelUtilizationApp:
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
+        if logging:
+            session.show_logging_status("Logging started")
 
     def start_logging_only(self, *, band: str, channel: int) -> None:
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession) and not display_session.finished:
             display_session.set_logging(True)
-            _display_logging_status(
-                self.g_vars,
-                "Logging started",
-                band=display_session.band,
-                channel=display_session.channel,
-            )
+            display_session.show_logging_status("Logging started")
             return
 
         session = self.g_vars.get("channel_utilization_logging_session")
@@ -319,10 +316,12 @@ class ChannelUtilizationApp:
     def stop_logging(self) -> None:
         _write_logging_enabled(False)
         stopped_channel: Optional[tuple[str, int]] = None
+        stopped_display_session: Optional[_DisplaySession] = None
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession):
             if display_session.logging_enabled and not display_session.finished:
                 stopped_channel = (display_session.band, display_session.channel)
+                stopped_display_session = display_session
             display_session.set_logging(False)
 
         logging_session = self.g_vars.pop(
@@ -335,7 +334,14 @@ class ChannelUtilizationApp:
             logging_session.stop()
 
         if stopped_channel is None:
-            _display_status(self.g_vars, "Logging already stopped")
+            _display_status(
+                self.g_vars,
+                f"Logging already stopped Log folder: {LOG_DIR}",
+            )
+            return
+
+        if stopped_display_session is not None:
+            stopped_display_session.show_logging_status("Logging stopped")
             return
 
         _display_logging_status(
@@ -394,6 +400,7 @@ class _DisplaySession:
         self.thread.start()
 
     def stop(self) -> None:
+        was_logging = self.logging_enabled
         self.set_logging(False)
         self.stop_event.set()
         process = self.process
@@ -410,6 +417,8 @@ class _DisplaySession:
                     process.wait(timeout=2)
         if self.thread is not None and self.thread is not threading.current_thread():
             self.thread.join(timeout=2)
+        if was_logging:
+            self.show_logging_status("Logging stopped")
         self.g_vars.pop("channel_utilization_session", None)
         self.g_vars.pop("page_exit_handler", None)
         self.g_vars.pop("page_up_handler", None)
@@ -430,6 +439,20 @@ class _DisplaySession:
 
     def ignore_auxiliary_button(self) -> None:
         """Override an FPMS shortcut button while this page owns the display."""
+
+    def show_logging_status(self, message: str) -> None:
+        self.show_status(
+            _logging_status_message(
+                message,
+                band=self.band,
+                channel=self.channel,
+            )
+        )
+
+    def show_status(self, message: str) -> None:
+        """Overlay a message, then restore the same display screen and state."""
+        with self.frame_lock:
+            _display_page_status(self.g_vars, message)
 
     def save_screenshot(self) -> Optional[Path]:
         """Save the currently composed FPMS screen without changing runtime state."""
@@ -458,6 +481,7 @@ class _DisplaySession:
             return None
         finally:
             temporary.unlink(missing_ok=True)
+        self.show_status(f"Screenshot saved: {LOG_DIR}")
         return output
 
     def _navigate(self, offset: int) -> None:
@@ -935,12 +959,47 @@ def _display_logging_status(
     band: str,
     channel: int,
 ) -> None:
+    _display_status(
+        g_vars,
+        _logging_status_message(message, band=band, channel=channel),
+    )
+
+
+def _logging_status_message(message: str, *, band: str, channel: int) -> str:
     frequency = _frequency_mhz(band, channel)
-    _display_status(g_vars, f"{message}: Ch {channel} {frequency} MHz")
+    return (
+        f"{message}: Ch {channel} {frequency} MHz "
+        f"Log folder: {LOG_DIR}"
+    )
 
 
 def _display_status(g_vars: dict[str, object], message: str) -> None:
     """Briefly overlay a status message, then restore the active FPMS menu."""
+    _display_overlay(
+        g_vars,
+        message,
+        restore_display_state="menu",
+        reset_result_cache=True,
+    )
+
+
+def _display_page_status(g_vars: dict[str, object], message: str) -> None:
+    """Briefly overlay a status message, then restore the active app page."""
+    _display_overlay(
+        g_vars,
+        message,
+        restore_display_state="page",
+        reset_result_cache=False,
+    )
+
+
+def _display_overlay(
+    g_vars: dict[str, object],
+    message: str,
+    *,
+    restore_display_state: str,
+    reset_result_cache: bool,
+) -> None:
     image = g_vars.get("image")
     draw = g_vars.get("draw")
     saved_image = None
@@ -971,5 +1030,6 @@ def _display_status(g_vars: dict[str, object], message: str) -> None:
                 oled.drawImage(saved_image)
         finally:
             g_vars["drawing_in_progress"] = False
-            g_vars["display_state"] = "menu"
-            g_vars["result_cache"] = False
+            g_vars["display_state"] = restore_display_state
+            if reset_result_cache:
+                g_vars["result_cache"] = False

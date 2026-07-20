@@ -198,16 +198,19 @@ Apps
 5. Press left and confirm capture exits and the selected channel menu returns.
 6. While a display is active, confirm the first two auxiliary buttons do
    nothing. Press the third auxiliary button and confirm a timestamped PNG for
-   the active screen appears in `/var/log/wlanpi-beacon-live`.
-7. Open `Display + Log`, wait several seconds, exit left, and confirm a CSV and
-   JSONL file exist:
+   the active screen appears in `/var/log/wlanpi-beacon-live`. Confirm the
+   brief saved-folder message clears back to the same screen.
+7. Open `Display + Log`; confirm its brief start message includes the log
+   folder. Wait several seconds, exit left, confirm the stop message, and
+   confirm a CSV and JSONL file exist:
 
    ```bash
    sudo ls -l /var/log/wlanpi-beacon-live
    ```
 
 8. Use `Start Logging`; confirm no graph page opens. Then use `Stop Logging` and
-   confirm the child exits and files are closed.
+   confirm both messages include the log folder, the child exits, and files are
+   closed.
 9. Confirm no unexpected capture child remains:
 
    ```bash

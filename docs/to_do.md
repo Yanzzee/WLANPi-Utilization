@@ -33,7 +33,7 @@ Features & changes
         retries - local only
         beacon count - local only, add to retries or separate screen
         clients - both - use unique MAC addresses
-11. screenshot on device
+11. DONE    screenshot on device
         * when a button is pressed, take the current rendered screen image
         * write it to a PNG file on disk in the /var/log/wlanpi-beacon-live folder
         * name it with a timestamp, screen name, and maybe channel/BSSID
@@ -48,7 +48,7 @@ Features & changes
 14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. optimize code for processor utilization and/or use multithreading for multiple cores
 16. DONE    change the channel screen label to "Utilization"
-17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? 
+17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? is this needed?
         consider how to tie what metric is used to select the displayed BSSID, likely color
         this is for RSSI except some screens
             stations
@@ -69,8 +69,8 @@ Features & changes
         alternatively, we could look at all BSSIDs collectively, including those that are far away, but there will be a higher probability that beacons are not received because they are too weak to be demodulated, not because they were dropped because of contention.
 22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Mist, Ubiquiti, etc
         add better discovery if possible - MLD identity, controller identifiers, richer vendor-specific device IDs ?
-23. reorder screens in a logical way
-24. logging only seems to be broken
+23. DONE    reorder screens in a logical way
+24. DONE    logging only seems to be broken
         stop logging does not work
         start logging hangs for a second before the screen can be navigated again
         add a status as it starts or change the menu to change text
