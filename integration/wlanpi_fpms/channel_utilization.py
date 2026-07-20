@@ -23,6 +23,8 @@ NAVIGATION_DEBOUNCE_SECONDS = 0.2
 
 _WHITE = (255, 255, 255)
 _DEFAULT_METRIC_COLOR = (0, 220, 120)
+_TEXT_LINE_TOPS = (1, 17, 33, 49, 65, 81, 97, 113)
+_TEXT_WIDTH = 124
 
 _24_GHZ_CHANNELS = tuple(range(1, 15))
 _5_GHZ_CHANNELS = (
@@ -309,25 +311,32 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         frame = source.convert("RGB").copy()
     state = _read_display_state(frame_path.with_suffix(".json"))
     draw = ImageDraw.Draw(frame)
-    font = _select_scanner_font(draw, state, SMART_FONT, ImageFont)
-    metadata = _select_metadata(draw, state, font)
+    fonts = _scanner_font_candidates(SMART_FONT, ImageFont)
+    metadata, metadata_font = _select_metadata_font(draw, state, fonts)
     _draw_metric_text(
         draw,
         1,
-        3,
+        _TEXT_LINE_TOPS[0],
         metadata,
-        font,
+        metadata_font,
         state["metric_color"],
         metric_token_count=state["metadata_metric_token_count"],
         metric_tokens_at_end=True,
         gap=3,
     )
+    summary_font = _select_metric_line_font(
+        draw,
+        str(state["summary"]),
+        fonts,
+        max_width=_TEXT_WIDTH,
+        gap=3,
+    )
     _draw_metric_text(
         draw,
         2,
-        17,
+        _TEXT_LINE_TOPS[1],
         state["summary"],
-        font,
+        summary_font,
         state["metric_color"],
         metric_token_count=state["summary_metric_token_count"],
         metric_tokens_at_end=False,
@@ -335,34 +344,54 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
     )
     if state["text_only"]:
         for top_y, detail_line in zip(
-            (33, 49, 65, 81),
+            _TEXT_LINE_TOPS[2:6],
             state["detail_lines"],
         ):
+            detail_text = str(detail_line)
+            detail_font = _select_text_line_font(
+                draw,
+                detail_text,
+                fonts,
+                max_width=_TEXT_WIDTH,
+            )
             _draw_text_top(
                 draw,
                 2,
                 top_y,
-                _truncate_text(draw, str(detail_line), font, 124),
-                font,
+                _truncate_text(
+                    draw,
+                    detail_text,
+                    detail_font,
+                    _TEXT_WIDTH,
+                ),
+                detail_font,
                 _WHITE,
             )
+    ssid_font = fonts[0]
     _draw_left_right(
         draw,
         2,
-        98,
+        _TEXT_LINE_TOPS[6],
         state["ssid"],
         state["rssi"],
-        font,
+        ssid_font,
         _WHITE,
         truncate_left=True,
+    )
+    bssid_font = _select_left_right_font(
+        draw,
+        str(state["bssid"]),
+        str(state["channel"]),
+        fonts,
+        max_width=_TEXT_WIDTH,
     )
     _draw_left_right(
         draw,
         2,
-        114,
+        _TEXT_LINE_TOPS[7],
         state["bssid"],
         state["channel"],
-        font,
+        bssid_font,
         _WHITE,
         truncate_left=False,
     )
@@ -465,49 +494,70 @@ def _atomic_write_text(path: Path, payload: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _select_scanner_font(draw, state, smart_font, image_font_module):
-    """Use the 10 px Scanner font, with 9/8 px safety fallbacks."""
+def _scanner_font_candidates(smart_font, image_font_module):
+    """Return Scanner fonts in the preferred per-line size order."""
     font_path = getattr(smart_font, "path", None)
-    candidates = (
-        [image_font_module.truetype(font_path, size) for size in (10, 9, 8)]
-        if font_path is not None
-        else [smart_font]
+    if font_path is None:
+        return (smart_font,)
+    return tuple(
+        image_font_module.truetype(font_path, size) for size in (10, 9, 8)
     )
 
-    for font in candidates:
-        if _font_fits(draw, state, font):
-            return font
-    return candidates[-1]
 
-
-def _font_fits(draw, state: dict[str, object], font) -> bool:
-    width = 124
-    if _compact_text_width(draw, str(state["summary"]), font, gap=3) > width:
-        return False
-    if not any(
-        _compact_text_width(draw, candidate, font, gap=3) <= 126
-        for candidate in state["metadata_candidates"]
-    ):
-        return False
-    if any(
-        _text_width(draw, str(line), font) > width
-        for line in state.get("detail_lines", [])
-    ):
-        return False
-    footer_width = (
-        _text_width(draw, str(state["bssid"]), font)
-        + 4
-        + _text_width(draw, str(state["channel"]), font)
-    )
-    return footer_width <= width
-
-
-def _select_metadata(draw, state: dict[str, object], font) -> str:
+def _select_metadata_font(draw, state: dict[str, object], fonts):
+    """Prefer a shorter metadata label at size 10 before shrinking it."""
     candidates = state["metadata_candidates"]
-    for candidate in candidates:
-        if _compact_text_width(draw, candidate, font, gap=3) <= 126:
-            return candidate
-    return str(candidates[-1])
+    for font in fonts:
+        for candidate in candidates:
+            if _compact_text_width(draw, candidate, font, gap=3) <= 126:
+                return candidate, font
+    return str(candidates[-1]), fonts[-1]
+
+
+def _select_metric_line_font(
+    draw,
+    text: str,
+    fonts,
+    *,
+    max_width: int,
+    gap: int,
+):
+    for font in fonts:
+        if _compact_text_width(draw, text, font, gap=gap) <= max_width:
+            return font
+    return fonts[-1]
+
+
+def _select_text_line_font(
+    draw,
+    text: str,
+    fonts,
+    *,
+    max_width: int,
+):
+    for font in fonts:
+        if _text_width(draw, text, font) <= max_width:
+            return font
+    return fonts[-1]
+
+
+def _select_left_right_font(
+    draw,
+    left: str,
+    right: str,
+    fonts,
+    *,
+    max_width: int,
+):
+    for font in fonts:
+        width = (
+            _text_width(draw, left, font)
+            + 4
+            + _text_width(draw, right, font)
+        )
+        if width <= max_width:
+            return font
+    return fonts[-1]
 
 
 def _draw_metric_text(

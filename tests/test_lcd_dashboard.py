@@ -303,10 +303,10 @@ def test_lcd_composition_screen_writes_eight_line_text_state_without_graph(
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
     assert state["screen_id"] == COMPOSITION_SCREEN_ID
     assert state["metadata"] == "5180MHz Composition"
-    assert state["summary"] == "BSSIDs 2 QBSS BSSIDs 2"
+    assert state["summary"] == "BSSIDs 2 QBSS 2"
     assert state["detail_lines"] == [
         "Est Radios 1",
-        "Strongest Radio BSSIDs 2",
+        "Radio BSSIDs 2",
         "AP Name Room-101",
         "Vendor Example Wireless",
     ]

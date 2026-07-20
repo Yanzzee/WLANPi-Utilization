@@ -174,59 +174,119 @@ def test_launch_failure_is_reported_without_leaving_session(
         ("2484MHz Retries", "RET <1% AVG <1% MAX <1%"),
     ],
 )
-def test_all_screen_text_allows_ten_pixel_scanner_font(
+def test_all_screen_header_lines_allow_ten_pixel_scanner_font(
     metadata: str,
     summary: str,
 ) -> None:
     state = _font_state(metadata=metadata, summary=summary)
     smart_font = _FakeFont(size=10, path="scanner.ttf", character_width=6)
-
-    selected = channel_utilization._select_scanner_font(
-        _FakeDraw(),
-        state,
+    fonts = channel_utilization._scanner_font_candidates(
         smart_font,
         _FakeImageFontModule,
     )
 
-    assert selected.size == 10
+    _, metadata_font = channel_utilization._select_metadata_font(
+        _FakeDraw(),
+        state,
+        fonts,
+    )
+    summary_font = channel_utilization._select_metric_line_font(
+        _FakeDraw(),
+        summary,
+        fonts,
+        max_width=124,
+        gap=3,
+    )
+
+    assert metadata_font.size == 10
+    assert summary_font.size == 10
 
 
-def test_three_digit_percentage_uses_nine_pixel_font_fallback() -> None:
+def test_only_three_digit_percentage_line_uses_nine_pixel_font() -> None:
     state = _font_state(
         metadata="2484MHz Admission",
         summary="ADC 100% AVG 100% MIN 100%",
     )
-
-    selected = channel_utilization._select_scanner_font(
-        _FakeDraw(),
-        state,
+    fonts = channel_utilization._scanner_font_candidates(
         _FakeFont(size=10, path="scanner.ttf", character_width=6),
         _FakeImageFontModule,
     )
 
-    assert selected.size == 9
+    _, metadata_font = channel_utilization._select_metadata_font(
+        _FakeDraw(),
+        state,
+        fonts,
+    )
+    summary_font = channel_utilization._select_metric_line_font(
+        _FakeDraw(),
+        str(state["summary"]),
+        fonts,
+        max_width=124,
+        gap=3,
+    )
+
+    assert metadata_font.size == 10
+    assert summary_font.size == 9
 
 
-def test_composition_longest_label_uses_eight_pixel_scanner_font() -> None:
+def test_composition_lines_choose_font_size_independently() -> None:
     state = _font_state(
         metadata="2484MHz Composition",
-        summary="BSSIDs 99 QBSS BSSIDs 99",
+        summary="BSSIDs 99 QBSS 99",
     )
     state["detail_lines"] = [
         "Est Radios 99",
-        "Strongest Radio BSSIDs 99",
+        "Radio BSSIDs 99",
         "AP Name Room-101",
-        "Vendor Example",
+        "Vendor Example Wireless Corporation",
     ]
-
-    selected = channel_utilization._select_scanner_font(
-        _FakeDraw(),
-        state,
+    fonts = channel_utilization._scanner_font_candidates(
         _FakeFont(size=10, path="scanner.ttf", character_width=6),
         _FakeImageFontModule,
     )
 
-    assert selected.size == 8
+    draw = _FakeDraw()
+    selected_sizes = [
+        channel_utilization._select_text_line_font(
+            draw,
+            line,
+            fonts,
+            max_width=124,
+        ).size
+        for line in state["detail_lines"]
+    ]
+
+    assert selected_sizes[:3] == [10, 10, 10]
+    assert selected_sizes[3] == 8
+
+
+def test_text_line_positions_are_evenly_spaced() -> None:
+    positions = channel_utilization._TEXT_LINE_TOPS
+
+    assert positions == (1, 17, 33, 49, 65, 81, 97, 113)
+    assert {
+        current - previous
+        for previous, current in zip(positions, positions[1:])
+    } == {16}
+
+
+def test_ssid_line_keeps_ten_pixel_font_and_truncates() -> None:
+    draw = _FakeDraw()
+    fonts = channel_utilization._scanner_font_candidates(
+        _FakeFont(size=10, path="scanner.ttf", character_width=6),
+        _FakeImageFontModule,
+    )
+    ssid_font = fonts[0]
+    displayed = channel_utilization._truncate_text(
+        draw,
+        "VeryLongNetworkName",
+        ssid_font,
+        40,
+    )
+
+    assert ssid_font.size == 10
+    assert displayed.endswith("…")
+    assert len(displayed) * ssid_font.character_width <= 40
 
 
 def test_metric_text_colors_summary_prefix_and_metadata_suffix() -> None:
@@ -293,9 +353,14 @@ def test_metadata_uses_ordered_frequency_fallbacks_based_on_width() -> None:
     }
     font = _FakeFont(size=10, path="scanner.ttf", character_width=6.1)
 
-    selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
+    selected, selected_font = channel_utilization._select_metadata_font(
+        _FakeDraw(),
+        state,
+        (font,),
+    )
 
     assert selected == "2484 Admission"
+    assert selected_font is font
 
 
 def test_utilization_metadata_never_includes_band_information() -> None:
@@ -313,9 +378,14 @@ def test_utilization_metadata_never_includes_band_information() -> None:
     }
     font = _FakeFont(size=10, path="scanner.ttf", character_width=6)
 
-    selected = channel_utilization._select_metadata(_FakeDraw(), state, font)
+    selected, selected_font = channel_utilization._select_metadata_font(
+        _FakeDraw(),
+        state,
+        (font,),
+    )
 
     assert selected == "2484MHz Utilization"
+    assert selected_font is font
     assert "G" not in selected
 
 

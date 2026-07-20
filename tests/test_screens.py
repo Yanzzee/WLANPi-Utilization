@@ -161,12 +161,12 @@ def test_composition_screen_renders_only_analyzer_snapshot_fields() -> None:
 
     assert view.title == "Composition"
     assert view.metadata_tokens == ("Composition",)
-    assert view.summary == "BSSIDs 2 QBSS BSSIDs 2"
+    assert view.summary == "BSSIDs 2 QBSS 2"
     assert view.text_only
     assert view.graph_points == ()
     assert view.detail_lines == (
         "Est Radios 1",
-        "Strongest Radio BSSIDs 2",
+        "Radio BSSIDs 2",
         "AP Name Room-101",
         "Vendor Example Wireless",
     )

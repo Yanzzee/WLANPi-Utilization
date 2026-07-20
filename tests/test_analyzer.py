@@ -239,12 +239,23 @@ def test_composition_snapshot_selects_strongest_radio_and_rotates_members() -> N
     assert first.displayed_rssi_dbm == -35
 
     analyzer.advance(1002, None)
-    second = analyzer.snapshot.composition
-    assert second.displayed_ssid is None
-    assert second.displayed_bssid == "00:11:22:33:44:51"
-    assert second.displayed_rssi_dbm == -37
+    one_second_later = analyzer.snapshot.composition
+    assert one_second_later.displayed_ssid == "Alpha"
+    assert one_second_later.displayed_bssid == "00:11:22:33:44:50"
 
     analyzer.advance(1003, None)
+    two_seconds_later = analyzer.snapshot.composition
+    assert two_seconds_later.displayed_ssid is None
+    assert two_seconds_later.displayed_bssid == "00:11:22:33:44:51"
+    assert two_seconds_later.displayed_rssi_dbm == -37
+
+    analyzer.advance(1004, None)
+    assert (
+        analyzer.snapshot.composition.displayed_bssid
+        == "00:11:22:33:44:51"
+    )
+
+    analyzer.advance(1005, None)
     assert (
         analyzer.snapshot.composition.displayed_bssid
         == "00:11:22:33:44:50"

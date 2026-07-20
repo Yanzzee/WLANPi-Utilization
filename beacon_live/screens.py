@@ -127,7 +127,7 @@ class CompositionScreen:
             metadata_tokens=("Composition",),
             summary=(
                 f"BSSIDs {composition.bssid_count} "
-                f"QBSS BSSIDs {composition.qbss_bssid_count}"
+                f"QBSS {composition.qbss_bssid_count}"
             ),
             graph_label="",
             graph_points=(),
@@ -144,7 +144,7 @@ class CompositionScreen:
             detail_lines=(
                 f"Est Radios {composition.estimated_radio_count}",
                 (
-                    "Strongest Radio BSSIDs "
+                    "Radio BSSIDs "
                     f"{composition.strongest_radio_bssid_count}"
                 ),
                 (

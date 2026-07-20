@@ -18,6 +18,7 @@ from beacon_live.radio_grouping import select_strongest_radio
 
 DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
+COMPOSITION_ROTATION_SECONDS = 2
 
 
 def select_bssid(
@@ -111,7 +112,7 @@ class Analyzer:
         self._history_selected_bssid: Optional[str] = None
         self._current_retry_bssid: Optional[str] = None
         self._history_retry_bssid: Optional[str] = None
-        self._composition_second: Optional[int] = None
+        self._composition_rotation_second: Optional[int] = None
         self._strongest_radio_bssids: tuple[str, ...] = ()
         self._composition_display_bssid: Optional[str] = None
         self._snapshot = MetricsSnapshot.empty(window_seconds=window_seconds)
@@ -419,7 +420,7 @@ class Analyzer:
         current_second: int,
     ) -> CompositionSnapshot:
         groups = estimate_radio_groups(states)
-        previous_second = self._composition_second
+        rotation_second = self._composition_rotation_second
         previous_radio_bssids = self._strongest_radio_bssids
 
         strongest = select_strongest_radio(
@@ -428,7 +429,7 @@ class Analyzer:
         )
 
         if strongest is None:
-            self._composition_second = current_second
+            self._composition_rotation_second = None
             self._strongest_radio_bssids = ()
             self._composition_display_bssid = None
             return CompositionSnapshot(
@@ -449,26 +450,34 @@ class Analyzer:
             set(previous_radio_bssids).intersection(strongest.bssids)
         )
         displayed_bssid = self._composition_display_bssid
-        if not radio_unchanged or previous_second is None:
+        if not radio_unchanged or rotation_second is None:
             displayed_bssid = strongest.bssids[0]
-        elif previous_second < current_second:
-            try:
-                previous_index = strongest.bssids.index(displayed_bssid or "")
-            except ValueError:
-                previous_index = -1
-            elapsed_seconds = current_second - previous_second
-            displayed_bssid = strongest.bssids[
-                (previous_index + elapsed_seconds) % len(strongest.bssids)
-            ]
+            rotation_second = current_second
         elif displayed_bssid not in strongest.bssids:
             displayed_bssid = strongest.bssids[0]
+            rotation_second = current_second
+        elif rotation_second < current_second:
+            elapsed_seconds = current_second - rotation_second
+            rotation_steps = elapsed_seconds // COMPOSITION_ROTATION_SECONDS
+            if rotation_steps:
+                previous_index = strongest.bssids.index(displayed_bssid)
+                displayed_bssid = strongest.bssids[
+                    (previous_index + rotation_steps) % len(strongest.bssids)
+                ]
+                rotation_second += (
+                    rotation_steps * COMPOSITION_ROTATION_SECONDS
+                )
+
+        if displayed_bssid is None:
+            displayed_bssid = strongest.bssids[0]
+            rotation_second = current_second
 
         displayed_state = next(
             member
             for member in strongest.members
             if member.bssid == displayed_bssid
         )
-        self._composition_second = current_second
+        self._composition_rotation_second = rotation_second
         self._strongest_radio_bssids = strongest.bssids
         self._composition_display_bssid = displayed_bssid
         return CompositionSnapshot(
