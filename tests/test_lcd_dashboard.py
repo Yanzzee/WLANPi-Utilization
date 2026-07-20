@@ -154,7 +154,7 @@ def test_station_sum_supports_three_digit_values(
             )
         )
     )
-    dashboard.set_active_screen(3)
+    dashboard.set_active_screen(2)
 
     assert dashboard.text_lines[0] == "Stations"
     assert dashboard.text_lines[1] == "SUM 999 MAX 999 TOP --"
@@ -240,12 +240,6 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert _pixel(admission_pixels, latest_x, baseline) == _ADMISSION_GRAPH
 
     assert dashboard.navigate_down(now=1.3)
-    assert dashboard.active_screen_id == COMPOSITION_SCREEN_ID
-    assert dashboard.metric_color == _COMPOSITION_TEXT
-    assert dashboard.text_lines[0] == "5180MHz Composition"
-    assert dashboard.graph_data == ()
-
-    assert dashboard.navigate_down(now=1.6)
     assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
     assert dashboard.metric_color == _STATION_GRAPH
     assert dashboard.text_lines[0] == "5180MHz Stations"
@@ -255,6 +249,14 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     station_pixels = dashboard.render().split(b"\n", 3)[3]
     assert _pixel(station_pixels, latest_x, baseline) == _STATION_GRAPH
     assert len({_CU_GRAPH, _ADMISSION_GRAPH, _STATION_GRAPH}) == 3
+
+    assert dashboard.navigate_down(now=1.6)
+    assert dashboard.active_screen_id == RETRY_SCREEN_ID
+    assert dashboard.navigate_down(now=1.9)
+    assert dashboard.active_screen_id == COMPOSITION_SCREEN_ID
+    assert dashboard.metric_color == _COMPOSITION_TEXT
+    assert dashboard.text_lines[0] == "5180MHz Composition"
+    assert dashboard.graph_data == ()
     assert dashboard.snapshot is snapshot
 
 
@@ -297,7 +299,7 @@ def test_lcd_composition_screen_writes_eight_line_text_state_without_graph(
             vendor="Example Wireless",
         )
     )
-    dashboard.set_active_screen(2)
+    dashboard.set_active_screen(4)
     dashboard.refresh(analyzer.snapshot)
 
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
@@ -332,7 +334,7 @@ def test_total_station_graph_truncates_over_64_and_colors_overflow_red(
             _stats(1001, 50.0, 128, station_count=65),
         )
     )
-    dashboard.set_active_screen(3)
+    dashboard.set_active_screen(2)
 
     pixel_data = dashboard.render().split(b"\n", 3)[3]
     latest_x = GRAPH_X + GRAPH_WIDTH - 1
@@ -356,7 +358,7 @@ def test_lcd_retry_screen_renders_shared_retry_history_and_top_bssid(
     )
     snapshot = _retry_snapshot()
     dashboard.update(snapshot)
-    dashboard.set_active_screen(4)
+    dashboard.set_active_screen(3)
 
     assert dashboard.active_screen_id == RETRY_SCREEN_ID
     assert dashboard.metric_color == _RETRY_GRAPH
@@ -385,7 +387,7 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     control = frame.with_suffix(".control.json")
     dashboard = LcdDashboard(frame, band="5", channel="36")
     snapshot = _phase_two_snapshot()
-    control.write_text('{"active_screen_offset":3}', encoding="utf-8")
+    control.write_text('{"active_screen_offset":2}', encoding="utf-8")
 
     dashboard.refresh(snapshot)
 
@@ -394,7 +396,7 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     assert [row.second for row in dashboard.snapshot.history] == [1000, 1001]
     state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
     assert state["screen_id"] == TOTAL_STATION_COUNT_SCREEN_ID
-    assert state["screen_index"] == 3
+    assert state["screen_index"] == 2
     assert state["screen_count"] == 5
 
 

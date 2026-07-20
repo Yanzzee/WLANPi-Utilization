@@ -150,7 +150,7 @@ exclusions, eligible denominator, retry numerator/percentage, and footer
 selection. A blank percentage means no eligible frames; `0.000000` means
 eligible frames existed with no Retry bit set.
 
-See [screens.md](screens.md#5-retries) for the metric rules.
+See [screens.md](screens.md#4-retries) for the metric rules.
 
 ## Copy artifacts to another machine
 
@@ -191,27 +191,30 @@ Apps
 
 1. Select a channel with known AP beacon activity and open `Display`.
 2. Confirm the Utilization graph gains samples as new capture seconds complete.
-3. Use up/down to visit Utilization, Admission, Composition, Stations, and
-   Retries.
+3. Use up/down to visit Utilization, Admission, Stations, Retries, and
+   Composition.
 4. Return to earlier screens and confirm their two-minute histories continued
    while inactive.
 5. Press left and confirm capture exits and the selected channel menu returns.
-6. Open `Display + Log`, wait several seconds, exit left, and confirm a CSV and
+6. While a display is active, confirm the first two auxiliary buttons do
+   nothing. Press the third auxiliary button and confirm a timestamped PNG for
+   the active screen appears in `/var/log/wlanpi-beacon-live`.
+7. Open `Display + Log`, wait several seconds, exit left, and confirm a CSV and
    JSONL file exist:
 
    ```bash
    sudo ls -l /var/log/wlanpi-beacon-live
    ```
 
-7. Use `Start Logging`; confirm no graph page opens. Then use `Stop Logging` and
+8. Use `Start Logging`; confirm no graph page opens. Then use `Stop Logging` and
    confirm the child exits and files are closed.
-8. Confirm no unexpected capture child remains:
+9. Confirm no unexpected capture child remains:
 
    ```bash
    pgrep -af 'wlanpi-beacon-live|tshark'
    ```
 
-9. Inspect FPMS service output for errors:
+10. Inspect FPMS service output for errors:
 
    ```bash
    sudo journalctl -u wlanpi-fpms -n 100 --no-pager

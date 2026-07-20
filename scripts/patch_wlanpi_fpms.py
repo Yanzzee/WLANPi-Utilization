@@ -110,6 +110,13 @@ def _patch_buttons(path: Path) -> None:
         handler_name="page_down_handler",
         path=path,
     )
+    for button_number in (1, 2, 3):
+        text = _insert_page_navigation_handler(
+            text,
+            method_name=f"menu_key{button_number}",
+            handler_name=f"page_key{button_number}_handler",
+            path=path,
+        )
     if text != original:
         _write_with_backup(path, text)
 

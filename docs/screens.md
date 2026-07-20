@@ -18,6 +18,8 @@ All screens render from the same immutable analyzer snapshot and the same
 - Missing values appear as `--`, an unavailable message, or a graph gap.
 - Footer identities are selected automatically. Users never choose an SSID or
   BSSID.
+- The first two auxiliary buttons are disabled while a display is active. The
+  third saves a PNG of the current screen without changing display state.
 
 The first two rows show the tuned frequency/screen name and a metric summary.
 Graph screens use the middle 120×64 region. The bottom rows show the selected
@@ -55,28 +57,7 @@ Summary fields:
 Admission capacity is beacon-advertised information, not a local capacity test.
 Unavailable values remain gaps and do not become zero.
 
-## 3. Composition
-
-Composition is a text screen describing the channel rather than a graph.
-
-It shows:
-
-- `BSSIDs`: BSSIDs with beacons currently retained in the rolling window;
-- `QBSS`: retained BSSIDs advertising QBSS information;
-- `Est Radios`: best-effort estimated physical-radio count;
-- `Radio BSSIDs`: BSSIDs grouped with the strongest estimated radio;
-- `AP Name`: supported vendor AP-name information when present;
-- `Vendor`: supported vendor identification when present.
-
-The footer cycles every two seconds through BSSIDs grouped with the strongest
-estimated radio. Radio grouping is an estimate: BSSIDs are compared using OUI,
-AP-name, RSSI, and related-MAC clues. Missing vendor information or unusual
-BSSID allocation can prevent accurate grouping.
-
-See [Radio grouping](architecture.md#radio-grouping) for the implemented
-heuristics.
-
-## 4. Stations
+## 3. Stations
 
 Stations sums the latest QBSS station count advertised by every retained BSSID.
 It does not count client MAC addresses observed over the air.
@@ -94,7 +75,7 @@ The graph uses a fixed 0–64 station scale. Values above 64 reach the graph
 ceiling and use the overflow color. Counts above 999 display as `∞` in the
 compact text layout, while snapshots and logs retain the uncapped number.
 
-## 5. Retries
+## 4. Retries
 
 Retries graphs one independent percentage for each completed capture second:
 
@@ -140,6 +121,27 @@ Known BSSIDs are associated with eligible frames through BSSID, TA, RA, SA, or
 DA fields. The footer chooses the BSSID with the highest retry percentage for
 the second. It keeps the prior footer if percentages tie and uses the strongest
 beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
+
+## 5. Composition
+
+Composition is a text screen describing the channel rather than a graph.
+
+It shows:
+
+- `BSSIDs`: BSSIDs with beacons currently retained in the rolling window;
+- `QBSS`: retained BSSIDs advertising QBSS information;
+- `Est Radios`: best-effort estimated physical-radio count;
+- `Radio BSSIDs`: BSSIDs grouped with the strongest estimated radio;
+- `AP Name`: supported vendor AP-name information when present;
+- `Vendor`: supported vendor identification when present.
+
+The footer cycles every two seconds through BSSIDs grouped with the strongest
+estimated radio. Radio grouping is an estimate: BSSIDs are compared using OUI,
+AP-name, RSSI, and related-MAC clues. Missing vendor information or unusual
+BSSID allocation can prevent accurate grouping.
+
+See [Radio grouping](architecture.md#radio-grouping) for the implemented
+heuristics.
 
 ## QBSS source selection
 

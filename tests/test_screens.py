@@ -32,15 +32,15 @@ def test_screen_navigation_wraps_and_debounces_without_changing_snapshot() -> No
     assert not manager.navigate_down(now=10.1)
     assert manager.active_screen_id == ADMISSION_CAPACITY_SCREEN_ID
     assert manager.navigate_down(now=10.3)
-    assert manager.active_screen_id == COMPOSITION_SCREEN_ID
-    assert manager.navigate_down(now=10.6)
     assert manager.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
-    assert manager.navigate_down(now=10.9)
+    assert manager.navigate_down(now=10.6)
     assert manager.active_screen_id == RETRY_SCREEN_ID
+    assert manager.navigate_down(now=10.9)
+    assert manager.active_screen_id == COMPOSITION_SCREEN_ID
     assert manager.navigate_down(now=11.2)
     assert manager.active_screen_id == CU_SCREEN_ID
     assert manager.navigate_up(now=11.5)
-    assert manager.active_screen_id == RETRY_SCREEN_ID
+    assert manager.active_screen_id == COMPOSITION_SCREEN_ID
 
     assert manager.snapshot is snapshot
     assert manager.snapshot.history is snapshot.history
@@ -211,7 +211,7 @@ def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:
     analyzer = _analyzer_with_history()
     analyzer_identity = id(analyzer)
     manager = ScreenManager(snapshot=analyzer.snapshot, debounce_seconds=0)
-    manager.set_active_index(3)
+    manager.set_active_index(2)
     original_seconds = tuple(row.second for row in manager.snapshot.history)
 
     analyzer.ingest(

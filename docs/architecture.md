@@ -170,14 +170,18 @@ five screen definitions are pure renderers over a snapshot:
 
 1. Utilization
 2. Admission
-3. Composition
-4. Stations
-5. Retries
+3. Stations
+4. Retries
+5. Composition
 
 Up/down navigation changes the index with wraparound and a 0.2-second debounce.
 It does not reset analyzer state. The LCD renderer writes a PPM frame and JSON
 display state; the thin FPMS adapter owns GPIO/menu integration and draws those
-artifacts on the device display.
+artifacts on the device display. While the display page is active, the adapter
+overrides all three FPMS auxiliary buttons: the first two are no-ops and the
+third atomically saves a PNG copy of the current composed screen in the FPMS
+log directory. Screenshot capture does not change the active renderer or
+analyzer state.
 
 See [screens.md](screens.md) for exact metric and presentation behavior.
 

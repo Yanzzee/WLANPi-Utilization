@@ -8,10 +8,12 @@ in the ``beacon_live`` package launched as a child process.
 from __future__ import annotations
 
 import json
+import re
 import signal
 import subprocess
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -205,10 +207,12 @@ class ChannelUtilizationApp:
         *,
         popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = datetime.now,
     ) -> None:
         self.g_vars = g_vars
         self.popen = popen
         self.clock = clock
+        self.wall_clock = wall_clock
 
     def launch(self, *, band: str, channel: int, logging: bool) -> None:
         logging_only_session = self.g_vars.get(
@@ -238,6 +242,7 @@ class ChannelUtilizationApp:
                 logging_enabled=logging,
                 popen=self.popen,
                 clock=self.clock,
+                wall_clock=self.wall_clock,
             )
             self.g_vars["channel_utilization_session"] = session
             try:
@@ -255,6 +260,9 @@ class ChannelUtilizationApp:
         self.g_vars["page_exit_handler"] = session.stop
         self.g_vars["page_up_handler"] = session.navigate_up
         self.g_vars["page_down_handler"] = session.navigate_down
+        self.g_vars["page_key1_handler"] = session.ignore_auxiliary_button
+        self.g_vars["page_key2_handler"] = session.ignore_auxiliary_button
+        self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
 
@@ -349,6 +357,7 @@ class _DisplaySession:
         logging_enabled: bool,
         popen: Callable[..., subprocess.Popen[bytes]],
         clock: Callable[[], float],
+        wall_clock: Callable[[], datetime],
     ) -> None:
         self.g_vars = g_vars
         self.command = command
@@ -357,11 +366,14 @@ class _DisplaySession:
         self.logging_enabled = logging_enabled
         self.popen = popen
         self.clock = clock
+        self.wall_clock = wall_clock
         self.process: Optional[subprocess.Popen[bytes]] = None
         self.stop_event = threading.Event()
+        self.frame_lock = threading.Lock()
         self.thread: Optional[threading.Thread] = None
         self.exit_reported = False
         self.screen_offset = 0
+        self.current_screen_name: Optional[str] = None
         self.last_navigation_ts: Optional[float] = None
 
     @property
@@ -402,6 +414,9 @@ class _DisplaySession:
         self.g_vars.pop("page_exit_handler", None)
         self.g_vars.pop("page_up_handler", None)
         self.g_vars.pop("page_down_handler", None)
+        self.g_vars.pop("page_key1_handler", None)
+        self.g_vars.pop("page_key2_handler", None)
+        self.g_vars.pop("page_key3_handler", None)
 
     def set_logging(self, enabled: bool) -> None:
         _write_logging_enabled(enabled)
@@ -412,6 +427,38 @@ class _DisplaySession:
 
     def navigate_down(self) -> None:
         self._navigate(1)
+
+    def ignore_auxiliary_button(self) -> None:
+        """Override an FPMS shortcut button while this page owns the display."""
+
+    def save_screenshot(self) -> Optional[Path]:
+        """Save the currently composed FPMS screen without changing runtime state."""
+        with self.frame_lock:
+            screen_name = self.current_screen_name
+            if screen_name is None:
+                return None
+            image = self.g_vars.get("image")
+            try:
+                screenshot = image.copy()  # type: ignore[union-attr]
+            except (AttributeError, OSError):
+                return None
+
+        timestamp = self.wall_clock().strftime("%Y%m%d-%H%M%S-%f")
+        frequency = _frequency_mhz(self.band, self.channel)
+        safe_screen_name = _filename_component(screen_name)
+        output = LOG_DIR / (
+            f"{timestamp}_{safe_screen_name}_{frequency}MHz.png"
+        )
+        temporary = output.with_name(f".{output.name}.tmp")
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            screenshot.save(temporary, format="PNG")
+            temporary.replace(output)
+        except (AttributeError, OSError, ValueError):
+            return None
+        finally:
+            temporary.unlink(missing_ok=True)
+        return output
 
     def _navigate(self, offset: int) -> None:
         now = self.clock()
@@ -439,7 +486,9 @@ class _DisplaySession:
             try:
                 modified_ns = FRAME_PATH.stat().st_mtime_ns
                 if modified_ns != last_modified_ns:
-                    _draw_frame(self.g_vars, FRAME_PATH)
+                    with self.frame_lock:
+                        state = _draw_frame(self.g_vars, FRAME_PATH)
+                        self.current_screen_name = str(state["screen_title"])
                     last_modified_ns = modified_ns
             except (FileNotFoundError, OSError):
                 pass
@@ -483,7 +532,10 @@ class _LoggingOnlySession:
         _stop_process(self.process)
 
 
-def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
+def _draw_frame(
+    g_vars: dict[str, object],
+    frame_path: Path,
+) -> dict[str, object]:
     from PIL import Image, ImageDraw, ImageFont
 
     import fpms.modules.wlanpi_oled as oled
@@ -585,10 +637,13 @@ def _draw_frame(g_vars: dict[str, object], frame_path: Path) -> None:
         oled.drawImage(frame)
     finally:
         g_vars["drawing_in_progress"] = False
+    return state
 
 
 def _read_display_state(path: Path) -> dict[str, object]:
     defaults = {
+        "screen_id": "channel",
+        "screen_title": "Channel",
         "metadata": "Channel",
         "metadata_candidates": ["Channel"],
         "metadata_metric_token_count": 1,
@@ -664,6 +719,11 @@ def _read_metric_color(value: object) -> tuple[int, int, int]:
 
 def _screen_control_path(frame_path: Path) -> Path:
     return frame_path.with_suffix(".control.json")
+
+
+def _filename_component(value: str) -> str:
+    component = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
+    return component or "screen"
 
 
 def _logging_control_path() -> Path:

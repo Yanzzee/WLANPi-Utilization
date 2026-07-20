@@ -1,5 +1,6 @@
 import json
 import signal
+from datetime import datetime
 from pathlib import Path
 from types import FunctionType
 from typing import Optional
@@ -231,6 +232,64 @@ def test_left_exit_handler_interrupts_child_and_clears_session(
     assert "page_exit_handler" not in g_vars
     assert "page_up_handler" not in g_vars
     assert "page_down_handler" not in g_vars
+    assert "page_key1_handler" not in g_vars
+    assert "page_key2_handler" not in g_vars
+    assert "page_key3_handler" not in g_vars
+
+
+def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    monkeypatch.setattr(channel_utilization, "LOG_DIR", log_dir)
+    processes: list[_FakeProcess] = []
+
+    def fake_popen(command: list[str]) -> _FakeProcess:
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    g_vars: dict[str, object] = {
+        "display_state": "menu",
+        "image": _FakeScreenshotImage(b"current-screen"),
+    }
+    app = channel_utilization.ChannelUtilizationApp(
+        g_vars,
+        popen=fake_popen,
+        wall_clock=lambda: datetime(2026, 7, 20, 14, 30, 5, 123456),
+    )
+    app.launch(band="5", channel=36, logging=True)
+    session = g_vars["channel_utilization_session"]
+    session.current_screen_name = "Retry Percentage"
+
+    key1 = g_vars["page_key1_handler"]
+    key2 = g_vars["page_key2_handler"]
+    key3 = g_vars["page_key3_handler"]
+    assert callable(key1)
+    assert callable(key2)
+    assert callable(key3)
+    assert key1() is None
+    assert key2() is None
+    assert key3() == log_dir / (
+        "20260720-143005-123456_retry-percentage_5180MHz.png"
+    )
+
+    screenshots = list(log_dir.glob("*.png"))
+    assert [path.name for path in screenshots] == [
+        "20260720-143005-123456_retry-percentage_5180MHz.png"
+    ]
+    assert screenshots[0].read_bytes() == b"current-screen"
+    assert g_vars["display_state"] == "page"
+    assert processes[0].poll() is None
+    assert session.screen_offset == 0
+    assert json.loads(
+        frame.with_name("logging.control.json").read_text(encoding="utf-8")
+    ) == {"logging_enabled": True}
+
+    session.stop()
 
 
 def test_up_down_navigation_keeps_one_capture_process_and_debounces(
@@ -577,6 +636,18 @@ class _FakeProcess:
 
     def kill(self) -> None:
         self.running = False
+
+
+class _FakeScreenshotImage:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+
+    def copy(self) -> "_FakeScreenshotImage":
+        return _FakeScreenshotImage(self.payload)
+
+    def save(self, path: Path, *, format: str) -> None:
+        assert format == "PNG"
+        path.write_bytes(self.payload)
 
 
 class _FakeFont:

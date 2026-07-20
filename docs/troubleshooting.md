@@ -182,7 +182,7 @@ related BSSID MAC patterns. AP-name fields are vendor-specific and may be
 absent. The Composition screen intentionally favors conservative grouping, so
 it can overcount physical radios rather than merge uncertain BSSIDs.
 
-See [screens.md](screens.md#3-composition) and
+See [screens.md](screens.md#5-composition) and
 [architecture.md](architecture.md#radio-grouping).
 
 ## Retry data is blank or unexpected
@@ -200,7 +200,7 @@ reasons:
   --output-csv /tmp/retry-audit.csv
 ```
 
-See [screens.md](screens.md#5-retries) and the detailed capture procedure in
+See [screens.md](screens.md#4-retries) and the detailed capture procedure in
 [pi_testing.md](pi_testing.md#capture-and-audit-retry-metrics).
 
 ## Logs are missing

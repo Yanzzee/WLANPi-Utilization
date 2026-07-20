@@ -67,7 +67,10 @@ Apps
 While a display is open:
 
 - move up or down to cycle through the five screens;
-- press left to stop capture and return to the menu.
+- press left to stop capture and return to the menu;
+- the first two auxiliary buttons are disabled; and
+- the third auxiliary button saves the current screen as a timestamped PNG in
+  `/var/log/wlanpi-beacon-live`.
 
 Changing screens never restarts capture or clears graph history.
 
@@ -77,9 +80,9 @@ Changing screens never restarts capture or clears graph history.
 | --- | --- |
 | Utilization | Channel utilization advertised by the automatically selected QBSS BSSID. |
 | Admission | The selected BSSID's advertised admission capacity as a percentage. |
-| Composition | BSSID and QBSS counts plus best-effort physical-radio, AP name, and vendor information. |
 | Stations | The sum of AP-advertised QBSS station counts and the BSSID reporting the highest count. |
 | Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
+| Composition | BSSID and QBSS counts plus best-effort physical-radio, AP name, and vendor information. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are
 shown as gaps or `--`. AP-advertised station counts are not observed-client

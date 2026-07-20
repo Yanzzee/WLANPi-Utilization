@@ -250,9 +250,9 @@ class RetryScreen:
 DEFAULT_SCREENS: tuple[ScreenDefinition, ...] = (
     CuScreen(),
     AdmissionCapacityScreen(),
-    CompositionScreen(),
     TotalStationCountScreen(),
     RetryScreen(),
+    CompositionScreen(),
 )
 
 

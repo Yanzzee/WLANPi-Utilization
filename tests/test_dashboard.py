@@ -9,7 +9,7 @@ import pytest
 from beacon_live.dashboard import TerminalDashboard
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
-from beacon_live.screens import TOTAL_STATION_COUNT_SCREEN_ID
+from beacon_live.screens import COMPOSITION_SCREEN_ID
 
 
 def test_dashboard_formats_all_beacon_metrics_without_local_cu() -> None:
@@ -134,17 +134,20 @@ def test_terminal_dashboard_uses_shared_screen_registry() -> None:
     dashboard.navigate_down(now=1.0)
     admission = dashboard.render()
     dashboard.navigate_down(now=1.3)
-    composition = dashboard.render()
-    dashboard.navigate_down(now=1.6)
     station_total = dashboard.render()
+    dashboard.navigate_down(now=1.6)
+    retry = dashboard.render()
+    dashboard.navigate_down(now=1.9)
+    composition = dashboard.render()
 
-    assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert dashboard.active_screen_id == COMPOSITION_SCREEN_ID
     assert "Admission Capacity" in admission
     assert "ADC --" in admission
-    assert "Composition" in composition
-    assert "Est Radios" in composition
     assert "Total Station Count" in station_total
     assert "SUM 12" in station_total
+    assert "Retry Percentage" in retry
+    assert "Composition" in composition
+    assert "Est Radios" in composition
     assert dashboard.snapshot is snapshot
 
 
