@@ -46,7 +46,7 @@ Features & changes
         scan beacons for those radios
         record and show analytics from the study
 14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
-15. optimize code for processor utilization and/or use multithreading for multiple cores
+15. DONE    optimize code for processor utilization and/or use multithreading for multiple cores
         there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
 16. DONE    change the channel screen label to "Utilization"
 17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? is this needed?
@@ -68,7 +68,7 @@ Features & changes
         for all BSSIDs associated with the strongest radio, count all received beacons and divide by the number of expected beacons
         this may need to track beacon timing instead of a simple 10 beacons per second, because it is actually one beacon per 102.4ms. or 10 beacons per 1.024 seconds, or 9.765625 beacons per second. sometimes there will be 9 per second and often there will be 10 per second. this graph may need to be delayed by one second in order to see if the additional beacons were received in the following window
         alternatively, we could look at all BSSIDs collectively, including those that are far away, but there will be a higher probability that beacons are not received because they are too weak to be demodulated, not because they were dropped because of contention.
-22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Mist, Ubiquiti, etc
+22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Arista, Mist, Ubiquiti, etc
         add better discovery if possible - MLD identity, controller identifiers, richer vendor-specific device IDs ?
 23. DONE    reorder screens in a logical way
 24. DONE    logging only seems to be broken
@@ -81,3 +81,5 @@ Features & changes
 26. update the stations TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
         as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS
 27. DONE    include beacons in logging, or remove it if it's useless
+28. make BSSID display behavior uniform wherever it is displayed
+        for highest RSSI BSSID, rotate all at 2 second interval
