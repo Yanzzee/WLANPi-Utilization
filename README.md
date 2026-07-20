@@ -8,7 +8,12 @@ station counts, channel composition, and retry percentage.
 The app automatically chooses the BSSID used for each display. You select only
 the band and channel, not an SSID or BSSID.
 
-![WLANPi Beacon Live utilization screen](docs/images/utilization-cu-screen.png)
+![WLANPi Beacon Live utilization screen](docs/images/channel-utilization_screen.png)
+![WLANPi Beacon Live admission capacity screen](docs/images/admission-capacity_screen.png)
+![WLANPi Beacon Live station count screen](docs/images/total-station-count_screen.png)
+![WLANPi Beacon Live retry screen](docs/images/retry-percentage_screen.png)
+![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
+![WLANPi Beacon Live composition screen](docs/images/composition_screen.png)
 
 ## Requirements
 

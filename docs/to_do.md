@@ -47,6 +47,7 @@ Features & changes
         record and show analytics from the study
 14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. optimize code for processor utilization and/or use multithreading for multiple cores
+        there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
 16. DONE    change the channel screen label to "Utilization"
 17. sync colors for TOP staitons and BSSID, how to signify what BSSID is shown on the bottom? is this needed?
         consider how to tie what metric is used to select the displayed BSSID, likely color
