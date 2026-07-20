@@ -269,14 +269,14 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
         second=1000,
         beacon_received_count=8,
         beacon_expected_count=10,
-        beacon_received_percent=80.0,
+        beacon_loss_percent=20.0,
     )
     current = replace(
         empty.current,
         second=1001,
         beacon_received_count=19,
         beacon_expected_count=20,
-        beacon_received_percent=95.0,
+        beacon_loss_percent=5.0,
     )
     snapshot = replace(
         empty,
@@ -291,7 +291,7 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
             bssids=(),
             received_count=19,
             expected_count=20,
-            received_percent=95.0,
+            loss_percent=5.0,
             displayed_ssid="Alpha",
             displayed_bssid="00:11:22:33:44:50",
             displayed_rssi_dbm=-35,
@@ -300,12 +300,13 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
 
     view = BeaconsScreen().render(snapshot)
 
-    assert view.title == "Beacons"
-    assert view.metadata_tokens == ("Beacons",)
-    assert view.summary == "BC 95% REC 19 EXP 20"
-    assert view.graph_label == "Strongest-radio beacon reception"
+    assert view.title == "Beacon Loss"
+    assert view.metadata_tokens == ("Beacon Loss",)
+    assert view.metadata_metric_token_count == 2
+    assert view.summary == "BL 5% REC 19 EXP 20"
+    assert view.graph_label == "Strongest-radio beacon loss"
     assert view.graph_maximum == 100
-    assert [point.value for point in view.graph_points] == [80.0, 95.0]
+    assert [point.value for point in view.graph_points] == [20.0, 5.0]
     assert view.identity.ssid == "Alpha"
     assert view.identity.bssid == "00:11:22:33:44:50"
     assert view.identity.rssi_dbm == -35

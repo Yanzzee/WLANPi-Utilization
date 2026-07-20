@@ -310,8 +310,8 @@ def test_lcd_navigation_renders_admission_and_total_station_screens(
     assert dashboard.navigate_down(now=1.9)
     assert dashboard.active_screen_id == BEACONS_SCREEN_ID
     assert dashboard.metric_color == _BEACONS_GRAPH
-    assert dashboard.text_lines[0] == "5180MHz Beacons"
-    assert dashboard.text_lines[1].startswith("BC ")
+    assert dashboard.text_lines[0] == "5180MHz Beacon Loss"
+    assert dashboard.text_lines[1].startswith("BL ")
     assert dashboard.navigate_down(now=2.2)
     assert dashboard.active_screen_id == COMPOSITION_SCREEN_ID
     assert dashboard.metric_color == _COMPOSITION_TEXT

@@ -482,7 +482,7 @@ class Analyzer:
                     bssid=bssid,
                     received_count=received,
                     expected_count=expected,
-                    received_percent=_percentage(received, expected),
+                    loss_percent=_beacon_loss_percent(received, expected),
                 )
             )
 
@@ -493,7 +493,10 @@ class Analyzer:
             bssids=tuple(members),
             received_count=received_count,
             expected_count=expected_count,
-            received_percent=_percentage(received_count, expected_count),
+            loss_percent=_beacon_loss_percent(
+                received_count,
+                expected_count,
+            ),
             displayed_ssid=displayed_ssid,
             displayed_bssid=displayed_bssid,
             displayed_rssi_dbm=displayed_rssi_dbm,
@@ -910,8 +913,8 @@ def _stats_from_states(
             if beacon_reception is not None
             else 0
         ),
-        beacon_received_percent=(
-            beacon_reception.received_percent
+        beacon_loss_percent=(
+            beacon_reception.loss_percent
             if beacon_reception is not None
             else None
         ),
@@ -1081,6 +1084,16 @@ def _percentage(numerator: int, denominator: int) -> Optional[float]:
     if denominator <= 0:
         return None
     return numerator / denominator * 100
+
+
+def _beacon_loss_percent(
+    received_count: int,
+    expected_count: int,
+) -> Optional[float]:
+    if expected_count <= 0:
+        return None
+    missing_count = max(0, expected_count - received_count)
+    return missing_count / expected_count * 100
 
 
 def _beacon_reception_counts(

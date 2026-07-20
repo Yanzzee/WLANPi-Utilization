@@ -85,7 +85,7 @@ maintains:
 - per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
 - best-effort radio groups; and
-- per-second strongest-radio beacon reception; and
+- per-second strongest-radio beacon loss; and
 - channel-composition state.
 
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
@@ -166,7 +166,7 @@ prevent grouping. Complete-link compatibility prevents a chain of weak matches
 from collapsing clearly different radios.
 
 AP names and vendor-specific fields are clues, not standardized identities.
-Composition counts and Beacons-screen radio membership must therefore be
+Composition counts and Beacon Loss screen radio membership must therefore be
 treated as estimates.
 
 ## Snapshot model
@@ -193,7 +193,7 @@ six screen definitions are pure renderers over a snapshot:
 2. Admission
 3. Stations
 4. Retries
-5. Beacons
+5. Beacon Loss
 6. Composition
 
 Up/down navigation changes the index with wraparound and a 0.2-second debounce.

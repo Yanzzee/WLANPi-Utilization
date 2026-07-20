@@ -146,22 +146,22 @@ DA fields. The footer chooses the BSSID with the highest retry percentage for
 the second. It keeps the prior footer if percentages tie and uses the strongest
 beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 
-## 5. Beacons
+## 5. Beacon Loss
 
-Beacons graphs the percentage of expected beacons received during each
+Beacon Loss graphs the percentage of expected beacons not received during each
 completed capture second for the strongest estimated radio.
 
 Summary fields:
 
-- `BC`: aggregate received percentage;
+- `BL`: aggregate loss percentage;
 - `REC`: actual beacons received; and
 - `EXP`: beacons expected.
 
 The analyzer applies the existing best-effort radio grouping to every retained
 BSSID, including hidden-SSID BSSIDs and BSSIDs without QBSS information. It
 sums `REC` and `EXP` for all BSSIDs in the strongest group and calculates
-`BC = REC / EXP × 100`. The footer uses the same two-second member rotation as
-Composition.
+`BL = (EXP - REC) / EXP × 100`. The footer uses the same two-second member
+rotation as Composition.
 
 Expected timing assumes a 102.4 ms interval for every BSSID. The last beacon
 before the capture second establishes the schedule phase, so a wall-clock

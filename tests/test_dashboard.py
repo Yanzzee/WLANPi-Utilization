@@ -150,8 +150,8 @@ def test_terminal_dashboard_uses_shared_screen_registry() -> None:
     assert "Total Station Count" in station_total
     assert "SUM 12" in station_total
     assert "Retry Percentage" in retry
-    assert "Beacons" in beacons
-    assert "BC --% REC 0 EXP 0" in beacons
+    assert "Beacon Loss" in beacons
+    assert "BL --% REC 0 EXP 0" in beacons
     assert "Composition" in composition
     assert "Est Radios" in composition
     assert dashboard.snapshot is snapshot

@@ -95,6 +95,7 @@ The stats file contains one row for each emitted capture second. Columns cover:
 - selected QBSS utilization and source identity/RSSI;
 - received, Retry-bit-readable, retry-eligible, and retry-frame counts;
 - retry percentage, selected beacon-rate percentage, and retry footer BSSID;
+- strongest-radio beacon received/expected counts and beacon-loss percentage;
 - optional local survey utilization.
 
 Rows use local ISO-8601 timestamps with offsets and are flushed immediately.

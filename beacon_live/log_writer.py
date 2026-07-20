@@ -35,6 +35,9 @@ STATS_CSV_FIELDS = [
     "retry_frame_count",
     "retry_percent",
     "selected_beacon_rate_percent",
+    "beacon_received_count",
+    "beacon_expected_count",
+    "beacon_loss_percent",
     "top_retry_bssid",
     "local_cu_percent",
 ]
@@ -454,6 +457,11 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
         "retry_percent": _format_optional_float(stats.retry_percent),
         "selected_beacon_rate_percent": _format_optional_float(
             stats.selected_beacon_rate_percent
+        ),
+        "beacon_received_count": stats.beacon_received_count,
+        "beacon_expected_count": stats.beacon_expected_count,
+        "beacon_loss_percent": _format_optional_float(
+            stats.beacon_loss_percent
         ),
         "top_retry_bssid": stats.top_retry_bssid or "",
         "local_cu_percent": _format_optional_float(stats.local_cu_percent),

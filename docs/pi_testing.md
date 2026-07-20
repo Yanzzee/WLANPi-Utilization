@@ -191,7 +191,7 @@ Apps
 
 1. Select a channel with known AP beacon activity and open `Display`.
 2. Confirm the Utilization graph gains samples as new capture seconds complete.
-3. Use up/down to visit Utilization, Admission, Stations, Retries, Beacons,
+3. Use up/down to visit Utilization, Admission, Stations, Retries, Beacon Loss,
    and Composition.
 4. On Stations, generate traffic from one or more associated clients. Confirm
    `MAC` increases only for newly seen client MACs in the two-minute window,

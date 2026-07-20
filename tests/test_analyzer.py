@@ -422,13 +422,13 @@ def test_beacon_reception_uses_all_bssids_on_strongest_radio_including_hidden() 
         (10, 10),
         (9, 10),
     ]
-    assert [member.received_percent for member in beacons.bssids] == pytest.approx(
-        [100.0, 90.0]
+    assert [member.loss_percent for member in beacons.bssids] == pytest.approx(
+        [0.0, 10.0]
     )
     assert beacons.received_count == 19
     assert beacons.expected_count == 20
-    assert beacons.received_percent == pytest.approx(95.0)
-    assert analyzer.snapshot.current.beacon_received_percent == pytest.approx(95.0)
+    assert beacons.loss_percent == pytest.approx(5.0)
+    assert analyzer.snapshot.current.beacon_loss_percent == pytest.approx(5.0)
 
 
 def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop() -> None:

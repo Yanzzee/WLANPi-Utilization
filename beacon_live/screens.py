@@ -269,24 +269,25 @@ class BeaconsScreen:
         graph_points = tuple(
             GraphPoint(
                 second=stats.second,
-                value=stats.beacon_received_percent,
-                display_value=stats.beacon_received_percent,
+                value=stats.beacon_loss_percent,
+                display_value=stats.beacon_loss_percent,
             )
             for stats in snapshot.history
         )
         beacons = snapshot.beacons
         return ScreenView(
             screen_id=self.screen_id,
-            title="Beacons",
-            metadata_tokens=("Beacons",),
+            title="Beacon Loss",
+            metadata_tokens=("Beacon Loss",),
             summary=(
-                f"BC {_whole_percent(beacons.received_percent)}% "
+                f"BL {_whole_percent(beacons.loss_percent)}% "
                 f"REC {beacons.received_count} "
                 f"EXP {beacons.expected_count}"
             ),
-            graph_label="Strongest-radio beacon reception",
+            graph_label="Strongest-radio beacon loss",
             graph_points=graph_points,
             graph_maximum=100,
+            metadata_metric_token_count=2,
             identity=DisplayIdentity(
                 ssid=beacons.displayed_ssid,
                 bssid=beacons.displayed_bssid,

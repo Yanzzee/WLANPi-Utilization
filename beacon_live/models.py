@@ -156,7 +156,7 @@ class SecondStats:
     unique_client_mac_count: int = 0
     beacon_received_count: int = 0
     beacon_expected_count: int = 0
-    beacon_received_percent: Optional[float] = None
+    beacon_loss_percent: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -272,18 +272,18 @@ class BeaconBssidReception:
     bssid: str
     received_count: int
     expected_count: int
-    received_percent: Optional[float]
+    loss_percent: Optional[float]
 
 
 @dataclass(frozen=True)
 class BeaconReceptionSnapshot:
-    """Analyzer-derived strongest-radio state for the Beacons screen."""
+    """Analyzer-derived strongest-radio state for the Beacon Loss screen."""
 
     strongest_radio_bssids: tuple[str, ...]
     bssids: tuple[BeaconBssidReception, ...]
     received_count: int
     expected_count: int
-    received_percent: Optional[float]
+    loss_percent: Optional[float]
     displayed_ssid: Optional[str]
     displayed_bssid: Optional[str]
     displayed_rssi_dbm: Optional[int]
@@ -295,7 +295,7 @@ class BeaconReceptionSnapshot:
             bssids=(),
             received_count=0,
             expected_count=0,
-            received_percent=None,
+            loss_percent=None,
             displayed_ssid=None,
             displayed_bssid=None,
             displayed_rssi_dbm=None,
