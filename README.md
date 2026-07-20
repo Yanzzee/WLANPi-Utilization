@@ -6,7 +6,7 @@ two-minute view of AP-advertised channel utilization, admission capacity,
 station counts, channel composition, and retry percentage.
 
 The app automatically chooses the BSSID used for each display. You select only
-the band and channel—not an SSID or BSSID.
+the band and channel, not an SSID or BSSID.
 
 ![WLANPi Beacon Live utilization screen](docs/images/utilization-cu-screen.png)
 
@@ -79,7 +79,7 @@ Changing screens never restarts capture or clears graph history.
 | Admission | The selected BSSID's advertised admission capacity as a percentage. |
 | Composition | BSSID and QBSS counts plus best-effort physical-radio, AP name, and vendor information. |
 | Stations | The sum of AP-advertised QBSS station counts and the BSSID reporting the highest count. |
-| Retries | The one-second retry percentage for eligible frames heard on the channel. |
+| Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are
 shown as gaps or `--`. AP-advertised station counts are not observed-client

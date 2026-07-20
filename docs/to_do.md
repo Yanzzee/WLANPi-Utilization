@@ -18,8 +18,7 @@ Features & changes
     retries as a percentage of total frames received
     include beacon rate of strongest signal as a percentage of expected (separate screen?)
     list the SSID/BSSID with highest retry rates
-6. Navigation - enable scrolling between screens with up/down on control stick
-    *disable/override other buttons while the display application is running
+6. DONE     Navigation - enable scrolling between screens with up/down on control stick
 7. DONE     Menu - add logging only start/stop without any display
     do any screens need to be a separate menu?
 8. DONE     Documentation
@@ -36,9 +35,10 @@ Features & changes
         clients - both - use unique MAC addresses
 11. screenshot on device
         * when a button is pressed, take the current rendered screen image
-        * write it to a PNG file on disk
+        * write it to a PNG file on disk in the /var/log/wlanpi-beacon-live folder
         * name it with a timestamp, screen name, and maybe channel/BSSID
         * keep the capture/analysis loop running normally
+        * disable/override other buttons while the display application is running
 12. look into the possibility of scanning multiple channels
         probably not very feasible, beacons are 10 per second per BSSID
 13. classroom mode
@@ -70,3 +70,8 @@ Features & changes
 22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Mist, Ubiquiti, etc
         add better discovery if possible - MLD identity, controller identifiers, richer vendor-specific device IDs ?
 23. reorder screens in a logical way
+24. logging only seems to be broken
+        stop logging does not work
+        start logging hangs for a second before the screen can be navigated again
+        add a status as it starts or change the menu to change text
+        add confirmation that logging has stopped - logging channel X has started... etc

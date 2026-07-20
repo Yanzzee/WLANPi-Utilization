@@ -1,6 +1,7 @@
 import json
 import signal
 from pathlib import Path
+from types import FunctionType
 from typing import Optional
 
 import pytest
@@ -86,10 +87,12 @@ def test_start_and_stop_logging_only_owns_one_background_process(
     frame = tmp_path / "display.ppm"
     monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
     processes: list[_FakeProcess] = []
+    launch_options: list[dict[str, object]] = []
 
-    def fake_popen(command: list[str]) -> _FakeProcess:
+    def fake_popen(command: list[str], **kwargs: object) -> _FakeProcess:
         process = _FakeProcess(command)
         processes.append(process)
+        launch_options.append(kwargs)
         return process
 
     app = channel_utilization.ChannelUtilizationApp({}, popen=fake_popen)
@@ -98,6 +101,12 @@ def test_start_and_stop_logging_only_owns_one_background_process(
 
     assert len(processes) == 1
     assert "--logging-only" in processes[0].command
+    assert launch_options == [
+        {
+            "stdin": channel_utilization.subprocess.DEVNULL,
+            "start_new_session": True,
+        }
+    ]
     control = json.loads(
         frame.with_name("logging.control.json").read_text(encoding="utf-8")
     )
@@ -111,6 +120,56 @@ def test_start_and_stop_logging_only_owns_one_background_process(
         frame.with_name("logging.control.json").read_text(encoding="utf-8")
     )
     assert control == {"logging_enabled": False}
+
+
+def test_logging_only_actions_return_to_menu_and_stop_from_another_channel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", frame)
+    processes: list[_FakeProcess] = []
+    messages: list[str] = []
+    original_display_status = channel_utilization._display_status
+
+    def fake_popen(command: list[str], **kwargs: object) -> _FakeProcess:
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    def capture_status(g_vars: dict[str, object], message: str) -> None:
+        messages.append(message)
+        original_display_status(g_vars, message)
+
+    monkeypatch.setattr(channel_utilization, "_display_status", capture_status)
+    g_vars: dict[str, object] = {"display_state": "page"}
+    app = channel_utilization.ChannelUtilizationApp(g_vars, popen=fake_popen)
+    menu = channel_utilization._band_menu(app, "5 GHz", "5", (36, 40))
+    channels = menu["action"]
+    assert isinstance(channels, list)
+
+    channel_36_actions = channels[0]["action"]
+    channel_40_actions = channels[1]["action"]
+    assert isinstance(channel_36_actions, list)
+    assert isinstance(channel_40_actions, list)
+    assert isinstance(channel_36_actions[2]["action"], FunctionType)
+    assert isinstance(channel_40_actions[3]["action"], FunctionType)
+    channel_36_actions[2]["action"]()
+
+    assert g_vars["display_state"] == "menu"
+    assert len(processes) == 1
+
+    # FPMS changes the state to page immediately before invoking a menu action.
+    g_vars["display_state"] = "page"
+    channel_40_actions[3]["action"]()
+
+    assert g_vars["display_state"] == "menu"
+    assert processes[0].signal_received == signal.SIGINT
+    assert "channel_utilization_logging_session" not in g_vars
+    assert messages == [
+        "Logging started: Ch 36 5180 MHz",
+        "Logging stopped: Ch 36 5180 MHz",
+    ]
 
 
 def test_stop_logging_with_display_keeps_capture_process_running(

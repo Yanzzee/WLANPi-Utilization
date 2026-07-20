@@ -20,6 +20,7 @@ FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = "wlan0"
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
+LOGGING_STATUS_SECONDS = 1.0
 
 _WHITE = (255, 255, 255)
 _DEFAULT_METRIC_COLOR = (0, 220, 120)
@@ -147,7 +148,7 @@ def _band_menu(
                     },
                     {
                         "name": "Stop Logging",
-                        "action": app.stop_logging,
+                        "action": _stop_logging_action(app),
                     },
                 ],
             }
@@ -176,6 +177,15 @@ def _logging_only_action(
         app.start_logging_only(band=band, channel=channel)
 
     return start_logging_only
+
+
+def _stop_logging_action(
+    app: "ChannelUtilizationApp",
+) -> Callable[[], None]:
+    def stop_logging() -> None:
+        app.stop_logging()
+
+    return stop_logging
 
 
 def _frequency_mhz(band: str, channel: int) -> int:
@@ -223,6 +233,9 @@ class ChannelUtilizationApp:
                     channel=channel,
                     logging=logging,
                 ),
+                band=band,
+                channel=channel,
+                logging_enabled=logging,
                 popen=self.popen,
                 clock=self.clock,
             )
@@ -249,10 +262,22 @@ class ChannelUtilizationApp:
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession) and not display_session.finished:
             display_session.set_logging(True)
+            _display_logging_status(
+                self.g_vars,
+                "Logging started",
+                band=display_session.band,
+                channel=display_session.channel,
+            )
             return
 
         session = self.g_vars.get("channel_utilization_logging_session")
         if isinstance(session, _LoggingOnlySession) and not session.finished:
+            _display_logging_status(
+                self.g_vars,
+                "Logging already active",
+                band=session.band,
+                channel=session.channel,
+            )
             return
 
         _write_logging_enabled(True)
@@ -264,6 +289,8 @@ class ChannelUtilizationApp:
                 logging=True,
                 logging_only=True,
             ),
+            band=band,
+            channel=channel,
             popen=self.popen,
         )
         self.g_vars["channel_utilization_logging_session"] = session
@@ -272,11 +299,22 @@ class ChannelUtilizationApp:
         except OSError:
             self.g_vars.pop("channel_utilization_logging_session", None)
             _display_error(self.g_vars, "Unable to start logging.")
+            return
+
+        _display_logging_status(
+            self.g_vars,
+            "Logging started",
+            band=band,
+            channel=channel,
+        )
 
     def stop_logging(self) -> None:
         _write_logging_enabled(False)
+        stopped_channel: Optional[tuple[str, int]] = None
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession):
+            if display_session.logging_enabled and not display_session.finished:
+                stopped_channel = (display_session.band, display_session.channel)
             display_session.set_logging(False)
 
         logging_session = self.g_vars.pop(
@@ -284,7 +322,20 @@ class ChannelUtilizationApp:
             None,
         )
         if isinstance(logging_session, _LoggingOnlySession):
+            if not logging_session.finished:
+                stopped_channel = (logging_session.band, logging_session.channel)
             logging_session.stop()
+
+        if stopped_channel is None:
+            _display_status(self.g_vars, "Logging already stopped")
+            return
+
+        _display_logging_status(
+            self.g_vars,
+            "Logging stopped",
+            band=stopped_channel[0],
+            channel=stopped_channel[1],
+        )
 
 
 class _DisplaySession:
@@ -293,11 +344,17 @@ class _DisplaySession:
         g_vars: dict[str, object],
         command: list[str],
         *,
+        band: str,
+        channel: int,
+        logging_enabled: bool,
         popen: Callable[..., subprocess.Popen[bytes]],
         clock: Callable[[], float],
     ) -> None:
         self.g_vars = g_vars
         self.command = command
+        self.band = band
+        self.channel = channel
+        self.logging_enabled = logging_enabled
         self.popen = popen
         self.clock = clock
         self.process: Optional[subprocess.Popen[bytes]] = None
@@ -348,6 +405,7 @@ class _DisplaySession:
 
     def set_logging(self, enabled: bool) -> None:
         _write_logging_enabled(enabled)
+        self.logging_enabled = enabled
 
     def navigate_up(self) -> None:
         self._navigate(-1)
@@ -399,10 +457,14 @@ class _LoggingOnlySession:
         g_vars: dict[str, object],
         command: list[str],
         *,
+        band: str,
+        channel: int,
         popen: Callable[..., subprocess.Popen[bytes]],
     ) -> None:
         self.g_vars = g_vars
         self.command = command
+        self.band = band
+        self.channel = channel
         self.popen = popen
         self.process: Optional[subprocess.Popen[bytes]] = None
 
@@ -411,7 +473,11 @@ class _LoggingOnlySession:
         return self.process is not None and self.process.poll() is not None
 
     def start(self) -> None:
-        self.process = self.popen(self.command)
+        self.process = self.popen(
+            self.command,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
     def stop(self) -> None:
         _stop_process(self.process)
@@ -800,3 +866,50 @@ def _display_error(g_vars: dict[str, object], message: str) -> None:
     from fpms.modules.pages.alert import Alert
 
     Alert(g_vars).display_alert_error(g_vars, message)
+
+
+def _display_logging_status(
+    g_vars: dict[str, object],
+    message: str,
+    *,
+    band: str,
+    channel: int,
+) -> None:
+    frequency = _frequency_mhz(band, channel)
+    _display_status(g_vars, f"{message}: Ch {channel} {frequency} MHz")
+
+
+def _display_status(g_vars: dict[str, object], message: str) -> None:
+    """Briefly overlay a status message, then restore the active FPMS menu."""
+    image = g_vars.get("image")
+    draw = g_vars.get("draw")
+    saved_image = None
+    if image is not None and draw is not None:
+        try:
+            saved_image = image.copy()  # type: ignore[union-attr]
+        except (AttributeError, OSError):
+            saved_image = None
+
+    try:
+        if saved_image is not None:
+            from fpms.modules.pages.alert import Alert
+
+            Alert(g_vars).display_popup_alert(
+                g_vars,
+                message,
+                delay=LOGGING_STATUS_SECONDS,
+            )
+    finally:
+        try:
+            if saved_image is not None:
+                from PIL import ImageDraw
+
+                import fpms.modules.wlanpi_oled as oled
+
+                g_vars["image"] = saved_image
+                g_vars["draw"] = ImageDraw.Draw(saved_image)
+                oled.drawImage(saved_image)
+        finally:
+            g_vars["drawing_in_progress"] = False
+            g_vars["display_state"] = "menu"
+            g_vars["result_cache"] = False
