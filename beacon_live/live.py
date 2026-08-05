@@ -353,13 +353,24 @@ def run_live(
     if logging_only and stats_csv is None and beacons_jsonl is None:
         raise ValueError("logging-only mode requires at least one log format")
     local_cu = local_cu or survey_debug
+    resolved_frequency_mhz = resolve_survey_target_frequency_mhz(
+        channel,
+        frequency_mhz=frequency_mhz,
+        band=band,
+    )
+    resolved_band = band or frequency_to_band(resolved_frequency_mhz)
     if (
         _dashboard is None
         and not logging_only
         and lcd_frame is None
         and should_use_curses()
     ):
-        curses_dashboard = CursesDashboard(include_local_cu=local_cu)
+        curses_dashboard = CursesDashboard(
+            include_local_cu=local_cu,
+            band=resolved_band,
+            channel=channel,
+            frequency_mhz=resolved_frequency_mhz,
+        )
         return curses_dashboard.run(
             lambda: run_live(
                 iface=iface,
@@ -382,12 +393,6 @@ def run_live(
                 _dashboard=curses_dashboard,
             )
         )
-    resolved_frequency_mhz = resolve_survey_target_frequency_mhz(
-        channel,
-        frequency_mhz=frequency_mhz,
-        band=band,
-    )
-    resolved_band = band or frequency_to_band(resolved_frequency_mhz)
     target_frequency_mhz = resolved_frequency_mhz if local_cu else None
     configure_monitor_interface(
         iface,

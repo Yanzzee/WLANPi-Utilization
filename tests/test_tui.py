@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Optional
 
 import pytest
 
+from beacon_live.models import BeaconBssidReception
 from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import BeaconRecord
 from beacon_live.models import BssidState
@@ -59,6 +61,7 @@ class _FakeWindow:
         self.width = width
         self.keys: list[int] = []
         self.lines: dict[int, str] = {}
+        self.writes: list[tuple[int, int, str, int]] = []
         self.refresh_count = 0
         self.nonblocking = False
         self.keypad_enabled = False
@@ -72,6 +75,7 @@ class _FakeWindow:
 
     def erase(self) -> None:
         self.lines = {}
+        self.writes = []
 
     def addnstr(
         self,
@@ -81,10 +85,10 @@ class _FakeWindow:
         count: int,
         attribute: int = 0,
     ) -> None:
-        del attribute
         if row < 0 or row >= self.height or column < 0 or column >= self.width:
             raise _FakeCursesError
         available = min(count, self.width - column)
+        self.writes.append((row, column, text[:available], attribute))
         prefix = self.lines.get(row, "").ljust(column)
         self.lines[row] = f"{prefix}{text[:available]}"[: self.width]
 
@@ -115,7 +119,7 @@ class _TtyStream:
 
 def test_layout_reserves_graphs_and_scrollable_table_at_common_sizes() -> None:
     wide = calculate_layout(30, 120)
-    narrow = calculate_layout(14, 30)
+    narrow = calculate_layout(16, 30)
     tiny = calculate_layout(8, 20)
 
     assert wide.too_small is False
@@ -125,7 +129,7 @@ def test_layout_reserves_graphs_and_scrollable_table_at_common_sizes() -> None:
     assert narrow.too_small is False
     assert narrow.compact_graphs is True
     assert narrow.graph_rows == 3
-    assert narrow.table_rows == 1
+    assert narrow.table_rows >= 1
     assert tiny.too_small is True
 
 
@@ -226,11 +230,19 @@ def test_resize_recalculates_layout_and_narrow_terminal_keeps_all_graphs() -> No
 
     def interact() -> int:
         dashboard.refresh(_snapshot(20))
-        assert dashboard.last_layout == calculate_layout(24, 100)
-        window.resize(14, 30)
+        assert dashboard.last_layout == calculate_layout(
+            24,
+            100,
+            radio_bssid_rows=2,
+        )
+        window.resize(16, 30)
         window.keys.append(curses_module.KEY_RESIZE)
         dashboard.poll_input()
-        assert dashboard.last_layout == calculate_layout(14, 30)
+        assert dashboard.last_layout == calculate_layout(
+            16,
+            30,
+            radio_bssid_rows=2,
+        )
         return 0
 
     dashboard.run(interact)
@@ -241,9 +253,65 @@ def test_resize_recalculates_layout_and_narrow_terminal_keeps_all_graphs() -> No
     assert "MAC" in window.text
     assert "RET" in window.text
     assert "LOSS" in window.text
-    assert "Composition" in window.text
     assert "TIME" in window.text
     assert all(len(line) <= 30 for line in window.lines.values())
+
+
+def test_header_composition_and_selected_identity_columns_are_deduplicated() -> None:
+    window = _FakeWindow(30, 140)
+    curses_module = _FakeCurses(window)
+    dashboard = CursesDashboard(
+        curses_module=curses_module,
+        band="5",
+        channel="36",
+        frequency_mhz=5180,
+    )
+
+    dashboard.run(lambda: (dashboard.refresh(_snapshot(20)), 0)[1])
+
+    assert "5180 MHz | Band 5 GHz | Channel 36" in window.lines[0]
+    assert "Composition:" not in window.text
+    assert "Strongest AP: AP-Lobby" in window.text
+    assert "aa:aa:aa:aa:aa:aa" in window.text
+    assert "bb:bb:bb:bb:bb:bb" in window.text
+    assert "Alpha" in window.text
+    assert "Bravo" in window.text
+    assert "Selected BSSIDs" in window.text
+    assert "QBSS CU  50%" in window.text
+    assert "ADC  50%" in window.text
+    assert "STA  12" in window.text
+    assert "RET  10%" in window.text
+    assert "LOSS   2%" in window.text
+
+    bold_text = "".join(
+        text
+        for _, _, text, attribute in window.writes
+        if attribute == curses_module.A_BOLD
+    )
+    assert "aa:aa:aa:aa:aa:aa" in bold_text
+    assert "Alpha" in bold_text
+
+
+def test_full_graph_fields_have_fixed_edges_and_requested_vertical_order() -> None:
+    window = _FakeWindow(30, 140)
+    curses_module = _FakeCurses(window)
+    dashboard = CursesDashboard(curses_module=curses_module)
+
+    dashboard.run(lambda: (dashboard.refresh(_snapshot(20)), 0)[1])
+
+    assert dashboard.last_layout is not None
+    graph_start = dashboard.last_layout.graph_start
+    graph_lines = [window.lines[graph_start + index] for index in range(6)]
+    assert [line.split()[0] for line in graph_lines] == [
+        "CU",
+        "ADC",
+        "MAC",
+        "LOSS",
+        "STA",
+        "RET",
+    ]
+    assert {len(line) for line in graph_lines} == {140}
+    assert {len(line[-31:]) for line in graph_lines} == {31}
 
 
 def test_curses_wrapper_detaches_window_and_restores_after_failure() -> None:
@@ -312,10 +380,24 @@ def _snapshot(row_count: int) -> MetricsSnapshot:
         latest_ap_name="AP-Lobby",
         latest_vendor="Example Vendor",
     )
+    second_beacon = replace(
+        beacon,
+        ssid="Bravo",
+        bssid="bb:bb:bb:bb:bb:bb",
+        rssi_dbm=-50,
+    )
+    second_state = replace(
+        state,
+        bssid=second_beacon.bssid,
+        ssid=second_beacon.ssid,
+        latest_beacon_record=second_beacon,
+        latest_rssi_dbm=-50,
+        peak_rssi_dbm=-48,
+    )
     return MetricsSnapshot(
         generated_at=float(current.second + 1),
         window_seconds=120,
-        bssids=(state,),
+        bssids=(state, second_state),
         selected_bssid=state.bssid,
         current=current,
         history=rows,
@@ -338,7 +420,7 @@ def _snapshot(row_count: int) -> MetricsSnapshot:
             qbss_bssid_count=2,
             estimated_radio_count=1,
             strongest_radio_bssid_count=2,
-            strongest_radio_bssids=(state.bssid,),
+            strongest_radio_bssids=(state.bssid, second_state.bssid),
             strongest_radio_ap_name="AP-Lobby",
             strongest_radio_vendor="Example Vendor",
             displayed_ssid=state.ssid,
@@ -348,7 +430,14 @@ def _snapshot(row_count: int) -> MetricsSnapshot:
         window_unique_client_mac_count=5,
         beacons=BeaconReceptionSnapshot(
             strongest_radio_bssids=(state.bssid,),
-            bssids=(),
+            bssids=(
+                BeaconBssidReception(
+                    bssid=state.bssid,
+                    received_count=98,
+                    expected_count=100,
+                    loss_percent=2.0,
+                ),
+            ),
             received_count=98,
             expected_count=100,
             loss_percent=2.0,

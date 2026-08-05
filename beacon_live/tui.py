@@ -14,7 +14,6 @@ from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.models import SecondStats
 from beacon_live.screens import ADMISSION_CAPACITY_SCREEN_ID
 from beacon_live.screens import BEACONS_SCREEN_ID
-from beacon_live.screens import COMPOSITION_SCREEN_ID
 from beacon_live.screens import CU_SCREEN_ID
 from beacon_live.screens import DEFAULT_SCREENS
 from beacon_live.screens import DisplayIdentity
@@ -41,6 +40,7 @@ class DashboardLayout:
     height: int
     width: int
     too_small: bool
+    side_by_side: bool
     compact_graphs: bool
     title_row: int
     identity_start: int
@@ -116,25 +116,31 @@ class TableViewport:
         )
 
 
-def calculate_layout(height: int, width: int) -> DashboardLayout:
+def calculate_layout(
+    height: int,
+    width: int,
+    *,
+    radio_bssid_rows: int = 1,
+) -> DashboardLayout:
     """Return a responsive layout while reserving at least one table row."""
     height = max(0, height)
     width = max(0, width)
-    identity_rows = 5 if width < 72 else 3
+    radio_bssid_rows = max(1, radio_bssid_rows)
+    side_by_side = width >= 112
+    identity_rows = 0
+    composition_rows = 4 + radio_bssid_rows
+    if not side_by_side:
+        composition_rows += 3
     compact_graphs = height < 20
     graph_rows = 3 if compact_graphs else 6
-    composition_rows = 2
 
     def fixed_rows() -> int:
-        # Title, identities, composition, graphs, table header, and footer.
-        return 1 + identity_rows + composition_rows + graph_rows + 1 + 1
+        # Title, composition/identities, graphs, table header, and footer.
+        return 1 + composition_rows + graph_rows + 1 + 1
 
     if height < fixed_rows() + 1 and graph_rows == 6:
         compact_graphs = True
         graph_rows = 3
-    if height < fixed_rows() + 1 and identity_rows == 5:
-        identity_rows = 3
-
     too_small = width < MIN_TERMINAL_WIDTH or height < fixed_rows() + 1
     title_row = 0
     identity_start = title_row + 1
@@ -148,6 +154,7 @@ def calculate_layout(height: int, width: int) -> DashboardLayout:
         height=height,
         width=width,
         too_small=too_small,
+        side_by_side=side_by_side,
         compact_graphs=compact_graphs,
         title_row=title_row,
         identity_start=identity_start,
@@ -209,11 +216,17 @@ class CursesDashboard:
         max_seconds: int = 120,
         include_local_cu: bool = False,
         local_timezone: Optional[tzinfo] = None,
+        band: Optional[str] = None,
+        channel: Optional[str] = None,
+        frequency_mhz: Optional[int] = None,
         curses_module: Optional[Any] = None,
     ) -> None:
         self.snapshot = MetricsSnapshot.empty(window_seconds=max_seconds)
         self.include_local_cu = include_local_cu
         self.local_timezone = local_timezone
+        self.band = band
+        self.channel = channel
+        self.frequency_mhz = frequency_mhz
         self.viewport = TableViewport()
         self.exit_requested = False
         self.last_layout: Optional[DashboardLayout] = None
@@ -281,7 +294,11 @@ class CursesDashboard:
             return False
 
         height, width = self._window.getmaxyx()
-        layout = calculate_layout(height, width)
+        layout = calculate_layout(
+            height,
+            width,
+            radio_bssid_rows=len(self._strongest_radio_identities()),
+        )
         row_count = len(self.snapshot.history)
         page_rows = layout.table_rows
         table_width = len(_format_table_header(self.include_local_cu))
@@ -345,7 +362,12 @@ class CursesDashboard:
         if self._window is None:
             return
         height, width = self._window.getmaxyx()
-        layout = calculate_layout(height, width)
+        radio_identities = self._strongest_radio_identities()
+        layout = calculate_layout(
+            height,
+            width,
+            radio_bssid_rows=len(radio_identities),
+        )
         self.last_layout = layout
         self._window.erase()
 
@@ -359,14 +381,17 @@ class CursesDashboard:
             for screen in DEFAULT_SCREENS
         }
         title = (
-            " WLANPi Beacon Live "
-            f"| rolling {self.snapshot.window_seconds}s "
+            f" {_format_tuning(self.frequency_mhz, self.band, self.channel)} "
+            "| WLANPi Beacon Live "
+            f"| {self.snapshot.window_seconds}s history "
             f"| rows {len(self.snapshot.history)} "
             f"| {'FOLLOW' if self.viewport.follow_newest else 'SCROLLED'} "
         )
         self._add(layout.title_row, 0, title, width, self._attr("A_REVERSE"))
-        self._draw_identities(layout, views)
-        self._draw_composition(layout, views[COMPOSITION_SCREEN_ID])
+        self._draw_composition(
+            layout,
+            radio_identities,
+        )
         self._draw_graphs(layout, views)
         self._draw_table(layout)
         footer = (
@@ -392,48 +417,165 @@ class CursesDashboard:
                 layout.width,
             )
 
-    def _draw_identities(
-        self,
-        layout: DashboardLayout,
-        views: dict[str, ScreenView],
-    ) -> None:
-        identities = (
-            ("QBSS", views[CU_SCREEN_ID].identity),
-            ("Stations", views[TOTAL_STATION_COUNT_SCREEN_ID].identity),
-            ("Retries", views[RETRY_SCREEN_ID].identity),
-            ("Beacons", views[BEACONS_SCREEN_ID].identity),
-            ("Composition", views[COMPOSITION_SCREEN_ID].identity),
-        )
-        lines = [_format_identity(label, identity) for label, identity in identities]
-        if layout.identity_rows == 3:
-            lines = [
-                lines[0],
-                _pair_text(lines[1], lines[2], layout.width),
-                _pair_text(lines[3], lines[4], layout.width),
-            ]
-        for index, line in enumerate(lines[: layout.identity_rows]):
-            self._add(layout.identity_start + index, 0, line, layout.width)
-
     def _draw_composition(
         self,
         layout: DashboardLayout,
-        view: ScreenView,
+        radio_identities: tuple[DisplayIdentity, ...],
     ) -> None:
-        first = " | ".join((view.summary, *view.detail_lines[:2]))
-        second = " | ".join(view.detail_lines[2:]) or "--"
+        composition = self.snapshot.composition
+        left_width = layout.width
+        right_start: Optional[int] = None
+        if layout.side_by_side:
+            left_width = max(1, (layout.width - 1) // 2)
+            right_start = left_width + 1
+
+        row = layout.composition_start
+        counts = (
+            f"BSSIDs {composition.bssid_count}  "
+            f"QBSS {composition.qbss_bssid_count}  "
+            f"Radios {composition.estimated_radio_count}  "
+            f"Radio BSSIDs {composition.strongest_radio_bssid_count}"
+        )
+        self._add(row, 0, counts, left_width, self._attr("A_BOLD"))
+        strongest_ap = composition.strongest_radio_ap_name or "<no AP name>"
+        vendor = composition.strongest_radio_vendor or "<unknown>"
         self._add(
-            layout.composition_start,
+            row + 1,
             0,
-            f"Composition: {first}",
-            layout.width,
+            f"Strongest AP: {strongest_ap}  Vendor: {vendor}",
+            left_width,
+        )
+        self._add(
+            row + 2,
+            0,
+            _format_identity_header(left_width),
+            left_width,
+            self._attr("A_REVERSE"),
+        )
+        for index, identity in enumerate(radio_identities, start=1):
+            self._draw_radio_identity(
+                row + 2 + index,
+                identity,
+                index=index,
+                width=left_width,
+            )
+        metrics_row = row + 3 + len(radio_identities)
+        self._add(
+            metrics_row,
+            0,
+            _format_selected_qbss_metrics(self.snapshot),
+            left_width,
             self._attr("A_BOLD"),
         )
-        self._add(
-            layout.composition_start + 1,
-            0,
-            f"             {second}",
-            layout.width,
+
+        selected_start = row if right_start is not None else metrics_row + 1
+        selected_width = (
+            layout.width - right_start
+            if right_start is not None
+            else layout.width
         )
+        selected_column = 0 if right_start is None else right_start
+        self._draw_selected_bssids(
+            selected_start,
+            selected_column,
+            selected_width,
+            include_header=right_start is not None,
+        )
+
+    def _draw_radio_identity(
+        self,
+        row: int,
+        identity: DisplayIdentity,
+        *,
+        index: int,
+        width: int,
+    ) -> None:
+        selected = identity.bssid == self.snapshot.selected_bssid
+        marker = "*" if selected else " "
+        prefix = f"{marker}{index:>2} "
+        bssid = identity.bssid or "--"
+        bssid_field = f"{bssid:<17}"[:17]
+        rssi = _format_identity_rssi(identity.rssi_dbm)
+        middle = f" {rssi:>7} "
+        ssid = identity.ssid or ("--" if identity.bssid else identity.unavailable_text)
+        bold = self._attr("A_BOLD") if selected else 0
+        column = 0
+        self._add(row, column, prefix, width - column)
+        column += len(prefix)
+        self._add(row, column, bssid_field, width - column, bold)
+        column += len(bssid_field)
+        self._add(row, column, middle, width - column)
+        column += len(middle)
+        self._add(row, column, ssid, width - column, bold)
+
+    def _draw_selected_bssids(
+        self,
+        row: int,
+        column: int,
+        width: int,
+        *,
+        include_header: bool,
+    ) -> None:
+        self._add(row, column, "Selected BSSIDs", width, self._attr("A_BOLD"))
+        data_row = row + 1
+        if include_header:
+            self._add(
+                data_row,
+                column,
+                _format_selected_header(width),
+                width,
+                self._attr("A_REVERSE"),
+            )
+            data_row += 1
+        station_identity, station_value = _highest_station_identity(self.snapshot)
+        retry_identity, retry_value = _highest_retry_identity(self.snapshot)
+        self._add(
+            data_row,
+            column,
+            _format_selected_identity(
+                "STA max",
+                station_value,
+                station_identity,
+                width,
+            ),
+            width,
+        )
+        self._add(
+            data_row + 1,
+            column,
+            _format_selected_identity(
+                "RET max",
+                retry_value,
+                retry_identity,
+                width,
+            ),
+            width,
+        )
+
+    def _strongest_radio_identities(self) -> tuple[DisplayIdentity, ...]:
+        identities: list[DisplayIdentity] = []
+        for bssid in self.snapshot.composition.strongest_radio_bssids:
+            state = self.snapshot.state_for(bssid)
+            if state is None:
+                identities.append(
+                    DisplayIdentity(None, bssid, None, "<Unknown BSSID>")
+                )
+                continue
+            identities.append(
+                DisplayIdentity(
+                    ssid=state.ssid,
+                    bssid=state.bssid,
+                    rssi_dbm=(
+                        state.peak_rssi_dbm
+                        if state.peak_rssi_dbm is not None
+                        else state.latest_rssi_dbm
+                    ),
+                    unavailable_text="<Unknown BSSID>",
+                )
+            )
+        if identities:
+            return tuple(identities)
+        return (DisplayIdentity(None, None, None, "<No radio BSSIDs>"),)
 
     def _draw_graphs(
         self,
@@ -448,10 +590,10 @@ class CursesDashboard:
                 views[ADMISSION_CAPACITY_SCREEN_ID].graph_points,
                 views[ADMISSION_CAPACITY_SCREEN_ID],
             ),
-            ("STA", station_view.graph_points, station_view),
             ("MAC", station_view.secondary_graph_points, station_view),
-            ("RET", views[RETRY_SCREEN_ID].graph_points, views[RETRY_SCREEN_ID]),
             ("LOSS", views[BEACONS_SCREEN_ID].graph_points, views[BEACONS_SCREEN_ID]),
+            ("STA", station_view.graph_points, station_view),
+            ("RET", views[RETRY_SCREEN_ID].graph_points, views[RETRY_SCREEN_ID]),
         )
         if layout.compact_graphs:
             left_width = max(1, (layout.width - 1) // 2)
@@ -548,11 +690,9 @@ def _format_full_graph(
     width: int,
 ) -> str:
     prefix = f"{label:<5} "
-    summary = view.summary
+    summary = _format_graph_summary(view.summary)
     remaining = max(1, width - len(prefix))
-    summary_width = min(len(summary), max(0, remaining // 3))
-    if remaining < 12:
-        summary_width = 0
+    summary_width = len(summary) if remaining >= len(summary) + 10 else 0
     graph_width = max(1, remaining - summary_width - (1 if summary_width else 0))
     graph = _sparkline(
         [point.value for point in points],
@@ -560,7 +700,7 @@ def _format_full_graph(
         view.graph_maximum,
     )
     if summary_width:
-        return f"{prefix}{graph} {_truncate(summary, summary_width)}"
+        return f"{prefix}{graph} {summary}"
     return f"{prefix}{graph}"
 
 
@@ -586,24 +726,170 @@ def _sparkline(
             int(bounded / maximum * len(_BAR_LEVELS)),
         )
         result.append(_BAR_LEVELS[index])
-    return "".join(result).rjust(width)
+    return "".join(result).ljust(width)
 
 
-def _format_identity(label: str, identity: DisplayIdentity) -> str:
-    if identity.bssid is None:
-        return f"{label}: {identity.unavailable_text}"
-    rssi = "--" if identity.rssi_dbm is None else f"{identity.rssi_dbm}dBm"
-    ssid = identity.ssid or "<hidden>"
-    return f"{label}: {identity.bssid} {rssi} {ssid}"
-
-
-def _pair_text(left: str, right: str, width: int) -> str:
-    left_width = max(1, (width - 3) // 2)
-    right_width = max(1, width - left_width - 3)
-    return (
-        f"{_truncate(left, left_width):<{left_width}} | "
-        f"{_truncate(right, right_width):<{right_width}}"
+def _format_graph_summary(summary: str) -> str:
+    tokens = summary.split()
+    pairs = list(zip(tokens[::2], tokens[1::2]))[:3]
+    while len(pairs) < 3:
+        pairs.append(("", ""))
+    return "  ".join(
+        f"{label:<4}{value:>5}"
+        for label, value in pairs
     )
+
+
+def _format_tuning(
+    frequency_mhz: Optional[int],
+    band: Optional[str],
+    channel: Optional[str],
+) -> str:
+    frequency = "-- MHz" if frequency_mhz is None else f"{frequency_mhz} MHz"
+    band_text = "--" if band is None else f"{band} GHz"
+    channel_text = "--" if channel is None else channel
+    return f"{frequency} | Band {band_text} | Channel {channel_text}"
+
+
+def _format_identity_header(width: int) -> str:
+    return f"{'#':>3} {'BSSID':<17} {'RSSI':>7} {'SSID'}"[:width]
+
+
+def _format_selected_header(width: int) -> str:
+    return (
+        f"{'Metric':<7} {'Value':>6} {'BSSID':<17} {'RSSI':>7} {'SSID'}"
+    )[:width]
+
+
+def _format_selected_identity(
+    label: str,
+    value: str,
+    identity: DisplayIdentity,
+    width: int,
+) -> str:
+    bssid = identity.bssid or "--"
+    rssi = _format_identity_rssi(identity.rssi_dbm)
+    ssid = identity.ssid or (
+        "<hidden>" if identity.bssid is not None else identity.unavailable_text
+    )
+    return (
+        f"{label:<7} {value:>6} {bssid:<17} {rssi:>7} {ssid}"
+    )[:width]
+
+
+def _format_identity_rssi(value: Optional[int]) -> str:
+    return "--" if value is None else f"{value}dBm"
+
+
+def _highest_station_identity(
+    snapshot: MetricsSnapshot,
+) -> tuple[DisplayIdentity, str]:
+    state = (
+        snapshot.state_for(snapshot.top_station_bssid)
+        if snapshot.top_station_bssid is not None
+        else None
+    )
+    if state is None:
+        return DisplayIdentity(None, None, None, "<No Station Counts>"), "--"
+    identity = DisplayIdentity(
+        ssid=state.ssid,
+        bssid=state.bssid,
+        rssi_dbm=(
+            state.peak_rssi_dbm
+            if state.peak_rssi_dbm is not None
+            else state.latest_rssi_dbm
+        ),
+        unavailable_text="<No Station Counts>",
+    )
+    value = (
+        "--"
+        if state.latest_station_count is None
+        else str(state.latest_station_count)
+    )
+    return identity, value
+
+
+def _highest_retry_identity(
+    snapshot: MetricsSnapshot,
+) -> tuple[DisplayIdentity, str]:
+    state = (
+        snapshot.retry_state_for(snapshot.top_retry_bssid)
+        if snapshot.top_retry_bssid is not None
+        else None
+    )
+    if state is None:
+        return DisplayIdentity(None, None, None, "<No Retry Data>"), "--"
+    return (
+        DisplayIdentity(
+            ssid=state.ssid,
+            bssid=state.bssid,
+            rssi_dbm=state.rssi_dbm,
+            unavailable_text="<No Retry Data>",
+        ),
+        _short_percent(state.window_retry_percent),
+    )
+
+
+def _format_selected_qbss_metrics(snapshot: MetricsSnapshot) -> str:
+    selected = snapshot.selected
+    current = snapshot.current
+    selected_bssid = snapshot.selected_bssid or current.selected_qbss_bssid
+    cu_percent = (
+        selected.latest_qbss_cu_percent
+        if selected is not None
+        else current.selected_qbss_cu_percent
+    )
+    admission = (
+        selected.latest_admission_capacity
+        if selected is not None
+        else current.selected_qbss_admission_capacity
+    )
+    adc_percent = (
+        None
+        if admission is None
+        else admission / QBSS_ADMISSION_CAPACITY_MAX * 100
+    )
+    station_count = (
+        selected.latest_station_count
+        if selected is not None
+        else current.selected_qbss_station_count
+    )
+    retry_state = (
+        snapshot.retry_state_for(selected_bssid)
+        if selected_bssid is not None
+        else None
+    )
+    retry_percent = (
+        retry_state.window_retry_percent
+        if retry_state is not None
+        else selected.window_retry_percent
+        if selected is not None
+        else None
+    )
+    beacon_loss = next(
+        (
+            reception.loss_percent
+            for reception in snapshot.beacons.bssids
+            if reception.bssid == selected_bssid
+        ),
+        None,
+    )
+    station = "--" if station_count is None else str(station_count)
+    return (
+        f"QBSS CU {_short_percent(cu_percent):>4}  "
+        f"ADC {_short_percent(adc_percent):>4}  "
+        f"STA {station:>3}  "
+        f"RET {_short_percent(retry_percent):>4}  "
+        f"LOSS {_short_percent(beacon_loss):>4}"
+    )
+
+
+def _short_percent(value: Optional[float]) -> str:
+    if value is None:
+        return "--"
+    if 0 < value < 1:
+        return "<1%"
+    return f"{round(value)}%"
 
 
 def _format_table_header(include_local_cu: bool) -> str:

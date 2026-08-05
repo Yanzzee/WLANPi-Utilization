@@ -239,8 +239,18 @@ def test_interactive_terminal_runs_capture_inside_curses_wrapper(
     snapshots: list[object] = []
 
     class FakeCursesDashboard:
-        def __init__(self, *, include_local_cu: bool) -> None:
+        def __init__(
+            self,
+            *,
+            include_local_cu: bool,
+            band: str,
+            channel: str,
+            frequency_mhz: int,
+        ) -> None:
             assert include_local_cu is False
+            assert band == "5"
+            assert channel == "36"
+            assert frequency_mhz == 5180
             events.append("created")
 
         def run(self, callback: object) -> int:
