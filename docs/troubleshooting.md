@@ -73,18 +73,27 @@ runtime dependency; the `dev` extra adds pytest.
 
 ## `sudo: beacon-live: command not found`
 
-`sudo` may not preserve the activated virtual environment's `PATH`. Call the
-venv launcher explicitly:
+The normal FPMS installer creates both commands in `/usr/local/bin`. Rerun it
+after an application or FPMS upgrade, then inspect the launchers and their
+isolated targets:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+sudo ./scripts/install_wlanpi_fpms.sh
+command -v wlanpi-beacon-live beacon-live
+ls -l /usr/local/bin/wlanpi-beacon-live /usr/local/bin/beacon-live
+ls -l /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live \
+  /opt/wlanpi-beacon-live/bin/beacon-live
 ```
 
-or:
+If a custom `sudo` configuration omits `/usr/local/bin` from its secure PATH,
+use the absolute system launcher:
 
 ```bash
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
+sudo /usr/local/bin/wlanpi-beacon-live --iface wlan0 --channel 36
 ```
+
+The `.venv/bin` commands are separate and are intended only for repository
+development.
 
 ## The Wi-Fi interface is missing
 
@@ -118,13 +127,13 @@ iw reg get
 Use an explicit center frequency when testing 5 GHz or 6 GHz:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
 ```
 
 For band-qualified channel notation, 6 GHz channel 5 maps to 5975 MHz:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
+sudo wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
 ```
 
 Do not pass a frequency to `--channel`; `--channel 5975` means channel number
@@ -190,7 +199,7 @@ AP's advertised QBSS utilization.
 Enable diagnostics:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 --channel 36 --survey-debug
 ```
 
@@ -220,7 +229,7 @@ Use the offline retry audit to inspect numerator, denominator, and exclusion
 reasons:
 
 ```bash
-.venv/bin/beacon-live retry-debug \
+beacon-live retry-debug \
   --input /path/to/capture.pcapng \
   --output-csv /tmp/retry-audit.csv
 ```

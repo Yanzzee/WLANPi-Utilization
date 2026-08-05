@@ -174,8 +174,9 @@ sudo ./scripts/install_wlanpi_fpms.sh
 
 The installer creates `/opt/wlanpi-beacon-live`, installs the application and
 thin FPMS adapter, patches the Apps menu/navigation callbacks, creates
-`/run/wlanpi-beacon-live` and `/var/log/wlanpi-beacon-live`, and restarts FPMS.
-Rerun it after an FPMS package upgrade.
+`/run/wlanpi-beacon-live` and `/var/log/wlanpi-beacon-live`, installs the two
+commands in `/usr/local/bin`, and restarts FPMS. Rerun it after an FPMS package
+upgrade.
 
 The installed menu is:
 
@@ -234,7 +235,7 @@ Use a temporary CLI log directory and set the minimum above current free space
 to force the safety path without filling a disk:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 \
   --channel 36 \
   --logging-only \
@@ -250,25 +251,25 @@ low-disk marker described in [logging.md](logging.md#low-disk-markers).
 Basic channel capture:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+sudo wlanpi-beacon-live --iface wlan0 --channel 36
 ```
 
 Explicit 6 GHz frequency:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
 ```
 
 Band-qualified 6 GHz channel:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
+sudo wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
 ```
 
 Optional local survey diagnostics:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 --channel 36 --survey-debug
 ```
 

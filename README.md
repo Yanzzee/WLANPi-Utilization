@@ -48,11 +48,17 @@ sudo ./scripts/install_wlanpi_fpms.sh
 
 The installer creates an isolated app environment under
 `/opt/wlanpi-beacon-live`, adds `Utilization` to the FPMS Apps menu, creates the
-runtime and log directories, and restarts `wlanpi-fpms`.
+runtime and log directories, installs the system-wide `wlanpi-beacon-live` and
+`beacon-live` commands, and restarts `wlanpi-fpms`. The commands are launchers
+in `/usr/local/bin` that run the existing executables in the isolated app
+environment; the installer does not copy the application into the system
+Python environment.
 
-Rerun the installer after updating this repository or upgrading FPMS.
+Rerun the installer after updating this repository or upgrading FPMS. It
+safely refreshes its managed CLI launchers as well as the application and FPMS
+integration.
 
-## Run from the front panel
+## Use the FPMS front panel
 
 Open:
 
@@ -83,6 +89,56 @@ While a display is open:
   changing the active screen.
 
 Changing screens never restarts capture or clears graph history.
+
+## Use the command line
+
+The normal FPMS installation makes both CLI commands available system-wide:
+
+- `wlanpi-beacon-live` runs live capture directly; and
+- `beacon-live` provides the `live`, `replay`, and `retry-debug` workflows.
+
+Live capture configures the wireless interface, tunes it, and starts TShark,
+so it normally requires `sudo`. Replay and help do not require root. Writing
+to `/var/log/wlanpi-beacon-live` also requires appropriate permissions, which
+the examples below obtain with `sudo`.
+
+```bash
+# Live terminal display on channel 36
+sudo wlanpi-beacon-live --iface wlan0 --channel 36
+
+# Logging-only capture (both CSV and JSONL, with no display rendering)
+sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
+  --logging-only --log-dir /var/log/wlanpi-beacon-live
+
+# Hardware-free replay of the included sample (run from the repository)
+beacon-live replay --input samples/tshark_qbss_sample.tsv
+
+# Explicit 6 GHz center frequency instead of band/channel mapping
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+
+# General and workflow-specific help
+wlanpi-beacon-live --help
+beacon-live --help
+beacon-live live --help
+```
+
+`beacon-live live` accepts the same live options as `wlanpi-beacon-live`. Use
+`--frequency-mhz` when the exact center frequency is clearest, or combine
+`--band` and `--channel` when a channel number is ambiguous across bands.
+
+For troubleshooting, the system launchers and their isolated targets are:
+
+```text
+/usr/local/bin/wlanpi-beacon-live -> /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live
+/usr/local/bin/beacon-live        -> /opt/wlanpi-beacon-live/bin/beacon-live
+/opt/wlanpi-beacon-live/bin/python
+/opt/wlanpi-beacon-live/lib/python*/site-packages/beacon_live
+```
+
+The arrows describe which executable each launcher invokes; the launchers are
+small managed shell scripts, not filesystem symlinks. You can bypass the PATH
+launcher while diagnosing an installation with, for example,
+`/opt/wlanpi-beacon-live/bin/beacon-live --help`.
 
 ## Screens
 
@@ -120,36 +176,19 @@ exits cleanly.
 See the [logging reference](docs/logging.md) for formats, filenames, rollover,
 markers, and configurable CLI limits.
 
-## Command-line use
+## Development environment
 
-The CLI supports live terminal capture, logging-only capture, hardware-free TSV
-replay, and retry auditing from PCAP/PCAPNG files.
-
-For a local development or CLI install:
+The repository `.venv` workflow is only for development and testing; it is
+separate from the supported `/opt/wlanpi-beacon-live` installation used by
+FPMS and the system-wide commands.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-```
-
-Examples:
-
-```bash
-# Live terminal display on channel 36
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
-
-# Background-style logging without rendering
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36 \
-  --logging-only --log-dir logs
-
-# Replay the included hardware-free sample
 .venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
+.venv/bin/python -m pytest -q
 ```
-
-Use `--frequency-mhz` for an explicit center frequency, or combine `--band`
-and `--channel` when a channel number is ambiguous across bands. Run
-`beacon-live live --help` for all live options.
 
 ## Documentation
 

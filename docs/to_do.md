@@ -27,7 +27,7 @@ Features & changes
 9. DONE     when logging, periodically check for free disk space and close if nearly full
     add message to end of log that the disk is full
     for long term logging, write separate files periodically
-10. how much can metrics also be found from hardware instead of just using beacons
+10. DONE    how much can metrics also be found from hardware instead of just using beacons
         channel utilization - depends on hardware
         admission capacity - no
         retries - local only
@@ -82,4 +82,5 @@ Features & changes
         as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS
 27. DONE    include beacons in logging, or remove it if it's useless
 28. make BSSID display behavior uniform wherever it is displayed
-        for highest RSSI BSSID, rotate all at 2 second interval
+        for highest RSSI radio, rotate all BSSID/SSID at 2 second interval
+29. DONE    improve CLI commands as supported, not just in dev mode

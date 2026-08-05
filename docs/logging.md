@@ -33,7 +33,7 @@ logging-only capture is already active. Stop the logging-only session first.
 Choose one or both live formats:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 \
   --channel 36 \
   --stats-csv \
@@ -45,7 +45,7 @@ sudo .venv/bin/wlanpi-beacon-live \
 formats:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 \
   --channel 36 \
   --logging-only \
@@ -198,7 +198,7 @@ Replay accepts explicit output paths because it processes a bounded saved
 input rather than an open-ended live session:
 
 ```bash
-.venv/bin/beacon-live replay \
+beacon-live replay \
   --input samples/tshark_qbss_sample.tsv \
   --stats-csv logs/replay-stats.csv \
   --beacons-jsonl logs/replay-beacons.jsonl
