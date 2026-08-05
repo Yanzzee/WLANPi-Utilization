@@ -126,6 +126,55 @@ beacon-live live --help
 `--frequency-mhz` when the exact center frequency is clearest, or combine
 `--band` and `--channel` when a channel number is ambiguous across bands.
 
+### Interactive SSH dashboard
+
+When both standard input and output are attached to a terminal, live CLI mode
+opens one full-screen `curses` dashboard similar to `top`. It renders directly
+from the shared live `MetricsSnapshot`; it does not read CSV or JSONL logs.
+The screen contains all five 120-second metric graphs, current source
+identities, Composition details, and a vertically and horizontally scrollable
+per-second table.
+
+An abridged wide-terminal example looks like this:
+
+```text
+ WLANPi Beacon Live | rolling 120s | rows 120 | FOLLOW
+QBSS: aa:aa:aa:aa:aa:aa -45dBm Alpha
+Composition: BSSIDs 8 QBSS 6 | Est Radios 3 | Radio BSSIDs 4
+             AP AP-Lobby | Vendor Example Vendor
+CU    ▁▂▂▃▄▃▅▆▅▇...  CU 62% AVG 44% MAX 81%
+ADC   ▇▇▆▆▅▅▄▄▃▃...  ADC 48% AVG 55% MIN 31%
+STA   ▂▂▃▃▃▄▄▄▄▅...  SUM 28 MAC 9 TOP 17
+MAC   ▁▁▁▂▂▁▃▂▂▃...
+RET   ▁▁▂▁▁▃▂▁▁▂...  RET 4% AVG 3% MAX 11%
+LOSS  ▁▁▁▁▂▁▁▃▁▁...  BL 1% AVG 2% MAX 8%
+TIME     BSSIDS STA SUM CLIENT CU% ... SSID                 QBSS BSSID
+14:30:05 8      28      3      62.0 ... Alpha                aa:aa:aa:aa:aa:aa
+```
+
+Controls:
+
+- Up/Down scroll the table one row; Page Up/Down scroll one visible page.
+- Home jumps to the oldest retained row; End resumes following the newest row.
+- Left/Right scroll the wide `SecondStats` table horizontally.
+- `q` or Ctrl-C exits capture cleanly.
+- Terminal resizing is detected automatically and immediately recalculates the
+  layout.
+
+The table follows each new second until you scroll upward or press Home. The
+graphs always represent the entire retained history: on narrow terminals,
+adjacent samples are compressed into the available columns instead of dropping
+the latest data. A terminal around 100×24 or larger is recommended. Layouts as
+small as 24×12 remain usable with paired compact graphs and one table row;
+smaller windows show a resize prompt.
+
+If the command is piped, redirected, run without a TTY, or Python lacks
+`curses`, Beacon Live uses the existing plain renderer. This also keeps
+automated invocations usable. Logging remains independent in either display
+mode: `--stats-csv` and `--beacons-jsonl` can run alongside the interactive
+TUI, while `--logging-only` writes both formats without starting any terminal
+dashboard.
+
 For troubleshooting, the system launchers and their isolated targets are:
 
 ```text

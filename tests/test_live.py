@@ -231,6 +231,86 @@ def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
     )
 
 
+def test_interactive_terminal_runs_capture_inside_curses_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    events: list[str] = []
+    snapshots: list[object] = []
+
+    class FakeCursesDashboard:
+        def __init__(self, *, include_local_cu: bool) -> None:
+            assert include_local_cu is False
+            events.append("created")
+
+        def run(self, callback: object) -> int:
+            events.append("wrapper-enter")
+            try:
+                return callback()  # type: ignore[operator]
+            finally:
+                events.append("wrapper-exit")
+
+        def refresh(self, snapshot: object = None) -> None:
+            snapshots.append(snapshot)
+
+        def poll_input(self) -> bool:
+            return False
+
+    monkeypatch.setattr("beacon_live.live.should_use_curses", lambda: True)
+    monkeypatch.setattr("beacon_live.live.CursesDashboard", FakeCursesDashboard)
+
+    assert run_live(interval_seconds=0.1) == 0
+
+    assert events == ["created", "wrapper-enter", "wrapper-exit"]
+    assert snapshots
+
+
+def test_non_tty_live_mode_keeps_plain_renderer_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    monkeypatch.setattr("beacon_live.live.should_use_curses", lambda: False)
+
+    class UnexpectedCursesDashboard:
+        def __init__(self, **kwargs: object) -> None:
+            raise AssertionError(f"curses should not start: {kwargs}")
+
+    monkeypatch.setattr(
+        "beacon_live.live.CursesDashboard",
+        UnexpectedCursesDashboard,
+    )
+
+    assert run_live(interval_seconds=0.1) == 0
+    assert "WLANPi Beacon Live" in capsys.readouterr().out
+
+
+def test_logging_only_never_starts_the_curses_dashboard(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    monkeypatch.setattr("beacon_live.live.should_use_curses", lambda: True)
+
+    class UnexpectedCursesDashboard:
+        def __init__(self, **kwargs: object) -> None:
+            raise AssertionError(f"logging-only started curses: {kwargs}")
+
+    monkeypatch.setattr(
+        "beacon_live.live.CursesDashboard",
+        UnexpectedCursesDashboard,
+    )
+
+    assert run_live(
+        interval_seconds=0.1,
+        stats_csv=tmp_path / "stats.csv",
+        beacons_jsonl=tmp_path / "beacons.jsonl",
+        logging_only=True,
+    ) == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_survey_enabled_live_mode_uses_available_data(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

@@ -29,6 +29,8 @@ from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.survey import SurveyCuResult
 from beacon_live.survey import compute_local_cu_result_from_samples
 from beacon_live.survey import parse_survey_dump
+from beacon_live.tui import CursesDashboard
+from beacon_live.tui import should_use_curses
 
 TSHARK_CAPTURE_FIELDS = list(TSHARK_FRAME_FIELD_NAMES)
 TSHARK_CAPTURE_PROTOCOLS = (
@@ -45,12 +47,18 @@ class LiveDashboard(Protocol):
     def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
         ...
 
+    def poll_input(self) -> bool:
+        ...
+
 
 class NullDashboard:
     """Disable rendering while retaining the normal live analyzer path."""
 
     def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
         return None
+
+    def poll_input(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True)
@@ -340,10 +348,40 @@ def run_live(
     min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
     disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
     rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
+    _dashboard: Optional[LiveDashboard] = None,
 ) -> int:
     if logging_only and stats_csv is None and beacons_jsonl is None:
         raise ValueError("logging-only mode requires at least one log format")
     local_cu = local_cu or survey_debug
+    if (
+        _dashboard is None
+        and not logging_only
+        and lcd_frame is None
+        and should_use_curses()
+    ):
+        curses_dashboard = CursesDashboard(include_local_cu=local_cu)
+        return curses_dashboard.run(
+            lambda: run_live(
+                iface=iface,
+                channel=channel,
+                frequency_mhz=frequency_mhz,
+                band=band,
+                interval_seconds=interval_seconds,
+                local_cu=local_cu,
+                survey_debug=survey_debug,
+                stats_csv=stats_csv,
+                beacons_jsonl=beacons_jsonl,
+                lcd_frame=lcd_frame,
+                logging_only=logging_only,
+                logging_control_path=logging_control_path,
+                logging_status_path=logging_status_path,
+                initial_logging_enabled=initial_logging_enabled,
+                min_free_bytes=min_free_bytes,
+                disk_check_interval_seconds=disk_check_interval_seconds,
+                rotation_interval_seconds=rotation_interval_seconds,
+                _dashboard=curses_dashboard,
+            )
+        )
     resolved_frequency_mhz = resolve_survey_target_frequency_mhz(
         channel,
         frequency_mhz=frequency_mhz,
@@ -359,7 +397,9 @@ def run_live(
     )
     analyzer = Analyzer()
     dashboard: LiveDashboard
-    if logging_only:
+    if _dashboard is not None:
+        dashboard = _dashboard
+    elif logging_only:
         dashboard = NullDashboard()
     elif lcd_frame is not None:
         dashboard = LcdDashboard(
@@ -425,6 +465,8 @@ def run_live(
         selector.register(process.stdout, selectors.EVENT_READ)
 
         while True:
+            if _dashboard_requests_exit(dashboard):
+                raise KeyboardInterrupt
             loop_now = time.monotonic()
             timeout_deadlines = [next_survey_poll]
             if logging_control_path is not None:
@@ -435,6 +477,16 @@ def run_live(
                 )
                 if maintenance_wait is not None:
                     timeout_deadlines.append(loop_now + maintenance_wait)
+            dashboard_poll_interval = getattr(
+                dashboard,
+                "poll_interval_seconds",
+                None,
+            )
+            if (
+                isinstance(dashboard_poll_interval, (int, float))
+                and dashboard_poll_interval > 0
+            ):
+                timeout_deadlines.append(loop_now + dashboard_poll_interval)
             timeout = max(0.0, min(timeout_deadlines) - loop_now)
             events = selector.select(timeout)
             for key, _ in events:
@@ -483,6 +535,9 @@ def run_live(
                             dashboard=dashboard,
                             snapshot=analyzer.snapshot,
                         )
+
+            if _dashboard_requests_exit(dashboard):
+                raise KeyboardInterrupt
 
             current = time.monotonic()
             if (
@@ -638,6 +693,11 @@ def _publish_live_stats(
     for stats in stats_rows:
         stats_writer(stats)
     dashboard.refresh(snapshot)
+
+
+def _dashboard_requests_exit(dashboard: LiveDashboard) -> bool:
+    poll_input = getattr(dashboard, "poll_input", None)
+    return bool(poll_input()) if callable(poll_input) else False
 
 
 def _advance_interval_deadline(

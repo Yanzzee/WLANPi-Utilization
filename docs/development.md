@@ -35,6 +35,7 @@ suggestions but does not run `apt install` itself.
 | `beacon_live/screens.py` | Pure screen definitions. |
 | `beacon_live/screen_manager.py` | UI-only screen index and debounce. |
 | `beacon_live/dashboard.py` | Terminal rendering. |
+| `beacon_live/tui.py` | Interactive curses dashboard, layout, and table navigation. |
 | `beacon_live/lcd_dashboard.py` | PPM/JSON LCD artifact rendering. |
 | `beacon_live/live.py` | Live hardware boundary and runtime loop. |
 | `beacon_live/log_writer.py` | Log formats, logging service, disk safety, rollover. |
