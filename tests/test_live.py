@@ -234,6 +234,7 @@ def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
 def test_interactive_terminal_runs_capture_inside_curses_wrapper(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _prepare_one_interval_live_run(monkeypatch)
     events: list[str] = []
@@ -291,6 +292,7 @@ def test_interactive_terminal_runs_capture_inside_curses_wrapper(
             "message": None,
         }
     ]
+    assert "Logging started" not in capsys.readouterr().err
 
 
 def test_non_tty_live_mode_keeps_plain_renderer_fallback(

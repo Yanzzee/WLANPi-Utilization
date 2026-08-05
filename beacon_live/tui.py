@@ -301,6 +301,10 @@ class CursesDashboard:
             self.logging_paths = tuple(str(path) for path in paths)
         self.logging_message = message
         if self._window is not None and not self.display_paused:
+            try:
+                self._window.clearok(True)
+            except (AttributeError, self._curses.error):
+                pass
             self.draw()
 
     def poll_input(self) -> bool:

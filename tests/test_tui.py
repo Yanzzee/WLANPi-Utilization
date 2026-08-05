@@ -68,6 +68,7 @@ class _FakeWindow:
         self.refresh_count = 0
         self.nonblocking = False
         self.keypad_enabled = False
+        self.clear_requested = False
 
     def getmaxyx(self) -> tuple[int, int]:
         return self.height, self.width
@@ -103,6 +104,9 @@ class _FakeWindow:
 
     def keypad(self, enabled: bool) -> None:
         self.keypad_enabled = enabled
+
+    def clearok(self, enabled: bool) -> None:
+        self.clear_requested = enabled
 
     def getch(self) -> int:
         return self.keys.pop(0) if self.keys else -1
@@ -369,17 +373,22 @@ def test_logging_paths_render_below_selected_bssids_with_blank_row() -> None:
     window = _FakeWindow(30, 140)
     curses_module = _FakeCurses(window)
     dashboard = CursesDashboard(curses_module=curses_module)
-    dashboard.set_logging_status(
-        active=True,
-        paths=(
-            Path("/var/log/wlanpi-beacon-live/live_stats.csv"),
-            Path("/var/log/wlanpi-beacon-live/live_beacons.jsonl"),
-        ),
-    )
 
-    dashboard.run(lambda: (dashboard.refresh(_snapshot(20)), 0)[1])
+    def enable_logging() -> int:
+        dashboard.refresh(_snapshot(20))
+        dashboard.set_logging_status(
+            active=True,
+            paths=(
+                Path("/var/log/wlanpi-beacon-live/live_stats.csv"),
+                Path("/var/log/wlanpi-beacon-live/live_beacons.jsonl"),
+            ),
+        )
+        return 0
+
+    dashboard.run(enable_logging)
 
     assert dashboard.last_layout is not None
+    assert window.clear_requested is True
     right_start = (dashboard.last_layout.width - 1) // 2 + 1
     selected_start = dashboard.last_layout.composition_start
     blank_row = selected_start + 4

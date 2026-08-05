@@ -464,12 +464,13 @@ def run_live(
     try:
         if logging_service is not None and initial_logging_requested:
             if logging_service.start():
-                _print_logging_started(logging_service)
-                _set_dashboard_logging_status(
+                status_rendered = _set_dashboard_logging_status(
                     dashboard,
                     active=True,
                     paths=logging_service.current_paths,
                 )
+                if not status_rendered:
+                    _print_logging_started(logging_service)
         if process.stdout is None:
             raise LiveCommandError(build_tshark_command(iface), stderr="missing stdout")
         selector.register(process.stdout, selectors.EVENT_READ)
@@ -560,21 +561,23 @@ def run_live(
                 if logging_service is not None and requested is not None:
                     if requested and not logging_service.active and not low_disk_latched:
                         if logging_service.start():
-                            _print_logging_started(logging_service)
-                            _set_dashboard_logging_status(
+                            status_rendered = _set_dashboard_logging_status(
                                 dashboard,
                                 active=True,
                                 paths=logging_service.current_paths,
                             )
+                            if not status_rendered:
+                                _print_logging_started(logging_service)
                     elif not requested and logging_service.active:
                         logging_service.stop()
-                        _set_dashboard_logging_status(
+                        status_rendered = _set_dashboard_logging_status(
                             dashboard,
                             active=False,
                             paths=logging_service.current_paths,
                             message="Logging stopped",
                         )
-                        print("Logging stopped.", file=sys.stderr, flush=True)
+                        if not status_rendered:
+                            print("Logging stopped.", file=sys.stderr, flush=True)
                         if logging_only:
                             return 0
                 next_logging_control_poll = _advance_interval_deadline(
@@ -587,7 +590,7 @@ def run_live(
                 logging_event = logging_service.maintain(now=current)
                 if logging_event is LoggingEvent.LOW_DISK_STOP:
                     low_disk_latched = True
-                    _set_dashboard_logging_status(
+                    status_rendered = _set_dashboard_logging_status(
                         dashboard,
                         active=False,
                         paths=logging_service.current_paths,
@@ -598,21 +601,26 @@ def run_live(
                             logging_status_path,
                             reason="disk_space_nearly_full",
                         )
-                    print(
-                        "Logging stopped: free disk space is below the safety "
-                        "threshold.",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    if not status_rendered:
+                        print(
+                            "Logging stopped: free disk space is below the safety "
+                            "threshold.",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                     if logging_only:
                         return 0
                 elif logging_event is LoggingEvent.ROTATED:
-                    _print_logging_started(logging_service, prefix="Log rollover")
-                    _set_dashboard_logging_status(
+                    status_rendered = _set_dashboard_logging_status(
                         dashboard,
                         active=True,
                         paths=logging_service.current_paths,
                     )
+                    if not status_rendered:
+                        _print_logging_started(
+                            logging_service,
+                            prefix="Log rollover",
+                        )
 
             if current >= next_survey_poll:
                 if local_cu:
@@ -738,10 +746,10 @@ def _set_dashboard_logging_status(
     active: bool,
     paths: Optional[LiveLogPaths],
     message: Optional[str] = None,
-) -> None:
+) -> bool:
     setter = getattr(dashboard, "set_logging_status", None)
     if not callable(setter):
-        return
+        return False
     path_values = None
     if paths is not None:
         path_values = tuple(
@@ -750,6 +758,7 @@ def _set_dashboard_logging_status(
             if path is not None
         )
     setter(active=active, paths=path_values, message=message)
+    return True
 
 
 def _advance_interval_deadline(
