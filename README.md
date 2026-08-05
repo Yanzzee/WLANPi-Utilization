@@ -110,6 +110,10 @@ sudo wlanpi-beacon-live --iface wlan0 --channel 36
 sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
   --logging-only --log-dir /var/log/wlanpi-beacon-live
 
+# Interactive display plus both log formats
+sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
+  --log --log-dir /var/log/wlanpi-beacon-live
+
 # Hardware-free replay of the included sample (run from the repository)
 beacon-live replay --input samples/tshark_qbss_sample.tsv
 
@@ -145,13 +149,15 @@ Strongest AP: AP-Lobby  Vendor: Example Vendor  Metric   Value BSSID ...
 * 1 aa:aa:aa:aa:aa:aa  -45dBm Alpha             RET max     4% aa:aa:... -45dBm Alpha
   2 aa:aa:aa:aa:aa:ab  -47dBm Guest
 QBSS CU 62%  ADC 48%  STA 17  RET 4%  LOSS 1%
+                                                Logging to logs/beacon_live_..._stats.csv
+                                                Logging to logs/beacon_live_..._beacons.jsonl
 CU    ▁▂▂▃▄▃▅▆▅▇...                 CU    62%  AVG   44%  MAX   81%
 ADC   ▇▇▆▆▅▅▄▄▃▃...                 ADC   48%  AVG   55%  MIN   31%
 MAC   ▁▁▁▂▂▁▃▂▂▃...                 SUM    28  MAC     9  TOP    17
 LOSS  ▁▁▁▁▂▁▁▃▁▁...                 BL      1%  AVG    2%  MAX    8%
 STA   ▂▂▃▃▃▄▄▄▄▅...                 SUM    28  MAC     9  TOP    17
 RET   ▁▁▂▁▁▃▂▁▁▂...                 RET     4%  AVG    3%  MAX   11%
-TIME     BSSIDS STA SUM CLIENT CU% ... SSID                 QBSS BSSID
+TIME     BSSIDS STA_SUM CLIENT CU% ... SSID                 QBSS_BSSID
 14:30:05 8      28      3      62.0 ... Alpha                aa:aa:aa:aa:aa:aa
 ```
 
@@ -166,6 +172,8 @@ Controls:
 - Up/Down scroll the table one row; Page Up/Down scroll one visible page.
 - Home jumps to the oldest retained row; End resumes following the newest row.
 - Left/Right scroll the wide `SecondStats` table horizontally.
+- Space pauses or resumes dashboard updates. Capture, analysis, and logging
+  continue while paused; resuming jumps directly to the current snapshot.
 - `q` or Ctrl-C exits capture cleanly.
 - Terminal resizing is detected automatically and immediately recalculates the
   layout.
@@ -173,18 +181,27 @@ Controls:
 The table follows each new second until you scroll upward or press Home. The
 graphs always represent the entire retained history: on narrow terminals,
 adjacent samples are compressed into the available columns instead of dropping
-the latest data. A terminal around 120×30 or larger is recommended for the
+the latest data. Once all 120 history columns fit, each graph's summary follows
+the graph directly instead of being pushed to the terminal's right edge. A
+terminal around 120×30 or larger is recommended for the
 side-by-side identity columns. Below 112 columns they stack vertically. A
 24×15 terminal can show one strongest-radio BSSID with compact graphs and a
 table row; each additional BSSID requires another row. Smaller windows show a
 resize prompt.
 
+Multiword table headers use underscores. Raw QBSS CU, Retry-bit-readable frame
+count, and selected beacon rate remain in the analyzer state but are omitted
+from the scrolling display table. The existing CSV schema is unchanged; its
+retry-observed count and selected beacon-rate fields remain available there.
+
 If the command is piped, redirected, run without a TTY, or Python lacks
 `curses`, Beacon Live uses the existing plain renderer. This also keeps
 automated invocations usable. Logging remains independent in either display
-mode: `--stats-csv` and `--beacons-jsonl` can run alongside the interactive
-TUI, while `--logging-only` writes both formats without starting any terminal
-dashboard.
+mode: `--log` enables both formats alongside the interactive TUI,
+and the TUI shows each active output path below `Selected BSSIDs`.
+`--stats-csv` and `--beacons-jsonl` remain available when only one format is
+wanted, while `--logging-only` writes both formats without starting any
+terminal dashboard.
 
 For troubleshooting, the system launchers and their isolated targets are:
 

@@ -232,11 +232,15 @@ def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
 
 
 def test_interactive_terminal_runs_capture_inside_curses_wrapper(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepare_one_interval_live_run(monkeypatch)
     events: list[str] = []
     snapshots: list[object] = []
+    logging_statuses: list[dict[str, object]] = []
+    stats_csv = tmp_path / "display-stats.csv"
+    beacons_jsonl = tmp_path / "display-beacons.jsonl"
 
     class FakeCursesDashboard:
         def __init__(
@@ -266,13 +270,27 @@ def test_interactive_terminal_runs_capture_inside_curses_wrapper(
         def poll_input(self) -> bool:
             return False
 
+        def set_logging_status(self, **status: object) -> None:
+            logging_statuses.append(status)
+
     monkeypatch.setattr("beacon_live.live.should_use_curses", lambda: True)
     monkeypatch.setattr("beacon_live.live.CursesDashboard", FakeCursesDashboard)
 
-    assert run_live(interval_seconds=0.1) == 0
+    assert run_live(
+        interval_seconds=0.1,
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+    ) == 0
 
     assert events == ["created", "wrapper-enter", "wrapper-exit"]
     assert snapshots
+    assert logging_statuses == [
+        {
+            "active": True,
+            "paths": (stats_csv, beacons_jsonl),
+            "message": None,
+        }
+    ]
 
 
 def test_non_tty_live_mode_keeps_plain_renderer_fallback(

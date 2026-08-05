@@ -12,6 +12,7 @@ from beacon_live.log_writer import LOW_DISK_END_MESSAGE
 from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import LoggingEvent
 from beacon_live.log_writer import LoggingService
+from beacon_live.log_writer import STATS_CSV_FIELDS
 from beacon_live.log_writer import build_live_log_paths
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
@@ -41,6 +42,19 @@ def test_live_log_paths_use_generated_timestamped_filenames() -> None:
     assert paths.beacons_jsonl == (
         log_dir / "beacon_live_20260710T123045123456-0600_beacons.jsonl"
     )
+
+
+def test_logging_reference_documents_every_stats_csv_field() -> None:
+    reference = (
+        Path(__file__).parents[1] / "docs" / "logging.md"
+    ).read_text(encoding="utf-8")
+
+    field_positions = []
+    for field in STATS_CSV_FIELDS:
+        marker = f"| `{field}` |"
+        assert marker in reference
+        field_positions.append(reference.index(marker))
+    assert field_positions == sorted(field_positions)
 
 
 def test_capture_log_writer_creates_directories_and_flushes_rows(

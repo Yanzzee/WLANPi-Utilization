@@ -352,6 +352,42 @@ def test_live_logging_only_enables_both_formats_and_disables_rendering(
     assert "lcd_frame" not in calls[0]
 
 
+def test_live_log_enables_both_formats_with_display(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(
+        ["live", "--log", "--log-dir", str(tmp_path)]
+    ) == 0
+
+    assert isinstance(calls[0]["stats_csv"], Path)
+    assert isinstance(calls[0]["beacons_jsonl"], Path)
+    assert calls[0]["stats_csv"].parent == tmp_path
+    assert calls[0]["beacons_jsonl"].parent == tmp_path
+    assert "logging_only" not in calls[0]
+
+
+def test_live_log_rejects_logging_only(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["live", "--log", "--logging-only"])
+
+    assert exc_info.value.code == 2
+    assert (
+        "--logging-only cannot be combined with --log"
+        in capsys.readouterr().err
+    )
+
+
 def test_live_wires_hidden_lcd_frame_for_fpms_launcher(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

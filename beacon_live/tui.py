@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import tzinfo
+from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, TextIO
 
 from beacon_live.models import MetricsSnapshot
@@ -30,6 +31,7 @@ except ImportError:  # pragma: no cover - depends on the Python build
 MIN_TERMINAL_HEIGHT = 12
 MIN_TERMINAL_WIDTH = 24
 HORIZONTAL_SCROLL_STEP = 8
+GRAPH_HISTORY_COLUMNS = 120
 _BAR_LEVELS = "▁▂▃▄▅▆▇█"
 
 
@@ -121,16 +123,29 @@ def calculate_layout(
     width: int,
     *,
     radio_bssid_rows: int = 1,
+    logging_rows: int = 0,
 ) -> DashboardLayout:
     """Return a responsive layout while reserving at least one table row."""
     height = max(0, height)
     width = max(0, width)
     radio_bssid_rows = max(1, radio_bssid_rows)
+    logging_rows = max(0, logging_rows)
     side_by_side = width >= 112
     identity_rows = 0
-    composition_rows = 4 + radio_bssid_rows
-    if not side_by_side:
-        composition_rows += 3
+    strongest_radio_rows = 4 + radio_bssid_rows
+    selected_bssid_rows = 4 if side_by_side else 3
+    logging_section_rows = 1 + logging_rows if logging_rows else 0
+    if side_by_side:
+        composition_rows = max(
+            strongest_radio_rows,
+            selected_bssid_rows + logging_section_rows,
+        )
+    else:
+        composition_rows = (
+            strongest_radio_rows
+            + selected_bssid_rows
+            + logging_section_rows
+        )
     compact_graphs = height < 20
     graph_rows = 3 if compact_graphs else 6
 
@@ -229,6 +244,11 @@ class CursesDashboard:
         self.frequency_mhz = frequency_mhz
         self.viewport = TableViewport()
         self.exit_requested = False
+        self.display_paused = False
+        self._pending_snapshot: Optional[MetricsSnapshot] = None
+        self.logging_active = False
+        self.logging_paths: tuple[str, ...] = ()
+        self.logging_message: Optional[str] = None
         self.last_layout: Optional[DashboardLayout] = None
         self._window: Optional[Any] = None
         self._curses = _curses if curses_module is None else curses_module
@@ -261,8 +281,26 @@ class CursesDashboard:
 
     def refresh(self, snapshot: Optional[MetricsSnapshot] = None) -> None:
         if snapshot is not None:
-            self.snapshot = snapshot
-        if self._window is not None:
+            if self.display_paused:
+                self._pending_snapshot = snapshot
+            else:
+                self.snapshot = snapshot
+        if self._window is not None and not self.display_paused:
+            self.draw()
+
+    def set_logging_status(
+        self,
+        *,
+        active: bool,
+        paths: Optional[Sequence[Path]] = None,
+        message: Optional[str] = None,
+    ) -> None:
+        """Update logging state without coupling it to metrics snapshots."""
+        self.logging_active = active
+        if paths is not None:
+            self.logging_paths = tuple(str(path) for path in paths)
+        self.logging_message = message
+        if self._window is not None and not self.display_paused:
             self.draw()
 
     def poll_input(self) -> bool:
@@ -290,6 +328,14 @@ class CursesDashboard:
         if key in (ord("q"), ord("Q"), 3):
             self.exit_requested = True
             return True
+        if key == ord(" "):
+            self.display_paused = not self.display_paused
+            if not self.display_paused:
+                if self._pending_snapshot is not None:
+                    self.snapshot = self._pending_snapshot
+                    self._pending_snapshot = None
+                self.viewport.follow_newest = True
+            return True
         if self._window is None:
             return False
 
@@ -298,6 +344,7 @@ class CursesDashboard:
             height,
             width,
             radio_bssid_rows=len(self._strongest_radio_identities()),
+            logging_rows=len(self._logging_lines()),
         )
         row_count = len(self.snapshot.history)
         page_rows = layout.table_rows
@@ -367,6 +414,7 @@ class CursesDashboard:
             height,
             width,
             radio_bssid_rows=len(radio_identities),
+            logging_rows=len(self._logging_lines()),
         )
         self.last_layout = layout
         self._window.erase()
@@ -385,7 +433,7 @@ class CursesDashboard:
             "| WLANPi Beacon Live "
             f"| {self.snapshot.window_seconds}s history "
             f"| rows {len(self.snapshot.history)} "
-            f"| {'FOLLOW' if self.viewport.follow_newest else 'SCROLLED'} "
+            f"| {_format_dashboard_state(self.display_paused, self.viewport)} "
         )
         self._add(layout.title_row, 0, title, width, self._attr("A_REVERSE"))
         self._draw_composition(
@@ -396,7 +444,7 @@ class CursesDashboard:
         self._draw_table(layout)
         footer = (
             " ↑/↓ rows  PgUp/PgDn page  Home/End oldest/newest  "
-            "←/→ columns  q quit "
+            "←/→ columns  Space pause/resume  q quit "
         )
         self._add(layout.footer_row, 0, footer, width, self._attr("A_REVERSE"))
         self._window.refresh()
@@ -481,6 +529,12 @@ class CursesDashboard:
             selected_width,
             include_header=right_start is not None,
         )
+        selected_rows = 4 if right_start is not None else 3
+        self._draw_logging_status(
+            selected_start + selected_rows + 1,
+            selected_column,
+            selected_width,
+        )
 
     def _draw_radio_identity(
         self,
@@ -551,6 +605,25 @@ class CursesDashboard:
             ),
             width,
         )
+
+    def _logging_lines(self) -> tuple[str, ...]:
+        if self.logging_active:
+            if self.logging_paths:
+                return tuple(f"Logging to {path}" for path in self.logging_paths)
+            return ("Logging active",)
+        if self.logging_message:
+            return (self.logging_message,)
+        return ()
+
+    def _draw_logging_status(self, row: int, column: int, width: int) -> None:
+        for index, line in enumerate(self._logging_lines()):
+            self._add(
+                row + index,
+                column,
+                line,
+                width,
+                self._attr("A_BOLD") if index == 0 else 0,
+            )
 
     def _strongest_radio_identities(self) -> tuple[DisplayIdentity, ...]:
         identities: list[DisplayIdentity] = []
@@ -693,7 +766,11 @@ def _format_full_graph(
     summary = _format_graph_summary(view.summary)
     remaining = max(1, width - len(prefix))
     summary_width = len(summary) if remaining >= len(summary) + 10 else 0
-    graph_width = max(1, remaining - summary_width - (1 if summary_width else 0))
+    available_graph_width = max(
+        1,
+        remaining - summary_width - (1 if summary_width else 0),
+    )
+    graph_width = min(GRAPH_HISTORY_COLUMNS, available_graph_width)
     graph = _sparkline(
         [point.value for point in points],
         graph_width,
@@ -749,6 +826,12 @@ def _format_tuning(
     band_text = "--" if band is None else f"{band} GHz"
     channel_text = "--" if channel is None else channel
     return f"{frequency} | Band {band_text} | Channel {channel_text}"
+
+
+def _format_dashboard_state(paused: bool, viewport: TableViewport) -> str:
+    if paused:
+        return "PAUSED"
+    return "FOLLOW" if viewport.follow_newest else "SCROLLED"
 
 
 def _format_identity_header(width: int) -> str:
@@ -896,11 +979,10 @@ def _format_table_header(include_local_cu: bool) -> str:
     cells = [
         ("TIME", 8),
         ("BSSIDS", 6),
-        ("STA SUM", 7),
+        ("STA_SUM", 7),
         ("CLIENT", 6),
         ("CU%", 6),
-        ("CU RAW", 6),
-        ("SEL STA", 7),
+        ("SEL_STA", 7),
         ("ADC%", 6),
     ]
     if include_local_cu:
@@ -908,19 +990,17 @@ def _format_table_header(include_local_cu: bool) -> str:
     cells.extend(
         (
             ("FRAMES", 7),
-            ("RET OBS", 7),
-            ("RET ELIG", 8),
+            ("RET_ELIG", 8),
             ("RETRIES", 7),
             ("RETRY%", 7),
-            ("BCN RATE", 8),
-            ("BCN RX", 6),
-            ("BCN EXP", 7),
+            ("BCN_RX", 6),
+            ("BCN_EXP", 7),
             ("LOSS%", 7),
             ("SSID", 20),
-            ("QBSS BSSID", 17),
+            ("QBSS_BSSID", 17),
             ("RSSI", 5),
             ("PEAK", 5),
-            ("TOP RETRY BSSID", 17),
+            ("TOP_RETRY_BSSID", 17),
         )
     )
     return " ".join(f"{label:<{width}}"[:width] for label, width in cells)
@@ -945,7 +1025,6 @@ def _format_table_row(
         (str(stats.qbss_station_count_sum), 7),
         (str(stats.unique_client_mac_count), 6),
         (_percent(stats.selected_qbss_cu_percent), 6),
-        (_optional(stats.selected_qbss_cu_raw), 6),
         (_optional(stats.selected_qbss_station_count), 7),
         (_percent(adc_percent), 6),
     ]
@@ -954,11 +1033,9 @@ def _format_table_row(
     values.extend(
         (
             (str(stats.received_frame_count), 7),
-            (str(stats.retry_observed_frame_count), 7),
             (str(stats.retry_eligible_frame_count), 8),
             (str(stats.retry_frame_count), 7),
             (_percent(stats.retry_percent), 7),
-            (_percent(stats.selected_beacon_rate_percent), 8),
             (str(stats.beacon_received_count), 6),
             (str(stats.beacon_expected_count), 7),
             (_percent(stats.beacon_loss_percent), 7),

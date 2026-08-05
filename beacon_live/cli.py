@@ -91,8 +91,15 @@ def _run_live_command(
         parser.error(
             f"{command_prefix}--logging-only cannot be combined with --lcd-frame"
         )
-    write_stats_csv = args.stats_csv or args.logging_only
-    write_beacons_jsonl = args.beacons_jsonl or args.logging_only
+    if args.logging_only and args.log:
+        parser.error(
+            f"{command_prefix}--logging-only cannot be combined with "
+            "--log"
+        )
+    write_stats_csv = args.stats_csv or args.logging_only or args.log
+    write_beacons_jsonl = (
+        args.beacons_jsonl or args.logging_only or args.log
+    )
     log_paths = build_live_log_paths(
         args.log_dir,
         write_stats_csv=write_stats_csv,
@@ -295,6 +302,14 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Capture and write both log formats without rendering a terminal "
             "or LCD display."
+        ),
+    )
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        help=(
+            "Render the live display while writing both CSV and JSONL log "
+            "formats."
         ),
     )
     parser.add_argument(

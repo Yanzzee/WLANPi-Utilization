@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -15,6 +16,8 @@ from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
 from beacon_live.tui import CursesDashboard
 from beacon_live.tui import TableViewport
+from beacon_live.tui import _format_table_header
+from beacon_live.tui import _format_table_row
 from beacon_live.tui import calculate_layout
 from beacon_live.tui import compress_history
 from beacon_live.tui import should_use_curses
@@ -132,6 +135,10 @@ def test_layout_reserves_graphs_and_scrollable_table_at_common_sizes() -> None:
     assert narrow.table_rows >= 1
     assert tiny.too_small is True
 
+    logging = calculate_layout(30, 120, radio_bssid_rows=2, logging_rows=2)
+    assert logging.composition_rows == 7
+    assert logging.table_rows >= 1
+
 
 def test_history_compression_uses_the_full_window_including_newest_sample() -> None:
     compressed = compress_history(tuple(float(value) for value in range(120)), 12)
@@ -223,6 +230,35 @@ def test_key_controls_scroll_both_axes_and_support_home_end_and_quit() -> None:
     assert ctrl_c_dashboard.exit_requested is True
 
 
+def test_space_pauses_only_rendered_snapshot_and_resume_jumps_to_newest() -> None:
+    window = _FakeWindow(24, 120)
+    curses_module = _FakeCurses(window)
+    dashboard = CursesDashboard(curses_module=curses_module)
+
+    def interact() -> int:
+        dashboard.refresh(_snapshot(20))
+        window.keys.append(ord(" "))
+        dashboard.poll_input()
+        assert dashboard.display_paused is True
+        assert "PAUSED" in window.lines[0]
+
+        paused_refresh_count = window.refresh_count
+        dashboard.refresh(_snapshot(21))
+        assert len(dashboard.snapshot.history) == 20
+        assert window.refresh_count == paused_refresh_count
+
+        dashboard.viewport.follow_newest = False
+        window.keys.append(ord(" "))
+        dashboard.poll_input()
+        assert dashboard.display_paused is False
+        assert len(dashboard.snapshot.history) == 21
+        assert dashboard.viewport.follow_newest is True
+        assert "FOLLOW" in window.lines[0]
+        return 0
+
+    assert dashboard.run(interact) == 0
+
+
 def test_resize_recalculates_layout_and_narrow_terminal_keeps_all_graphs() -> None:
     window = _FakeWindow(24, 100)
     curses_module = _FakeCurses(window)
@@ -312,6 +348,69 @@ def test_full_graph_fields_have_fixed_edges_and_requested_vertical_order() -> No
     ]
     assert {len(line) for line in graph_lines} == {140}
     assert {len(line[-31:]) for line in graph_lines} == {31}
+
+
+def test_full_history_graph_summary_follows_graph_on_very_wide_terminal() -> None:
+    window = _FakeWindow(30, 220)
+    curses_module = _FakeCurses(window)
+    dashboard = CursesDashboard(curses_module=curses_module)
+
+    dashboard.run(lambda: (dashboard.refresh(_snapshot(120)), 0)[1])
+
+    assert dashboard.last_layout is not None
+    graph_start = dashboard.last_layout.graph_start
+    graph_lines = [window.lines[graph_start + index] for index in range(6)]
+    assert {len(line) for line in graph_lines} == {158}
+    assert all(len(line) < 220 for line in graph_lines)
+    assert {len(line[-31:]) for line in graph_lines} == {31}
+
+
+def test_logging_paths_render_below_selected_bssids_with_blank_row() -> None:
+    window = _FakeWindow(30, 140)
+    curses_module = _FakeCurses(window)
+    dashboard = CursesDashboard(curses_module=curses_module)
+    dashboard.set_logging_status(
+        active=True,
+        paths=(
+            Path("/var/log/wlanpi-beacon-live/live_stats.csv"),
+            Path("/var/log/wlanpi-beacon-live/live_beacons.jsonl"),
+        ),
+    )
+
+    dashboard.run(lambda: (dashboard.refresh(_snapshot(20)), 0)[1])
+
+    assert dashboard.last_layout is not None
+    right_start = (dashboard.last_layout.width - 1) // 2 + 1
+    selected_start = dashboard.last_layout.composition_start
+    blank_row = selected_start + 4
+    assert not any(
+        row == blank_row and column == right_start
+        for row, column, _, _ in window.writes
+    )
+    assert "Logging to /var/log/wlanpi-beacon-live/live_stats.csv" in window.text
+    assert (
+        "Logging to /var/log/wlanpi-beacon-live/live_beacons.jsonl"
+        in window.text
+    )
+
+
+def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> None:
+    header = _format_table_header(include_local_cu=True)
+    row = _format_table_row(
+        _stats(1_000),
+        include_local_cu=True,
+        local_timezone=None,
+    )
+
+    assert "STA_SUM" in header
+    assert "SEL_STA" in header
+    assert "RET_ELIG" in header
+    assert "QBSS_BSSID" in header
+    assert "TOP_RETRY_BSSID" in header
+    assert "CU RAW" not in header
+    assert "RET OBS" not in header
+    assert "BCN RATE" not in header
+    assert len(row) == len(header)
 
 
 def test_curses_wrapper_detaches_window_and_restores_after_failure() -> None:
