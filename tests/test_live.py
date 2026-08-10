@@ -243,12 +243,12 @@ def test_configure_monitor_interface_stops_on_failed_command() -> None:
 
 def test_live_command_error_without_stderr_still_has_a_message() -> None:
     error = LiveCommandError(
-        ["iw", "dev", "wlan0", "set", "freq", "5180", "80MHz", "5210"],
+        ["iw", "dev", "wlan0", "set", "freq", "5180", "80", "5210"],
         returncode=1,
     )
 
     assert str(error) == (
-        "iw dev wlan0 set freq 5180 80MHz 5210 exited with status 1"
+        "iw dev wlan0 set freq 5180 80 5210 exited with status 1"
     )
 
 
@@ -314,10 +314,12 @@ def test_default_80mhz_tune_failure_retries_once_at_20mhz(
         ChannelWidth.MHZ80,
         ChannelWidth.MHZ20,
     ]
+    captured = capsys.readouterr()
     assert (
         "driver rejected 80 MHz); retrying once at 20 MHz"
-        in capsys.readouterr().err
+        in captured.err
     )
+    assert "Channel 36 | Width 20 MHz" in captured.out
 
 
 def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
@@ -730,8 +732,12 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     process_starts: list[str] = []
     configured_definitions: list[ChannelDefinition] = []
     snapshots: list[object] = []
+    displayed_widths: list[str] = []
 
     class Dashboard:
+        def set_capture_width(self, width: str) -> None:
+            displayed_widths.append(width)
+
         def refresh(self, snapshot: object = None) -> None:
             snapshots.append(snapshot)
 
@@ -791,6 +797,7 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     assert len(configured_definitions) == 1
     assert configured_definitions[0].width is ChannelWidth.MHZ80
     assert configured_definitions[0].center_frequency1_mhz == 5210
+    assert displayed_widths == ["80"]
     assert snapshots
     assert snapshots[-1].history
     assert stats_csv.exists() and beacons_jsonl.exists()

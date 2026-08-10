@@ -30,6 +30,21 @@ def test_dashboard_formats_all_beacon_metrics_without_local_cu() -> None:
     assert "LOCAL SURVEY CU" not in rendered
 
 
+def test_dashboard_title_shows_actual_capture_width_after_channel() -> None:
+    dashboard = TerminalDashboard(
+        band="5",
+        channel="40",
+        frequency_mhz=5200,
+    )
+    dashboard.set_capture_width("80")
+    dashboard.update(_snapshot(_stats(1000)))
+
+    assert (
+        "5200 MHz | Band 5 GHz | Channel 40 | Width 80 MHz"
+        in dashboard.render().splitlines()[0]
+    )
+
+
 def test_rolling_summary_uses_displayed_values_from_last_120_seconds() -> None:
     dashboard = TerminalDashboard()
     values = [float(index % 101) for index in range(121)]

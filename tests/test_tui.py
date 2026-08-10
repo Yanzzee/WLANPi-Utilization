@@ -306,10 +306,14 @@ def test_header_composition_and_selected_identity_columns_are_deduplicated() -> 
         channel="36",
         frequency_mhz=5180,
     )
+    dashboard.set_capture_width("80")
 
     dashboard.run(lambda: (dashboard.refresh(_snapshot(20)), 0)[1])
 
-    assert "5180 MHz | Band 5 GHz | Channel 36" in window.lines[0]
+    assert (
+        "5180 MHz | Band 5 GHz | Channel 36 | Width 80 MHz"
+        in window.lines[0]
+    )
     assert "Composition:" not in window.text
     assert "Strongest AP: AP-Lobby" in window.text
     assert "aa:aa:aa:aa:aa:aa" in window.text

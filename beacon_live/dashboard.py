@@ -38,12 +38,22 @@ class TerminalDashboard:
         max_seconds: int = DEFAULT_WINDOW_SECONDS,
         include_local_cu: bool = False,
         local_timezone: Optional[tzinfo] = None,
+        band: Optional[str] = None,
+        channel: Optional[str] = None,
+        frequency_mhz: Optional[int] = None,
     ) -> None:
         self.screen_manager = ScreenManager(
             snapshot=MetricsSnapshot.empty(window_seconds=max_seconds)
         )
         self.include_local_cu = include_local_cu
         self.local_timezone = local_timezone
+        self.band = band
+        self.channel = channel
+        self.frequency_mhz = frequency_mhz
+        self.capture_width: Optional[str] = None
+
+    def set_capture_width(self, width: str) -> None:
+        self.capture_width = width
 
     @property
     def snapshot(self) -> MetricsSnapshot:
@@ -87,7 +97,7 @@ class TerminalDashboard:
             return self._render_metric_screen()
 
         title = (
-            "WLANPi Beacon Live | "
+            f"{self._title_prefix()} | "
             f"rolling {self.snapshot.window_seconds}s | "
             f"rows={len(self.snapshot.history)}"
         )
@@ -118,7 +128,7 @@ class TerminalDashboard:
     def _render_metric_screen(self) -> str:
         view = self.screen_manager.view
         title = (
-            "WLANPi Beacon Live | "
+            f"{self._title_prefix()} | "
             f"{view.title} | rolling {self.snapshot.window_seconds}s | "
             f"rows={len(self.snapshot.history)}"
         )
@@ -187,6 +197,22 @@ class TerminalDashboard:
         )
         return f"Selected QBSS CU graph (0–100%, one bar/second): {bars or '--'}"
 
+    def _title_prefix(self) -> str:
+        if (
+            self.frequency_mhz is None
+            and self.band is None
+            and self.channel is None
+            and self.capture_width is None
+        ):
+            return "WLANPi Beacon Live"
+        return (
+            f"{_format_frequency(self.frequency_mhz)} | "
+            f"Band {_format_band(self.band)} | "
+            f"Channel {self.channel or '--'} | "
+            f"Width {_format_capture_width(self.capture_width)} | "
+            "WLANPi Beacon Live"
+        )
+
     def refresh(
         self,
         snapshot: Optional[MetricsSnapshot] = None,
@@ -216,6 +242,18 @@ def _format_stats_row(
     if include_local_cu:
         return f"{line}  {_format_local_cu(stats.local_cu_percent):>16}"
     return line
+
+
+def _format_frequency(frequency_mhz: Optional[int]) -> str:
+    return "-- MHz" if frequency_mhz is None else f"{frequency_mhz} MHz"
+
+
+def _format_band(band: Optional[str]) -> str:
+    return "--" if band is None else f"{band} GHz"
+
+
+def _format_capture_width(width: Optional[str]) -> str:
+    return "-- MHz" if width is None else f"{width} MHz"
 
 
 def _format_second_time(second: int, local_timezone: Optional[tzinfo]) -> str:

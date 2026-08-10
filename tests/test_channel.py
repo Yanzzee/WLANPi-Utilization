@@ -275,8 +275,28 @@ def test_explicit_width_requires_centers_and_builds_160_tune() -> None:
         "set",
         "freq",
         "5180",
-        "160MHz",
+        "160",
         "5250",
+    ]
+
+
+def test_80mhz_tune_uses_numeric_iw_channel_definition_syntax() -> None:
+    definition = ChannelDefinition(
+        5200,
+        ChannelWidth.MHZ80,
+        5210,
+        primary_channel=40,
+    )
+
+    assert build_definition_tune_command("wlan0", definition) == [
+        "iw",
+        "dev",
+        "wlan0",
+        "set",
+        "freq",
+        "5200",
+        "80",
+        "5210",
     ]
 
 

@@ -242,6 +242,7 @@ class CursesDashboard:
         self.band = band
         self.channel = channel
         self.frequency_mhz = frequency_mhz
+        self.capture_width: Optional[str] = None
         self.viewport = TableViewport()
         self.exit_requested = False
         self.display_paused = False
@@ -252,6 +253,11 @@ class CursesDashboard:
         self.last_layout: Optional[DashboardLayout] = None
         self._window: Optional[Any] = None
         self._curses = _curses if curses_module is None else curses_module
+
+    def set_capture_width(self, width: str) -> None:
+        self.capture_width = width
+        if self._window is not None and not self.display_paused:
+            self.draw()
 
     def run(self, callback: Callable[[], int]) -> int:
         """Run a capture callback inside curses.wrapper cleanup semantics."""
@@ -432,8 +438,14 @@ class CursesDashboard:
             screen.screen_id: screen.render(self.snapshot)
             for screen in DEFAULT_SCREENS
         }
+        tuning = _format_tuning(
+            self.frequency_mhz,
+            self.band,
+            self.channel,
+            self.capture_width,
+        )
         title = (
-            f" {_format_tuning(self.frequency_mhz, self.band, self.channel)} "
+            f" {tuning} "
             "| WLANPi Beacon Live "
             f"| {self.snapshot.window_seconds}s history "
             f"| rows {len(self.snapshot.history)} "
@@ -825,11 +837,16 @@ def _format_tuning(
     frequency_mhz: Optional[int],
     band: Optional[str],
     channel: Optional[str],
+    capture_width: Optional[str],
 ) -> str:
     frequency = "-- MHz" if frequency_mhz is None else f"{frequency_mhz} MHz"
     band_text = "--" if band is None else f"{band} GHz"
     channel_text = "--" if channel is None else channel
-    return f"{frequency} | Band {band_text} | Channel {channel_text}"
+    width_text = "-- MHz" if capture_width is None else f"{capture_width} MHz"
+    return (
+        f"{frequency} | Band {band_text} | Channel {channel_text} | "
+        f"Width {width_text}"
+    )
 
 
 def _format_dashboard_state(paused: bool, viewport: TableViewport) -> str:

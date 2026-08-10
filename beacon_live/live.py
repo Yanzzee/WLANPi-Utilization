@@ -202,10 +202,10 @@ def build_definition_tune_command(
         command.append(f"HT40{offset}")
         return command
     width_argument = {
-        ChannelWidth.MHZ80: "80MHz",
-        ChannelWidth.MHZ160: "160MHz",
-        ChannelWidth.MHZ80P80: "80+80MHz",
-        ChannelWidth.MHZ320: "320MHz",
+        ChannelWidth.MHZ80: "80",
+        ChannelWidth.MHZ160: "160",
+        ChannelWidth.MHZ80P80: "80+80",
+        ChannelWidth.MHZ320: "320",
     }[definition.width]
     command.extend([width_argument, str(definition.center_frequency1_mhz)])
     if definition.width is ChannelWidth.MHZ80P80:
@@ -895,7 +895,16 @@ def run_live(
             frequency_mhz=resolved_frequency_mhz,
         )
     else:
-        dashboard = TerminalDashboard(include_local_cu=local_cu)
+        dashboard = TerminalDashboard(
+            include_local_cu=local_cu,
+            band=resolved_band,
+            channel=channel,
+            frequency_mhz=resolved_frequency_mhz,
+        )
+    _set_dashboard_capture_width(
+        dashboard,
+        actual_definition.width.value,
+    )
     logging_service: Optional[LoggingService] = None
     if stats_csv is not None or beacons_jsonl is not None:
         first_log_path = stats_csv if stats_csv is not None else beacons_jsonl
@@ -1452,6 +1461,15 @@ def _publish_live_stats(
 def _dashboard_requests_exit(dashboard: LiveDashboard) -> bool:
     poll_input = getattr(dashboard, "poll_input", None)
     return bool(poll_input()) if callable(poll_input) else False
+
+
+def _set_dashboard_capture_width(
+    dashboard: LiveDashboard,
+    width: str,
+) -> None:
+    setter = getattr(dashboard, "set_capture_width", None)
+    if callable(setter):
+        setter(width)
 
 
 def _set_dashboard_logging_status(
