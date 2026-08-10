@@ -56,6 +56,8 @@ Features & changes
             retries
 18. additional graph/screen - noise/SNR
         from adapter if possible
+        only show if the adapter supports it
+        need to get hardware that supports this to test.
 19. DONE    make the text dynamic per line - only decrease size on the line needed, otherwise size 10 font.
         this should only ever affect line 2 if there is 100%
         line 3 for SSID should just be trunkated
@@ -68,8 +70,9 @@ Features & changes
         for all BSSIDs associated with the strongest radio, count all received beacons and divide by the number of expected beacons
         this may need to track beacon timing instead of a simple 10 beacons per second, because it is actually one beacon per 102.4ms. or 10 beacons per 1.024 seconds, or 9.765625 beacons per second. sometimes there will be 9 per second and often there will be 10 per second. this graph may need to be delayed by one second in order to see if the additional beacons were received in the following window
         alternatively, we could look at all BSSIDs collectively, including those that are far away, but there will be a higher probability that beacons are not received because they are too weak to be demodulated, not because they were dropped because of contention.
-22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Arista, Mist, Ubiquiti, etc
+22. improve vendor discovery through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Arista, Mist, Ubiquiti, etc
         add better discovery if possible - MLD identity, controller identifiers, richer vendor-specific device IDs ?
+        get captures, what fields can be reliably used to find vendor?
 23. DONE    reorder screens in a logical way
 24. DONE    logging only seems to be broken
         stop logging does not work
@@ -78,9 +81,18 @@ Features & changes
         add confirmation that logging has stopped - logging channel X has started... etc
 25. unify app name - beacon-live and Utilization
         update log path if necessary
-26. update the stations TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
+        Utilization is the name of the app, beacon-live is the command to run it, this is probably OK
+26. update the stations screen TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
         as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS
+        may need to add this to the log & CLI
 27. DONE    include beacons in logging, or remove it if it's useless
-28. make BSSID display behavior uniform wherever it is displayed
+28. CANCELLED   make BSSID display behavior uniform wherever it is displayed ?
         for highest RSSI radio, rotate all BSSID/SSID at 2 second interval
+        don't do this - only one BSSID is used for getting CU, ADC, retries. STA count combines all across radios, or looks at the one with the most. this is shown on the composition screen if someone wants to look at it.
 29. DONE    improve CLI commands as supported, not just in dev mode
+30. Review accuracy of frame retry capture and calculation
+        are we looking at all frames, including wider channels?
+        are frames being trunkated correctly on capture to get all headers?
+        compare to a raw capture to test
+31. screenshot of the TUI in the readme
+32. add cross platform support for other linux & MACOS to run CLI at least
