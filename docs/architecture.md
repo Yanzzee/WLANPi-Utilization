@@ -54,32 +54,32 @@ creates another analyzer or capture worker.
 
 ## Acquisition layer
 
-Live capture configures one interface in monitor mode on the selected primary
-at HT20 and launches one line-buffered TShark process. Supported HT, VHT, HE
-6 GHz, and EHT operation fields form immutable `ChannelDefinition` values.
-Fresh per-BSSID observations feed a pure coverage planner. After a candidate is
-stable, the hardware boundary retunes that interface in place; TShark, the
-analyzer, renderers, screen state, logging state, and graph history remain
-alive. Explicit CLI width/center definitions bypass automatic selection.
+Live capture configures one interface in monitor mode and launches one
+line-buffered TShark process. Automatic width selection uses a fixed 20 MHz
+definition on 2.4 GHz and the standard 80 MHz block containing the selected
+primary on 5 GHz and 6 GHz. This reflects the supported WLAN Pi USB-adapter
+capture limit. If the default 80 MHz definition is unsupported or rejected, the
+hardware boundary warns and retries once at 20 MHz. Explicit CLI width/center
+definitions are validated and are never silently changed.
 
-The planner chooses the widest capability-supported definition containing the
-advertised bandwidth of every fresh BSSID with the selected primary. A single
-continuous definition naturally covers narrower BSSIDs nested inside it. A
-conflicting 80+80 layout, puncturing unsupported by `iw`/kernel/driver, missing center,
-disabled segment, unsupported PHY width, failed tune, or failed read-back
-produces an explicit partial/fallback status. It never derives width from the
-primary alone and never channel-hops between incompatible definitions.
+Supported HT, VHT, HE 6 GHz, and EHT operation fields still form immutable
+per-BSSID `ChannelDefinition` values. They are used to scope retry metrics to
+the selected primary and to report incomplete fixed-width coverage. Beacon
+contents never cause a retune, channel hop, capture restart, analyzer restart,
+or history reset.
 
 The live TShark process enables only the Radiotap/802.11 dissector chain and
-disables WLAN decryption and defragmentation. None of the analyzer metrics
-requires payload or higher-layer protocol dissection. A 16 MiB capture buffer
-provides headroom during short scheduler stalls. Capture snapshot length remains
-unrestricted (`-s 0` is explicit for raw diagnostics): TShark's snapshot length is global, so shortening data frames
-would also risk truncating beacon information elements used for QBSS, AP-name,
-vendor, and radio-grouping output.
+disables WLAN decryption and defragmentation. The analyzer still receives every
+decoded 802.11 frame; retry eligibility then excludes control and extension
+frames without a separate capture pipeline. None of the metrics requires
+payload or higher-layer protocol dissection. A 16 MiB capture buffer provides
+headroom during short scheduler stalls. Normal live capture uses a 512-byte
+snapshot length and warns once per BSSID when a larger beacon is truncated and
+later information elements may be unavailable.
 
-Optional `--raw-pcapng` adds `-P -w` to that same TShark process. It therefore
-saves the raw packets feeding live decoding without a second competing capture.
+Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
+that same TShark process. It therefore saves the raw packets feeding live
+decoding without a second competing capture.
 The adjacent JSON sidecar records requested/actual definitions, verification and
 coverage status, negotiated fields, full-snapshot policy, decoded/normalized
 counts, and a drop count when TShark reports one. PCAPNG interface statistics
@@ -139,6 +139,12 @@ rolling window and merged for snapshot publication. If the retained BSSID set
 changes, affected projections are rebuilt from the single raw-frame store so
 address-based association keeps the same meaning. The completed projection is
 also reused when publishing that second, avoiding a second window scan.
+
+Target-primary association uses timestamp-indexed beacon timelines and binary
+search instead of scanning every retained beacon for every frame. Projection
+cache keys contain only the channel definitions that can affect that capture
+second, so a later beacon does not invalidate and recompute the preceding
+two-minute history.
 
 When live capture supplies a selected primary frequency, retry projection is
 temporally scoped. A frame must associate through BSSID/TA/RA/SA/DA with a

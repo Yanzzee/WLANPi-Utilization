@@ -130,7 +130,7 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `channel` | Channel value configured for the run. |
 | `frequency_mhz` | Resolved tuned center frequency in MHz, when it can be determined. |
 | `band` | Resolved `2.4`, `5`, or `6` GHz band, when it can be determined. |
-| `capture_width_mode` | `auto` for beacon-driven width selection or `explicit` for a CLI override. |
+| `capture_width_mode` | `band-default` for fixed 20 MHz (2.4 GHz) or 80 MHz (5/6 GHz) selection, or `explicit` for a CLI override. |
 | `requested_capture_width_mhz` | Most recently requested capture width (`20`, `40`, `80`, `160`, `80+80`, or `320`). |
 | `requested_center_frequency1_mhz` | Requested center frequency 1. |
 | `requested_center_frequency2_mhz` | Requested center frequency 2 for 80+80 MHz. |
@@ -146,7 +146,7 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `selected_qbss_ssid` | SSID belonging to that selected QBSS BSSID. |
 | `selected_qbss_bssid` | Automatically selected BSSID supplying the QBSS utilization fields. |
 | `selected_qbss_rssi_dbm` | RSSI in dBm from the selected BSSID's latest retained beacon. |
-| `received_frame_count` | All decoded 802.11 frames captured during this one-second period. |
+| `received_frame_count` | All decoded 802.11 frames delivered to the analyzer during this one-second period. |
 | `retry_observed_frame_count` | Primary-scoped frames during the second for which the Retry bit was readable, including frames not eligible for the retry denominator. Unknown, pre-discovery, stale, and non-target-primary associations are excluded. |
 | `retry_eligible_frame_count` | Primary-scoped unicast data and retry-capable unicast management frames eligible for the retry-percentage denominator. |
 | `retry_frame_count` | Retry-eligible frames whose Retry bit was set; repeated retry transmissions are each counted. |

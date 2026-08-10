@@ -47,7 +47,7 @@ TSHARK_FRAME_FIELD_NAMES = (
 # These fields are appended only when ``tshark -G fields`` reports them. This
 # lets one source tree work with the older TShark commonly installed on WLAN Pi
 # images while using HE/EHT and packet-audit data on newer versions.
-TSHARK_OPTIONAL_FRAME_FIELD_NAMES = (
+TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
     "wlan.ds.current_channel",
     "wlan.ht.info.primarychannel",
     "wlan.ht.info.secchanoffset",
@@ -64,6 +64,9 @@ TSHARK_OPTIONAL_FRAME_FIELD_NAMES = (
     "wlan.eht.eht_operation_information.disabled_subchannel_bitmap",
     "frame.cap_len",
     "frame.len",
+)
+
+TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES = (
     "wlan_radio.frequency",
     "wlan_radio.phy",
     "radiotap.mcs.bw",
@@ -78,6 +81,11 @@ TSHARK_OPTIONAL_FRAME_FIELD_NAMES = (
     "wlan.frag",
     "wlan.qos.tid",
     "radiotap.ampdu.reference",
+)
+
+TSHARK_OPTIONAL_FRAME_FIELD_NAMES = (
+    TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
+    + TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES
 )
 
 TSHARK_MULTI_VALUE_SEPARATOR = "|"
@@ -400,14 +408,20 @@ def parse_tshark_capture_record(
     )
     records: list[FrameRecord] = []
     for index in range(occurrence_count):
-        expanded = [
-            (
-                values[index]
-                if len(values) == occurrence_count
-                else values[0] if len(values) == 1 else ""
-            )
-            for values in split_fields
-        ]
+        expanded = []
+        for name, values in zip(field_names, split_fields):
+            if name not in occurrence_fields:
+                # Radiotap can expose one signal value per antenna. Those are
+                # properties of the outer capture record, not extra MPDUs.
+                # Preserve occurrence=f behavior for scalar fields so a
+                # multi-antenna RSSI never turns into an empty value.
+                expanded.append(values[0])
+            elif len(values) == occurrence_count:
+                expanded.append(values[index])
+            elif len(values) == 1:
+                expanded.append(values[0])
+            else:
+                expanded.append("")
         record = parse_tshark_frame_row(
             "\t".join(expanded),
             field_names=field_names,

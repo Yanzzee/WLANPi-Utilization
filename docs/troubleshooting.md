@@ -130,20 +130,25 @@ For bonded capture, also inspect the actual definition:
 iw dev wlan0 info
 ```
 
-The application starts at HT20 and waits for stable beacon operation fields.
-It will stay at or return to HT20, with a warning, when `iw phy` lacks a width
-or required 20 MHz segment, the beacon center is incomplete/ambiguous, 80+80
-definitions conflict, EHT puncturing is unsupported by the installed stack, the kernel rejects
-the tune, or `iw` reads back a different definition. An explicit override still
-undergoes the same capability check:
+The default is fixed at 20 MHz on 2.4 GHz and 80 MHz on 5 GHz and 6 GHz. The
+application does not retune in response to beacon operation fields. If the
+default 80 MHz definition is unsupported or rejected, it warns and retries once
+at 20 MHz. An explicit override undergoes the same capability check and is not
+silently changed:
 
 ```bash
 sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
   --channel-width 80 --center-frequency1-mhz 5210
 ```
 
-Do not choose a wider center from the primary channel alone. Check the AP's
-HT/VHT/HE/EHT operation element and the regulatory/driver capability together.
+The automatic 80 MHz center is the standard block containing the selected
+primary. For explicit non-default definitions, check the AP's HT/VHT/HE/EHT
+operation element and the regulatory/driver capability together.
+
+Normal live capture uses a 512-byte snapshot length. A warning naming the BSSID
+and original length means a larger beacon was truncated and late information
+elements may be unavailable. Re-run with `--raw-pcapng` when a full-length
+diagnostic capture is needed.
 
 Use an explicit center frequency when testing 5 GHz or 6 GHz:
 

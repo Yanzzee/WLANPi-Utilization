@@ -96,3 +96,6 @@ Features & changes
         compare to a raw capture to test
 31. screenshot of the TUI in the readme
 32. add cross platform support for other linux & MACOS to run CLI at least
+33. truncate frames at 512 bytes to improve processing
+34. include OBSS count
+        number of BSSIDs that overlap to the selected primary, but have a different primary

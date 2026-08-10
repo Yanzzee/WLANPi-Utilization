@@ -6,8 +6,47 @@ import pytest
 from beacon_live.analyzer import Analyzer
 from beacon_live.analyzer import _beacon_reception_counts
 from beacon_live.analyzer import select_bssid
+from beacon_live.channel import ChannelDefinition
+from beacon_live.channel import ChannelWidth
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
+
+
+def test_future_beacons_do_not_recompute_completed_frame_projections() -> None:
+    analyzer = Analyzer(target_primary_frequency_mhz=5180)
+
+    def beacon(timestamp: float) -> FrameRecord:
+        return FrameRecord(
+            timestamp=timestamp,
+            bssid="aa:aa:aa:aa:aa:aa",
+            frame_type=0,
+            frame_subtype=8,
+            retry_flag=False,
+            receiver_address="ff:ff:ff:ff:ff:ff",
+            channel_definition=ChannelDefinition(
+                5180,
+                ChannelWidth.MHZ80,
+                5210,
+                primary_channel=36,
+            ),
+        )
+
+    analyzer.ingest(beacon(1000.0), publish_snapshot=False)
+    analyzer.ingest(
+        _frame(
+            1000.2,
+            "aa:aa:aa:aa:aa:aa",
+            retry=True,
+            receiver_address="00:11:22:33:44:55",
+        ),
+        publish_snapshot=False,
+    )
+    analyzer.ingest(beacon(1001.2), publish_snapshot=False)
+    original = analyzer._frame_projections_by_second[1000][1]
+
+    analyzer.ingest(beacon(1002.4), publish_snapshot=False)
+
+    assert analyzer._frame_projections_by_second[1000][1] is original
 
 
 def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:

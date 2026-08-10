@@ -275,13 +275,16 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--channel",
         default="36",
-        help="Channel number to tune with HT20. Default: 36.",
+        help="Primary channel number to monitor. Default: 36.",
     )
     parser.add_argument(
         "--frequency-mhz",
         required=False,
         type=int,
-        help="Explicit center frequency in MHz, for example 5975 for 6 GHz PSC channel 5.",
+        help=(
+            "Explicit primary/control frequency in MHz, for example 5975 "
+            "for 6 GHz PSC channel 5."
+        ),
     )
     parser.add_argument(
         "--band",
@@ -297,8 +300,8 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         default="auto",
         choices=("auto", "20", "40", "80", "160", "80+80", "320"),
         help=(
-            "Capture width. Default: auto, discovered from fresh beacon "
-            "operation elements after an initial HT20 tune."
+            "Capture width. Default: auto, meaning fixed 20 MHz on 2.4 GHz "
+            "and fixed 80 MHz on 5/6 GHz."
         ),
     )
     parser.add_argument(

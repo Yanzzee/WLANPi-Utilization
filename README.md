@@ -1,12 +1,12 @@
 # WLANPi Beacon Live
 
 WLANPi Beacon Live is a live 802.11 beacon and channel analyzer for WLAN Pi
-hardware. It starts on the selected 20 MHz primary channel, reads advertised
-HT/VHT/HE/EHT operation information, and—when the adapter, driver, regulatory
-state, `iw`, and TShark support it—widens the same monitor capture to cover
-traffic transmitted across the bonded channel. It shows a rolling two-minute
-view of AP-advertised channel utilization, admission capacity, station counts,
-channel composition, and retry percentage.
+hardware. It uses one fixed capture definition for the run: 20 MHz by default
+on 2.4 GHz and 80 MHz by default on 5 GHz and 6 GHz. Advertised HT/VHT/HE/EHT
+operation information scopes retry metrics to BSSIDs using the selected primary
+channel. The application shows a rolling two-minute view of AP-advertised
+channel utilization, admission capacity, station counts, channel composition,
+and retry percentage.
 
 The app automatically chooses the BSSID used for each display. You select only
 the band and channel, not an SSID or BSSID.
@@ -30,8 +30,9 @@ The primary target is a WLAN Pi R4 running WLAN Pi OS with:
 
 The adapter, driver, and regulatory domain must permit the selected channel
 definition, not only its primary frequency. The application checks `iw phy`,
-reads the actual configured definition back from `iw`, and reports partial or
-HT20 fallback coverage when it cannot safely represent a wider definition.
+reads the actual configured definition back from `iw`, and reports a clear
+error or a one-time 20 MHz fallback when the default 80 MHz definition cannot
+be used.
 Some adapters do not expose usable local survey counters, but beacon-based
 screens can still work.
 
@@ -141,12 +142,13 @@ beacon-live live --help
 ```
 
 `beacon-live live` accepts the same live options as `wlanpi-beacon-live`. Use
-`--frequency-mhz` when the exact center frequency is clearest, or combine
+`--frequency-mhz` when the exact primary/control frequency is clearest, or combine
 `--band` and `--channel` when a channel number is ambiguous across bands.
-`--channel-width auto` is the default. Explicit widths above 20 MHz require
-`--center-frequency1-mhz`; 80+80 also requires
-`--center-frequency2-mhz`. A width is never inferred from the primary channel
-alone.
+`--channel-width auto` is the default: 20 MHz on 2.4 GHz and the standard
+80 MHz block containing the selected primary on 5 GHz and 6 GHz. The capture
+does not retune in response to beacon contents. Explicit widths above 20 MHz
+require `--center-frequency1-mhz`; 80+80 also requires
+`--center-frequency2-mhz`.
 
 Retry numerator and denominator include only eligible frames associated through
 BSSID/TA/RA/SA/DA with a BSSID whose fresh beacon advertises the selected

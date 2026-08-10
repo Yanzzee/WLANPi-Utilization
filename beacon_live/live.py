@@ -15,13 +15,11 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 from beacon_live.analyzer import Analyzer
-from beacon_live.channel import BssidChannelObservation
 from beacon_live.channel import ChannelDefinition
 from beacon_live.channel import ChannelWidth
 from beacon_live.channel import CoverageDecision
 from beacon_live.channel import RadioCapabilities
-from beacon_live.channel import RetuneHysteresis
-from beacon_live.channel import choose_capture_definition
+from beacon_live.channel import channel_to_frequency
 from beacon_live.channel import frequency_to_channel
 from beacon_live.channel import parse_iw_interface_channel
 from beacon_live.channel import parse_iw_phy_capabilities
@@ -39,6 +37,7 @@ from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.parser import parse_tshark_capture_record
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
+from beacon_live.parser import TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_MULTI_VALUE_SEPARATOR
 from beacon_live.parser import TSHARK_OPTIONAL_FRAME_FIELD_NAMES
 from beacon_live.survey import SurveyCuResult
@@ -51,12 +50,15 @@ TSHARK_CAPTURE_PROTOCOLS = (
     "radiotap,wlan_radio,wlan,wlan_ext,wlan_aggregate"
 )
 TSHARK_CAPTURE_BUFFER_MIB = 16
+LIVE_SNAPSHOT_LENGTH = 512
+LIVE_DISPLAY_FILTER = "wlan"
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
 LIVE_WARMUP_CYCLES = 1
 LOGGING_CONTROL_POLL_SECONDS = 0.5
 CHANNEL_DEFINITION_MAX_AGE_SECONDS = 10.0
-CHANNEL_EVALUATION_INTERVAL_SECONDS = 1.0
+DEFAULT_5_GHZ_80MHZ_CENTER_CHANNELS = (42, 58, 106, 122, 138, 155, 171)
+DEFAULT_6_GHZ_80MHZ_CENTER_CHANNELS = tuple(range(7, 216, 16))
 
 
 class LiveDashboard(Protocol):
@@ -86,6 +88,13 @@ class LiveCommandError(Exception):
     @property
     def command_text(self) -> str:
         return " ".join(self.command)
+
+    def __str__(self) -> str:
+        if self.stderr:
+            return self.stderr
+        if self.returncode is not None:
+            return f"{self.command_text} exited with status {self.returncode}"
+        return self.command_text
 
 
 @dataclass
@@ -284,6 +293,8 @@ def build_tshark_command(
         iface,
         "-B",
         str(TSHARK_CAPTURE_BUFFER_MIB),
+        "-s",
+        "0" if raw_capture_path is not None else str(LIVE_SNAPSHOT_LENGTH),
         "--disable-protocol",
         "ALL",
         "--enable-protocol",
@@ -304,14 +315,15 @@ def build_tshark_command(
         f"aggregator={TSHARK_MULTI_VALUE_SEPARATOR}",
     ]
     if raw_capture_path is None:
-        command[command.index("-T"):command.index("-T")] = ["-Y", "wlan"]
+        command[command.index("-T"):command.index("-T")] = [
+            "-Y",
+            LIVE_DISPLAY_FILTER,
+        ]
     else:
         # -P keeps the field stream on stdout while -w saves the exact packets
         # from this same capture process. Live display filters cannot be used
         # while writing raw packets, so non-WLAN rows are rejected by parser.
-        command.extend(
-            ["-P", "-s", "0", "-F", "pcapng", "-w", str(raw_capture_path)]
-        )
+        command.extend(["-P", "-F", "pcapng", "-w", str(raw_capture_path)])
     for field in field_names:
         command.extend(["-e", field])
     return command
@@ -343,10 +355,17 @@ def available_tshark_fields(
 
 def select_tshark_frame_fields(
     available_fields: frozenset[str],
+    *,
+    include_diagnostics: bool = True,
 ) -> tuple[str, ...]:
+    optional_fields = (
+        TSHARK_OPTIONAL_FRAME_FIELD_NAMES
+        if include_diagnostics
+        else TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
+    )
     return TSHARK_FRAME_FIELD_NAMES + tuple(
         field
-        for field in TSHARK_OPTIONAL_FRAME_FIELD_NAMES
+        for field in optional_fields
         if field in available_fields
     )
 
@@ -356,12 +375,15 @@ def build_survey_command(iface: str) -> list[str]:
 
 
 def run_checked_command(command: list[str]) -> None:
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise LiveCommandError(command=command, stderr=str(exc)) from exc
     if result.returncode != 0:
         raise LiveCommandError(
             command=command,
@@ -397,7 +419,10 @@ def start_tshark_process(
     popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
 ) -> subprocess.Popen[str]:
     if field_names is None:
-        field_names = select_tshark_frame_fields(available_tshark_fields())
+        field_names = select_tshark_frame_fields(
+            available_tshark_fields(),
+            include_diagnostics=raw_capture_path is not None,
+        )
     command = build_tshark_command(
         iface,
         field_names=field_names,
@@ -519,6 +544,107 @@ def explicit_channel_definition(
     return definition
 
 
+def default_channel_definition(
+    *,
+    primary_frequency_mhz: int,
+    band: str,
+) -> ChannelDefinition:
+    """Return the fixed WLAN Pi capture width for the selected band."""
+    primary_channel = frequency_to_channel(primary_frequency_mhz)
+    if band == "2.4":
+        return ChannelDefinition(
+            primary_frequency_mhz,
+            ChannelWidth.MHZ20,
+            primary_frequency_mhz,
+            primary_channel=primary_channel,
+            phy="band-default",
+        )
+
+    center_channels = (
+        DEFAULT_5_GHZ_80MHZ_CENTER_CHANNELS
+        if band == "5"
+        else DEFAULT_6_GHZ_80MHZ_CENTER_CHANNELS
+        if band == "6"
+        else ()
+    )
+    for center_channel in center_channels:
+        center_frequency = channel_to_frequency(center_channel, band)
+        if center_frequency is None:
+            continue
+        definition = ChannelDefinition(
+            primary_frequency_mhz,
+            ChannelWidth.MHZ80,
+            center_frequency,
+            primary_channel=primary_channel,
+            phy="band-default",
+        )
+        if primary_frequency_mhz in definition.active_20mhz_centers:
+            return definition
+
+    # Edge or nonstandard channels that cannot form a legal 80 MHz block use
+    # the only definition that can be derived safely from the primary alone.
+    return ChannelDefinition(
+        primary_frequency_mhz,
+        ChannelWidth.MHZ20,
+        primary_frequency_mhz,
+        primary_channel=primary_channel,
+        phy="band-default-fallback",
+        reason="selected primary is not inside a standard 80 MHz block",
+    )
+
+
+def update_fixed_capture_coverage(
+    coverage: CoverageDecision,
+    *,
+    bssid: str,
+    advertised: ChannelDefinition,
+    actual: ChannelDefinition,
+) -> CoverageDecision:
+    """Record whether one target-primary BSSID fits the fixed capture width."""
+    covered = set(coverage.covered_bssids)
+    partial = set(coverage.partial_bssids)
+    inferred_ht20 = (
+        advertised.phy == "ht20-capture-inference"
+        and actual.width is ChannelWidth.MHZ20
+        and advertised.primary_frequency_mhz == actual.primary_frequency_mhz
+    )
+    if inferred_ht20 or (
+        advertised.complete
+        and not advertised.ambiguous
+        and actual.contains(advertised)
+    ):
+        covered.add(bssid)
+        partial.discard(bssid)
+        status = (
+            "complete"
+            if coverage.status == "partial" and not partial
+            else coverage.status
+        )
+        warning = None if status == "complete" else coverage.warning
+        return CoverageDecision(
+            coverage.requested,
+            tuple(sorted(covered)),
+            tuple(sorted(partial)),
+            status,
+            warning,
+        )
+
+    partial.add(bssid)
+    covered.discard(bssid)
+    reason = advertised.reason or (
+        f"advertised {advertised.width.value} MHz is not fully covered by "
+        f"actual {actual.width.value} MHz capture"
+    )
+    status = "fallback" if coverage.status == "fallback" else "partial"
+    return CoverageDecision(
+        coverage.requested,
+        tuple(sorted(covered)),
+        tuple(sorted(partial)),
+        status,
+        reason,
+    )
+
+
 def _read_radio_capabilities_safely(iface: str) -> RadioCapabilities:
     try:
         return read_radio_capabilities(iface)
@@ -630,14 +756,16 @@ def run_live(
             "the selected primary channel is ambiguous; provide --band or "
             "--frequency-mhz"
         )
+    if resolved_band is None:
+        raise ValueError(
+            f"frequency {resolved_frequency_mhz} MHz is outside the supported "
+            "2.4, 5, and 6 GHz channel ranges"
+        )
     auto_channel_width = channel_width is None
     requested_definition = (
-        ChannelDefinition(
-            resolved_frequency_mhz,
-            ChannelWidth.MHZ20,
-            resolved_frequency_mhz,
-            primary_channel=frequency_to_channel(resolved_frequency_mhz),
-            phy="auto-discovery",
+        default_channel_definition(
+            primary_frequency_mhz=resolved_frequency_mhz,
+            band=resolved_band,
         )
         if auto_channel_width
         else explicit_channel_definition(
@@ -650,7 +778,25 @@ def run_live(
     capabilities = _read_radio_capabilities_safely(iface)
     supported, unsupported_reason = capabilities.supports(requested_definition)
     initial_definition = requested_definition
+    fallback_reason: Optional[str] = None
+    if (
+        auto_channel_width
+        and resolved_band in {"5", "6"}
+        and requested_definition.width is ChannelWidth.MHZ20
+    ):
+        fallback_reason = requested_definition.reason
+        print(
+            "Warning: the selected primary is not inside a standard 80 MHz "
+            "block; using 20 MHz capture.",
+            file=sys.stderr,
+            flush=True,
+        )
     if not supported:
+        if not auto_channel_width:
+            raise ValueError(
+                "explicit capture definition is unsupported: "
+                f"{unsupported_reason}"
+            )
         initial_definition = ChannelDefinition(
             resolved_frequency_mhz,
             ChannelWidth.MHZ20,
@@ -658,19 +804,45 @@ def run_live(
             primary_channel=frequency_to_channel(resolved_frequency_mhz),
             phy="fallback",
         )
+        fallback_reason = unsupported_reason
         print(
             "Warning: requested capture definition is unsupported "
             f"({unsupported_reason}); falling back to HT20 partial coverage.",
             file=sys.stderr,
             flush=True,
         )
-    configure_monitor_interface(
-        iface,
-        channel,
-        frequency_mhz=frequency_mhz,
-        band=band,
-        channel_definition=initial_definition,
-    )
+    try:
+        configure_monitor_interface(
+            iface,
+            channel,
+            frequency_mhz=frequency_mhz,
+            band=band,
+            channel_definition=initial_definition,
+        )
+    except LiveCommandError as exc:
+        if not auto_channel_width or initial_definition.width is ChannelWidth.MHZ20:
+            raise
+        fallback_reason = str(exc)
+        initial_definition = ChannelDefinition(
+            resolved_frequency_mhz,
+            ChannelWidth.MHZ20,
+            resolved_frequency_mhz,
+            primary_channel=frequency_to_channel(resolved_frequency_mhz),
+            phy="tune-fallback",
+        )
+        print(
+            "Warning: default 80 MHz capture could not be configured "
+            f"({exc}); retrying once at 20 MHz.",
+            file=sys.stderr,
+            flush=True,
+        )
+        configure_monitor_interface(
+            iface,
+            channel,
+            frequency_mhz=frequency_mhz,
+            band=band,
+            channel_definition=initial_definition,
+        )
     actual_definition, actual_verified = _read_actual_channel_safely(
         iface,
         initial_definition,
@@ -683,12 +855,29 @@ def run_live(
             flush=True,
         )
     elif not actual_definition.same_tuning(initial_definition):
+        fallback_reason = (
+            f"iw reported {actual_definition.label} after requesting "
+            f"{initial_definition.label}"
+        )
         print(
             "Warning: actual capture definition differs from the request: "
             f"requested {initial_definition.label}; actual {actual_definition.label}.",
             file=sys.stderr,
             flush=True,
         )
+    coverage_decision = CoverageDecision(
+        requested_definition,
+        (),
+        (),
+        (
+            "fallback"
+            if fallback_reason is not None
+            else "unverified"
+            if not actual_verified
+            else "complete"
+        ),
+        fallback_reason,
+    )
     analyzer = Analyzer(
         target_primary_frequency_mhz=resolved_frequency_mhz,
         channel_definition_max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
@@ -718,12 +907,14 @@ def run_live(
                 channel=channel,
                 frequency_mhz=resolved_frequency_mhz,
                 band=resolved_band,
-                capture_width_mode=("auto" if auto_channel_width else "explicit"),
+                capture_width_mode=(
+                    "band-default" if auto_channel_width else "explicit"
+                ),
             ).with_channel_definition(
                 requested=requested_definition,
                 actual=actual_definition,
                 verified=actual_verified,
-                coverage_status=("initial" if actual_verified else "unverified"),
+                coverage_status=coverage_decision.status,
             ),
             log_dir=log_dir,
             write_stats_csv=stats_csv is not None,
@@ -739,42 +930,41 @@ def run_live(
             monotonic=time.monotonic,
         )
     tshark_available_fields = available_tshark_fields()
-    tshark_fields = select_tshark_frame_fields(tshark_available_fields)
+    tshark_fields = select_tshark_frame_fields(
+        tshark_available_fields,
+        include_diagnostics=raw_capture_path is not None,
+    )
     if (
         auto_channel_width
         and tshark_available_fields
-        and len(tshark_fields) == len(TSHARK_FRAME_FIELD_NAMES)
+        and not any(
+            field in tshark_fields
+            for field in (
+                "wlan.ds.current_channel",
+                "wlan.ht.info.primarychannel",
+                "wlan.ext_tag.he_operation.6ghz.primary_channel",
+            )
+        )
+        and actual_definition.width is not ChannelWidth.MHZ20
     ):
         print(
             "Warning: installed TShark exposes no supported channel-operation "
-            "fields; automatic capture remains HT20 with partial coverage.",
+            "fields; retry metrics cannot safely associate BSSIDs with the "
+            "selected primary inside this bonded capture.",
             file=sys.stderr,
             flush=True,
         )
     if raw_capture_path is not None:
         raw_capture_path.parent.mkdir(parents=True, exist_ok=True)
-    if raw_capture_path is None:
-        process = start_tshark_process(iface)
-    else:
-        process = start_tshark_process(
-            iface,
-            field_names=tshark_fields,
-            raw_capture_path=raw_capture_path,
-        )
+    process = start_tshark_process(
+        iface,
+        field_names=tshark_fields,
+        raw_capture_path=raw_capture_path,
+    )
     selector = selectors.DefaultSelector()
     warmup_filter = LiveWarmupFilter()
-    channel_observations: dict[str, BssidChannelObservation] = {}
-    retune_hysteresis = RetuneHysteresis()
-    coverage_decision = CoverageDecision(
-        actual_definition,
-        (),
-        (),
-        "unverified" if not actual_verified else "initial",
-        None if actual_verified else "actual channel definition could not be verified",
-    )
-    latest_capture_timestamp: Optional[float] = None
-    next_channel_evaluation = time.monotonic() + CHANNEL_EVALUATION_INTERVAL_SECONDS
-    last_coverage_warning: Optional[str] = coverage_decision.warning
+    warned_truncated_beacons: set[str] = set()
+    warned_partial_bssids: set[str] = set()
     capture_record_count = 0
     normalized_frame_count = 0
     malformed_capture_record_count = 0
@@ -866,12 +1056,25 @@ def run_live(
                 normalized_frame_count += len(frames)
                 for parsed_frame in frames:
                     frame = parsed_frame
-                    latest_capture_timestamp = max(
-                        frame.timestamp,
-                        latest_capture_timestamp
-                        if latest_capture_timestamp is not None
-                        else frame.timestamp,
-                    )
+                    if (
+                        frame.is_beacon
+                        and frame.original_length is not None
+                        and frame.captured_length is not None
+                        and frame.original_length > frame.captured_length
+                    ):
+                        warning_key = frame.bssid or "unknown-bssid"
+                        if warning_key not in warned_truncated_beacons:
+                            print(
+                                "Warning: beacon "
+                                f"{warning_key} is {frame.original_length} bytes "
+                                f"and was truncated to {frame.captured_length}; "
+                                "information elements beyond the live 512-byte "
+                                "limit may be unavailable. Use --raw-pcapng for "
+                                "a full-length diagnostic capture.",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            warned_truncated_beacons.add(warning_key)
                     if (
                         frame.is_beacon
                         and frame.channel_definition is None
@@ -916,21 +1119,36 @@ def run_live(
                     if (
                         beacon is not None
                         and beacon.channel_definition is not None
+                        and beacon.channel_definition.primary_frequency_mhz
+                        == resolved_frequency_mhz
                     ):
-                        observation = BssidChannelObservation(
-                            beacon.bssid,
-                            beacon.channel_definition,
-                            beacon.timestamp,
-                        )
-                        previous_observation = channel_observations.get(
-                            beacon.bssid
+                        updated_coverage = update_fixed_capture_coverage(
+                            coverage_decision,
+                            bssid=beacon.bssid,
+                            advertised=beacon.channel_definition,
+                            actual=actual_definition,
                         )
                         if (
-                            previous_observation is None
-                            or observation.observed_at
-                            >= previous_observation.observed_at
+                            beacon.bssid in updated_coverage.partial_bssids
+                            and beacon.bssid not in warned_partial_bssids
                         ):
-                            channel_observations[beacon.bssid] = observation
+                            print(
+                                "Warning: fixed capture has partial coverage "
+                                f"for {beacon.bssid}: "
+                                f"{updated_coverage.warning}.",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                            warned_partial_bssids.add(beacon.bssid)
+                        if updated_coverage != coverage_decision:
+                            coverage_decision = updated_coverage
+                            if logging_service is not None:
+                                logging_service.update_channel_definition(
+                                    requested=coverage_decision.requested,
+                                    actual=actual_definition,
+                                    verified=actual_verified,
+                                    coverage_status=coverage_decision.status,
+                                )
                     if beacon is not None and logging_service is not None:
                         logging_service.write_beacon(beacon)
                     # Defer frame-level snapshots. The capture-watermark call
@@ -959,117 +1177,6 @@ def run_live(
                 raise KeyboardInterrupt
 
             current = time.monotonic()
-            if (
-                auto_channel_width
-                and latest_capture_timestamp is not None
-                and current >= next_channel_evaluation
-            ):
-                coverage_decision = choose_capture_definition(
-                    channel_observations.values(),
-                    target_primary_frequency_mhz=resolved_frequency_mhz,
-                    capabilities=capabilities,
-                    now=latest_capture_timestamp,
-                    max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
-                )
-                channel_observations = {
-                    bssid: observation
-                    for bssid, observation in channel_observations.items()
-                    if latest_capture_timestamp - observation.observed_at
-                    <= CHANNEL_DEFINITION_MAX_AGE_SECONDS
-                }
-                if (
-                    capabilities.source_complete
-                    and coverage_decision.warning is not None
-                    and coverage_decision.warning != last_coverage_warning
-                ):
-                    print(
-                        f"Warning: {coverage_decision.warning}; requested "
-                        f"{coverage_decision.requested.label}.",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                last_coverage_warning = coverage_decision.warning
-                if retune_hysteresis.consider(
-                    coverage_decision.requested,
-                    actual_definition,
-                    now=current,
-                ):
-                    previous_definition = actual_definition
-                    try:
-                        run_checked_command(
-                            build_definition_tune_command(
-                                iface,
-                                coverage_decision.requested,
-                            )
-                        )
-                        actual_definition, actual_verified = (
-                            _read_actual_channel_safely(
-                                iface,
-                                coverage_decision.requested,
-                            )
-                        )
-                        if (
-                            actual_verified
-                            and not actual_definition.same_tuning(
-                                coverage_decision.requested
-                            )
-                        ):
-                            raise LiveCommandError(
-                                build_definition_tune_command(
-                                    iface,
-                                    coverage_decision.requested,
-                                ),
-                                stderr=(
-                                    "iw verification reported "
-                                    f"{actual_definition.label}"
-                                ),
-                            )
-                        print(
-                            "Capture retuned without restarting analysis: "
-                            f"requested {coverage_decision.requested.label}; "
-                            f"actual {actual_definition.label}"
-                            + (" (unverified)" if not actual_verified else ""),
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                    except (LiveCommandError, OSError, ValueError) as exc:
-                        observed_after_failure = actual_definition
-                        observed_verified = actual_verified
-                        try:
-                            run_checked_command(
-                                build_definition_tune_command(
-                                    iface,
-                                    previous_definition,
-                                )
-                            )
-                            actual_definition, actual_verified = (
-                                _read_actual_channel_safely(
-                                    iface,
-                                    previous_definition,
-                                )
-                            )
-                        except (LiveCommandError, OSError, ValueError):
-                            actual_definition = observed_after_failure
-                            actual_verified = observed_verified
-                        print(
-                            "Warning: bonded-channel retune failed; recovery "
-                            f"requested {previous_definition.label}; actual "
-                            f"{actual_definition.label}: {exc}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                if logging_service is not None:
-                    logging_service.update_channel_definition(
-                        requested=coverage_decision.requested,
-                        actual=actual_definition,
-                        verified=actual_verified,
-                        coverage_status=coverage_decision.status,
-                    )
-                next_channel_evaluation = _advance_interval_deadline(
-                    next_channel_evaluation,
-                    CHANNEL_EVALUATION_INTERVAL_SECONDS,
-                    current,
-                )
             if (
                 logging_control_path is not None
                 and current >= next_logging_control_poll

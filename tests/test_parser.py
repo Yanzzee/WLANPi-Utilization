@@ -195,6 +195,7 @@ def test_multiple_wlan_occurrences_emit_every_mpdu_and_retry_bit() -> None:
             ),
             "wlan.ra": "00:11:22:33:44:55|00:11:22:33:44:55",
             "wlan.da": "00:11:22:33:44:55|00:11:22:33:44:55",
+            "radiotap.dbm_antsignal": "-45|-47",
         }
     )
 
@@ -204,6 +205,7 @@ def test_multiple_wlan_occurrences_emit_every_mpdu_and_retry_bit() -> None:
 
     assert len(records) == 2
     assert [record.retry_flag for record in records] == [False, True]
+    assert [record.rssi_dbm for record in records] == [-45, -45]
     assert all(record.retry_eligible for record in records)
 
 

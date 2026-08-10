@@ -18,6 +18,7 @@ from beacon_live.live import build_tshark_command
 from beacon_live.live import _write_raw_capture_metadata
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
+from beacon_live.live import default_channel_definition
 from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
@@ -81,12 +82,35 @@ def test_frequency_to_band_resolves_log_metadata() -> None:
     assert frequency_to_band(5975) == "6"
 
 
+def test_band_defaults_use_20mhz_on_24_and_80mhz_on_5_and_6ghz() -> None:
+    definition_24 = default_channel_definition(
+        primary_frequency_mhz=2437,
+        band="2.4",
+    )
+    definition_5 = default_channel_definition(
+        primary_frequency_mhz=5180,
+        band="5",
+    )
+    definition_6 = default_channel_definition(
+        primary_frequency_mhz=5975,
+        band="6",
+    )
+
+    assert definition_24.width is ChannelWidth.MHZ20
+    assert definition_24.center_frequency1_mhz == 2437
+    assert definition_5.width is ChannelWidth.MHZ80
+    assert definition_5.center_frequency1_mhz == 5210
+    assert definition_6.width is ChannelWidth.MHZ80
+    assert definition_6.center_frequency1_mhz == 5985
+
+
 def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
     command = build_tshark_command("wlan9")
 
     assert command[:4] == ["tshark", "-l", "-i", "wlan9"]
     assert command[4:6] == ["-B", "16"]
-    assert command[6:10] == [
+    assert command[6:8] == ["-s", "512"]
+    assert command[8:12] == [
         "--disable-protocol",
         "ALL",
         "--enable-protocol",
@@ -98,9 +122,7 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         if value == "-o"
     ] == ["wlan.defragment:FALSE", "wlan.enable_decryption:FALSE"]
     assert command[command.index("-N") + 1] == "m"
-    assert "wlan" in command
-    assert "wlan.fc.type_subtype == 8" not in command
-    assert "-s" not in command
+    assert command[command.index("-Y") + 1] == "wlan"
     assert _field_args(command) == [
         "frame.time_epoch",
         "wlan.fc.type",
@@ -212,10 +234,90 @@ def test_configure_monitor_interface_stops_on_failed_command() -> None:
 
     assert exc_info.value.command == failing_command
     assert exc_info.value.stderr == "set type failed"
+    assert str(exc_info.value) == "set type failed"
     assert commands_seen == [
         ["ip", "link", "set", "wlan0", "down"],
         failing_command,
     ]
+
+
+def test_live_command_error_without_stderr_still_has_a_message() -> None:
+    error = LiveCommandError(
+        ["iw", "dev", "wlan0", "set", "freq", "5180", "80MHz", "5210"],
+        returncode=1,
+    )
+
+    assert str(error) == (
+        "iw dev wlan0 set freq 5180 80MHz 5210 exited with status 1"
+    )
+
+
+def test_explicit_unsupported_width_fails_before_interface_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "beacon_live.live._read_radio_capabilities_safely",
+        lambda iface: RadioCapabilities.ht20_only(),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        lambda *args, **kwargs: pytest.fail("interface should not be changed"),
+    )
+
+    with pytest.raises(ValueError, match="explicit capture definition.*80 MHz"):
+        run_live(
+            channel_width=ChannelWidth.MHZ80,
+            center_frequency1_mhz=5210,
+        )
+
+
+def test_default_80mhz_tune_failure_retries_once_at_20mhz(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    capabilities = RadioCapabilities(
+        frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ80}),
+        frozenset({5180, 5200, 5220, 5240}),
+        supports_monitor=True,
+        source_complete=True,
+    )
+    definitions: list[ChannelDefinition] = []
+
+    def configure(*args: object, **kwargs: object) -> None:
+        definition = kwargs["channel_definition"]
+        assert isinstance(definition, ChannelDefinition)
+        definitions.append(definition)
+        if definition.width is ChannelWidth.MHZ80:
+            raise LiveCommandError(
+                ["iw", "dev", "wlan0", "set", "freq", "5180"],
+                returncode=1,
+                stderr="driver rejected 80 MHz",
+            )
+
+    monkeypatch.setattr(
+        "beacon_live.live._read_radio_capabilities_safely",
+        lambda iface: capabilities,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        configure,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_actual_channel_safely",
+        lambda iface, requested: (requested, True),
+    )
+
+    assert run_live(interval_seconds=0.1) == 0
+
+    assert [definition.width for definition in definitions] == [
+        ChannelWidth.MHZ80,
+        ChannelWidth.MHZ20,
+    ]
+    assert (
+        "driver rejected 80 MHz); retrying once at 20 MHz"
+        in capsys.readouterr().err
+    )
 
 
 def test_all_frame_live_mode_skips_survey_and_keeps_beacon_logging(
@@ -427,7 +529,7 @@ def test_survey_enabled_live_mode_uses_available_data(
     assert "Alpha/aa:aa:aa:aa:aa:aa" in captured.out
     assert "LOCAL SURVEY CU" in captured.out
     assert "20.00%" in captured.out
-    assert captured.err == ""
+    assert "falling back to HT20 partial coverage" in captured.err
 
 
 def test_survey_enabled_live_mode_survives_unsupported_driver(
@@ -501,7 +603,7 @@ def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
     )
     monkeypatch.setattr(
         "beacon_live.live.start_tshark_process",
-        lambda iface: process,
+        lambda iface, **kwargs: process,
     )
     monkeypatch.setattr(
         "beacon_live.live.terminate_tshark_process",
@@ -594,9 +696,10 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
     assert warmup_filter.filter([stats]) == [stats]
 
 
-def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
+def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     optional_fields = (
         "wlan.ht.info.primarychannel",
@@ -604,6 +707,8 @@ def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
         "wlan.vht.op.channelwidth",
         "wlan.vht.op.channelcenter0",
         "wlan.vht.op.channelcenter1",
+        "frame.cap_len",
+        "frame.len",
     )
     field_names = TSHARK_FRAME_FIELD_NAMES + optional_fields
     rows = [
@@ -623,7 +728,7 @@ def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
             return None
 
     process_starts: list[str] = []
-    tune_commands: list[list[str]] = []
+    configured_definitions: list[ChannelDefinition] = []
     snapshots: list[object] = []
 
     class Dashboard:
@@ -650,7 +755,9 @@ def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
     )
     monkeypatch.setattr(
         "beacon_live.live.configure_monitor_interface",
-        lambda *args, **kwargs: None,
+        lambda *args, **kwargs: configured_definitions.append(
+            kwargs["channel_definition"]
+        ),
     )
     monkeypatch.setattr(
         "beacon_live.live.available_tshark_fields",
@@ -658,11 +765,7 @@ def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
     )
     monkeypatch.setattr(
         "beacon_live.live.start_tshark_process",
-        lambda iface: (process_starts.append(iface) or Process()),
-    )
-    monkeypatch.setattr(
-        "beacon_live.live.run_checked_command",
-        tune_commands.append,
+        lambda iface, **kwargs: (process_starts.append(iface) or Process()),
     )
     monkeypatch.setattr(
         "beacon_live.live.terminate_tshark_process",
@@ -685,15 +788,16 @@ def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
     ) == 0
 
     assert process_starts == ["wlan0"]
-    assert tune_commands == [
-        ["iw", "dev", "wlan0", "set", "freq", "5180", "80MHz", "5210"]
-    ]
+    assert len(configured_definitions) == 1
+    assert configured_definitions[0].width is ChannelWidth.MHZ80
+    assert configured_definitions[0].center_frequency1_mhz == 5210
     assert snapshots
     assert snapshots[-1].history
     assert stats_csv.exists() and beacons_jsonl.exists()
     with stats_csv.open(encoding="utf-8") as input_file:
         logged = list(csv.DictReader(input_file))
     assert logged[-1]["actual_capture_width_mhz"] == "80"
+    assert "was truncated to 512" in capsys.readouterr().err
 
 
 def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
@@ -715,6 +819,8 @@ def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
             "wlan.ht.info.secchanoffset": "1",
             "wlan.vht.op.channelwidth": "1",
             "wlan.vht.op.channelcenter0": "42",
+            "frame.cap_len": "512",
+            "frame.len": "700",
         }
     )
     return "\t".join(values[name] for name in field_names)
@@ -786,7 +892,7 @@ def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         "beacon_live.live.start_tshark_process",
-        lambda iface: _FakeTsharkProcess(),
+        lambda iface, **kwargs: _FakeTsharkProcess(),
     )
     monkeypatch.setattr(
         "beacon_live.live.terminate_tshark_process",

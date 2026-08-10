@@ -132,10 +132,10 @@ Let it run for at least 60 seconds, then stop it normally. Keep all of:
   reported drops when available; and
 - the application stats CSV and beacon JSONL.
 
-Do not add a MAC filter or snap length. Snapshot truncation occurs after RF
-demodulation and cannot make a 20 MHz receiver decode an 80 MHz transmission.
-A global short snap length can also truncate variable Radiotap/MAC headers or
-the beacon IEs required by existing metrics, so live diagnostics use `-s 0`.
+Do not add a MAC filter. Normal live analysis uses the application's 512-byte
+snapshot limit and reports any larger beacon it encounters. The `--raw-pcapng`
+diagnostic workflow uses full-length `-s 0` capture so the saved evidence is not
+truncated.
 
 Run the application audit, explicitly naming the selected primary frequency:
 
@@ -203,11 +203,12 @@ Repeat the same-primary test with controlled AP/client traffic at 20, 40+, 40-,
 4. Add a second AP whose own primary is channel 40 inside the captured 80 MHz
    block. Confirm its eligible traffic appears in the raw PCAPNG but is counted
    under `out_of_primary_scope_excluded_count`, not the channel-36 ratio.
-5. Exercise mixed BSSIDs on primary 36 advertising narrower widths. Confirm one
-   widest compatible definition covers them without channel hopping.
-6. If available, repeat 80+80, HE 6 GHz, and EHT 320/punctured cases. Unsupported
-   or unrepresentable modes must warn and report partial/HT20 coverage rather
-   than claim complete capture.
+5. Exercise mixed BSSIDs on primary 36 advertising narrower widths. Confirm the
+   fixed 80 MHz definition covers them without a retune or history reset.
+6. Add a BSSID advertising bandwidth beyond or incompatible with the fixed
+   80 MHz block. It must warn and report partial coverage without retuning or
+   claiming complete capture. Test wider explicit CLI overrides only on an
+   adapter known to support them.
 
 Passive monitor capture cannot obtain literally every transmitted frame. The
 validation target is every valid frame that this configured radio, PHY, driver,
