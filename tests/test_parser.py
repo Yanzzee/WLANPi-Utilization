@@ -209,6 +209,69 @@ def test_multiple_wlan_occurrences_emit_every_mpdu_and_retry_bit() -> None:
     assert all(record.retry_eligible for record in records)
 
 
+@pytest.mark.parametrize(
+    ("frame_control", "expected_retry"),
+    (("0x8808", True), ("0x8800", False)),
+)
+def test_frame_control_fallback_recovers_retry_bit(
+    frame_control: str,
+    expected_retry: bool,
+) -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + ("wlan.fc",)
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.250",
+            "wlan.fc": frame_control,
+            "wlan.fc.type": "2",
+            "wlan.fc.subtype": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "00:11:22:33:44:55",
+            "wlan.da": "00:11:22:33:44:55",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+    )
+
+    assert len(records) == 1
+    assert records[0].retry_flag is expected_retry
+    assert records[0].retry_eligible
+
+
+def test_6ghz_beacon_uses_radio_frequency_when_he_primary_is_unavailable() -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + ("wlan_radio.frequency",)
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.125",
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "ff:ff:ff:ff:ff:ff",
+            "wlan.ssid": "Six",
+            "wlan.fixed.beacon": "100",
+            "wlan_radio.frequency": "5975",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+        band="6",
+    )
+
+    assert len(records) == 1
+    definition = records[0].channel_definition
+    assert definition is not None
+    assert definition.primary_frequency_mhz == 5975
+    assert definition.complete is False
+    assert definition.ambiguous is True
+
+
 def test_parse_legacy_all_frame_row_without_address_fields() -> None:
     record = parse_tshark_frame_row(
         "1700000000.250\t2\t0\t1\taa:bb:cc:dd:ee:ff\t\t\t\t\t-51\t128\t"

@@ -22,6 +22,7 @@ from beacon_live.live import default_channel_definition
 from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
+from beacon_live.live import select_tshark_frame_fields
 from beacon_live.channel import ChannelDefinition
 from beacon_live.channel import ChannelWidth
 from beacon_live.channel import RadioCapabilities
@@ -145,6 +146,25 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         "wlan.vs.aerohive.hostname",
         "wlan.bssid_resolved",
     ]
+
+
+def test_live_field_selection_keeps_retry_and_frequency_fallbacks() -> None:
+    fields = select_tshark_frame_fields(
+        frozenset(
+            {
+                "wlan.fc",
+                "wlan_radio.frequency",
+                "radiotap.channel.freq",
+                "wlan_radio.phy",
+            }
+        ),
+        include_diagnostics=False,
+    )
+
+    assert "wlan.fc" in fields
+    assert "wlan_radio.frequency" in fields
+    assert "radiotap.channel.freq" in fields
+    assert "wlan_radio.phy" not in fields
 
 
 def test_raw_capture_command_uses_same_process_full_packet_stream(

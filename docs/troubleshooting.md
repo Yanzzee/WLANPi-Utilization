@@ -251,6 +251,13 @@ A blank retry sample means no eligible frame with a readable Retry bit was
 captured in that second. Beacons, group-addressed frames, control frames, and
 several management subtypes are intentionally excluded.
 
+`wlan.fc.retry.expert` in Wireshark is an expert label generated from the same
+Frame Control Retry bit as `wlan.fc.retry`; it is not a separate retry source.
+The live parser also reads the complete `wlan.fc` value as a fallback. For older
+TShark versions that do not expose the 6 GHz HE Operation primary-channel
+field, the capture's per-frame radio frequency provides the primary-scope
+fallback instead of excluding every frame from the denominator.
+
 Use the offline retry audit to inspect numerator, denominator, and exclusion
 reasons:
 

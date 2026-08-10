@@ -948,18 +948,14 @@ def run_live(
         and tshark_available_fields
         and not any(
             field in tshark_fields
-            for field in (
-                "wlan.ds.current_channel",
-                "wlan.ht.info.primarychannel",
-                "wlan.ext_tag.he_operation.6ghz.primary_channel",
-            )
+            for field in _primary_scope_field_names(resolved_band)
         )
         and actual_definition.width is not ChannelWidth.MHZ20
     ):
         print(
-            "Warning: installed TShark exposes no supported channel-operation "
-            "fields; retry metrics cannot safely associate BSSIDs with the "
-            "selected primary inside this bonded capture.",
+            "Warning: installed TShark exposes no supported primary-channel "
+            "or radio-frequency fields; retry metrics cannot safely associate "
+            "BSSIDs with the selected primary inside this bonded capture.",
             file=sys.stderr,
             flush=True,
         )
@@ -1347,6 +1343,23 @@ def _read_survey_samples_safely(iface: str) -> Optional[list[SurveySample]]:
         return read_survey_samples(iface)
     except (LiveCommandError, OSError, ValueError, OverflowError):
         return None
+
+
+def _primary_scope_field_names(band: str) -> tuple[str, ...]:
+    radio_fields = (
+        "wlan_radio.frequency",
+        "radiotap.channel.freq",
+    )
+    if band == "6":
+        return (
+            "wlan.ext_tag.he_operation.6ghz.primary_channel",
+            *radio_fields,
+        )
+    return (
+        "wlan.ds.current_channel",
+        "wlan.ht.info.primarychannel",
+        *radio_fields,
+    )
 
 
 def _read_tshark_line(fileobj: object) -> str:

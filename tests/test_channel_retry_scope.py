@@ -75,6 +75,38 @@ def test_retry_scope_associates_target_through_ta_ra_sa_and_da() -> None:
     assert stats.retry_frame_count == 4
 
 
+def test_retry_scope_accepts_radio_frequency_fallback_definition() -> None:
+    analyzer = Analyzer(target_primary_frequency_mhz=5975)
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.0,
+            bssid=TARGET,
+            frame_type=0,
+            frame_subtype=8,
+            retry_flag=False,
+            receiver_address="ff:ff:ff:ff:ff:ff",
+            channel_definition=ChannelDefinition(
+                5975,
+                ChannelWidth.MHZ20,
+                5975,
+                phy="radio-frequency",
+                complete=False,
+                ambiguous=True,
+                reason="primary channel not advertised",
+            ),
+        ),
+        publish_snapshot=False,
+    )
+    analyzer.ingest(_data(1000.2, TARGET, retry=True), publish_snapshot=False)
+    analyzer.ingest(_data(1000.3, TARGET, retry=False), publish_snapshot=False)
+
+    stats = analyzer.flush(include_history=False)[0]
+
+    assert stats.retry_eligible_frame_count == 2
+    assert stats.retry_frame_count == 1
+    assert stats.retry_percent == 50.0
+
+
 def _beacon(timestamp: float, bssid: str, primary_frequency: int) -> FrameRecord:
     return FrameRecord(
         timestamp=timestamp,

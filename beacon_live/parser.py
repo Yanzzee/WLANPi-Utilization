@@ -48,6 +48,9 @@ TSHARK_FRAME_FIELD_NAMES = (
 # lets one source tree work with the older TShark commonly installed on WLAN Pi
 # images while using HE/EHT and packet-audit data on newer versions.
 TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
+    "wlan.fc",
+    "wlan_radio.frequency",
+    "radiotap.channel.freq",
     "wlan.ds.current_channel",
     "wlan.ht.info.primarychannel",
     "wlan.ht.info.secchanoffset",
@@ -67,7 +70,6 @@ TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
 )
 
 TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES = (
-    "wlan_radio.frequency",
     "wlan_radio.phy",
     "radiotap.mcs.bw",
     "radiotap.vht.bw",
@@ -385,6 +387,7 @@ def parse_tshark_capture_record(
         return (legacy,) if legacy is not None else ()
 
     occurrence_fields = {
+        "wlan.fc",
         "wlan.fc.type",
         "wlan.fc.subtype",
         "wlan.fc.retry",
@@ -451,12 +454,16 @@ def _parse_named_tshark_frame_fields(
             return None
         integers[name] = parsed
 
-    radio_frequency = integers.get("wlan_radio.frequency")
+    radio_frequency = (
+        integers.get("wlan_radio.frequency")
+        or integers.get("radiotap.channel.freq")
+    )
     resolved_band = band or _band_from_frequency(radio_frequency)
     definition = None
     if record.is_beacon and resolved_band is not None:
         definition = definition_from_operation_fields(
             band=resolved_band,
+            fallback_primary_frequency_mhz=radio_frequency,
             ds_primary_channel=integers.get("wlan.ds.current_channel"),
             ht_primary_channel=integers.get("wlan.ht.info.primarychannel"),
             ht_secondary_offset=integers.get("wlan.ht.info.secchanoffset"),
@@ -502,8 +509,16 @@ def _parse_named_tshark_frame_fields(
         )
         if values.get(name, "")
     )
+    retry_flag = record.retry_flag
+    frame_control = integers.get("wlan.fc")
+    if retry_flag is None and frame_control is not None:
+        # Wireshark renders wlan.fc in wire order: the first octet (type and
+        # subtype) is the high byte and the second, flags octet is the low
+        # byte. Retry is bit 3 of that low byte.
+        retry_flag = bool(frame_control & 0x0008)
     return replace(
         record,
+        retry_flag=retry_flag,
         channel_definition=definition,
         captured_length=integers.get("frame.cap_len"),
         original_length=integers.get("frame.len"),
