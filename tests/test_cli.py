@@ -5,6 +5,7 @@ from typing import Optional
 
 import pytest
 
+from beacon_live.channel import ChannelWidth
 from beacon_live.cli import main
 from beacon_live.live import LiveCommandError
 from beacon_live.models import FrameRecord
@@ -499,6 +500,46 @@ def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) ->
             "survey_debug": False,
         }
     ]
+
+
+def test_live_wires_explicit_channel_definition_and_raw_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    raw_capture = tmp_path / "capture.pcapng"
+    monkeypatch.setattr(
+        "beacon_live.cli.run_live",
+        lambda **kwargs: (calls.append(kwargs) or 0),
+    )
+
+    assert main(
+        [
+            "live",
+            "--frequency-mhz",
+            "5180",
+            "--channel-width",
+            "160",
+            "--center-frequency1-mhz",
+            "5250",
+            "--raw-pcapng",
+            str(raw_capture),
+        ]
+    ) == 0
+
+    assert calls[0]["channel_width"] is ChannelWidth.MHZ160
+    assert calls[0]["center_frequency1_mhz"] == 5250
+    assert calls[0]["raw_capture_path"] == raw_capture
+
+
+def test_live_rejects_centers_with_automatic_width(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["live", "--center-frequency1-mhz", "5210"])
+
+    assert exc_info.value.code == 2
+    assert "center-frequency overrides require" in capsys.readouterr().err
 
 
 def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) -> None:

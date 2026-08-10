@@ -130,6 +130,15 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `channel` | Channel value configured for the run. |
 | `frequency_mhz` | Resolved tuned center frequency in MHz, when it can be determined. |
 | `band` | Resolved `2.4`, `5`, or `6` GHz band, when it can be determined. |
+| `capture_width_mode` | `auto` for beacon-driven width selection or `explicit` for a CLI override. |
+| `requested_capture_width_mhz` | Most recently requested capture width (`20`, `40`, `80`, `160`, `80+80`, or `320`). |
+| `requested_center_frequency1_mhz` | Requested center frequency 1. |
+| `requested_center_frequency2_mhz` | Requested center frequency 2 for 80+80 MHz. |
+| `actual_capture_width_mhz` | Width reported by `iw dev <iface> info`, or the attempted width when verification is unavailable. |
+| `actual_center_frequency1_mhz` | Actual or attempted center frequency 1. |
+| `actual_center_frequency2_mhz` | Actual or attempted center frequency 2. |
+| `actual_capture_verified` | `1` when the actual definition was read back from `iw`, `0` when it could not be verified. |
+| `capture_coverage_status` | `initial`, `complete`, `partial`, `fallback`, or `unverified`; partial/fallback never claims full bonded-channel coverage. |
 | `unique_bssid_count` | BSSIDs whose beacons are retained in the rolling 120-second window at this second. |
 | `qbss_station_count_sum` | Sum of the latest advertised QBSS station counts across retained BSSIDs; missing counts contribute zero. |
 | `unique_client_mac_count` | Unique eligible wireless client MACs observed in BSSID-linked data frames during this one-second period; this is not an associated-station count. |
@@ -138,8 +147,8 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `selected_qbss_bssid` | Automatically selected BSSID supplying the QBSS utilization fields. |
 | `selected_qbss_rssi_dbm` | RSSI in dBm from the selected BSSID's latest retained beacon. |
 | `received_frame_count` | All decoded 802.11 frames captured during this one-second period. |
-| `retry_observed_frame_count` | Captured frames during the second for which the Retry bit was readable, including frames not eligible for the retry denominator. |
-| `retry_eligible_frame_count` | Unicast data and retry-capable unicast management frames eligible for the retry-percentage denominator. |
+| `retry_observed_frame_count` | Primary-scoped frames during the second for which the Retry bit was readable, including frames not eligible for the retry denominator. Unknown, pre-discovery, stale, and non-target-primary associations are excluded. |
+| `retry_eligible_frame_count` | Primary-scoped unicast data and retry-capable unicast management frames eligible for the retry-percentage denominator. |
 | `retry_frame_count` | Retry-eligible frames whose Retry bit was set; repeated retry transmissions are each counted. |
 | `retry_percent` | `retry_frame_count / retry_eligible_frame_count × 100` for the second. |
 | `selected_beacon_rate_percent` | Selected BSSID's rolling-window received-beacon rate relative to the rate expected from its advertised beacon interval, capped at 100%. |

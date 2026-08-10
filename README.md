@@ -1,9 +1,12 @@
 # WLANPi Beacon Live
 
 WLANPi Beacon Live is a live 802.11 beacon and channel analyzer for WLAN Pi
-hardware. It listens on one 20 MHz channel in monitor mode and shows a rolling
-two-minute view of AP-advertised channel utilization, admission capacity,
-station counts, channel composition, and retry percentage.
+hardware. It starts on the selected 20 MHz primary channel, reads advertised
+HT/VHT/HE/EHT operation information, and—when the adapter, driver, regulatory
+state, `iw`, and TShark support it—widens the same monitor capture to cover
+traffic transmitted across the bonded channel. It shows a rolling two-minute
+view of AP-advertised channel utilization, admission capacity, station counts,
+channel composition, and retry percentage.
 
 The app automatically chooses the BSSID used for each display. You select only
 the band and channel, not an SSID or BSSID.
@@ -25,7 +28,10 @@ The primary target is a WLAN Pi R4 running WLAN Pi OS with:
 - `git`, `ip`, `iw`, and `tshark`; and
 - root access through `sudo`.
 
-The adapter, driver, and regulatory domain must permit the selected channel.
+The adapter, driver, and regulatory domain must permit the selected channel
+definition, not only its primary frequency. The application checks `iw phy`,
+reads the actual configured definition back from `iw`, and reports partial or
+HT20 fallback coverage when it cannot safely represent a wider definition.
 Some adapters do not expose usable local survey counters, but beacon-based
 screens can still work.
 
@@ -120,6 +126,14 @@ beacon-live replay --input samples/tshark_qbss_sample.tsv
 # Explicit 6 GHz center frequency instead of band/channel mapping
 sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
 
+# Explicit 160 MHz override: primary 5180 MHz, center 5250 MHz
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+  --channel-width 160 --center-frequency1-mhz 5250
+
+# Save full packets from the exact live-analysis process and a JSON sidecar
+sudo wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 \
+  --raw-pcapng /tmp/beacon-live-channel36.pcapng
+
 # General and workflow-specific help
 wlanpi-beacon-live --help
 beacon-live --help
@@ -129,6 +143,17 @@ beacon-live live --help
 `beacon-live live` accepts the same live options as `wlanpi-beacon-live`. Use
 `--frequency-mhz` when the exact center frequency is clearest, or combine
 `--band` and `--channel` when a channel number is ambiguous across bands.
+`--channel-width auto` is the default. Explicit widths above 20 MHz require
+`--center-frequency1-mhz`; 80+80 also requires
+`--center-frequency2-mhz`. A width is never inferred from the primary channel
+alone.
+
+Retry numerator and denominator include only eligible frames associated through
+BSSID/TA/RA/SA/DA with a BSSID whose fresh beacon advertises the selected
+primary. Frames before that beacon is discovered, unknown associations, stale
+definitions, and BSSIDs using a secondary portion as their own primary are
+excluded. The result means all valid frames the configured radio, PHY, driver,
+and TShark successfully decode—not literally every frame transmitted over RF.
 
 ### Interactive SSH dashboard
 

@@ -38,6 +38,7 @@ suggestions but does not run `apt install` itself.
 | `beacon_live/tui.py` | Interactive curses dashboard, layout, and table navigation. |
 | `beacon_live/lcd_dashboard.py` | PPM/JSON LCD artifact rendering. |
 | `beacon_live/live.py` | Live hardware boundary and runtime loop. |
+| `beacon_live/channel.py` | Pure channel-operation parsing, capability, coverage, and retune policy. |
 | `beacon_live/log_writer.py` | Log formats, logging service, disk safety, rollover. |
 | `beacon_live/survey.py` | Optional local survey parsing/calculation. |
 | `beacon_live/retry_debug.py` | Offline retry audit. |
@@ -78,6 +79,7 @@ Useful focused groups:
 .venv/bin/python -m pytest -q tests/test_parser.py tests/test_analyzer.py
 .venv/bin/python -m pytest -q tests/test_screens.py tests/test_lcd_dashboard.py
 .venv/bin/python -m pytest -q tests/test_log_writer.py tests/test_live.py
+.venv/bin/python -m pytest -q tests/test_channel.py tests/test_channel_retry_scope.py
 .venv/bin/python -m pytest -q tests/test_fpms_integration.py tests/test_fpms_patch.py
 ```
 

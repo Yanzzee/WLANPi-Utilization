@@ -10,11 +10,13 @@ import threading
 import time
 from dataclasses import asdict
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import IO, Callable, Optional
 
+from beacon_live.channel import ChannelDefinition
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
 
@@ -24,6 +26,15 @@ STATS_CSV_FIELDS = [
     "channel",
     "frequency_mhz",
     "band",
+    "capture_width_mode",
+    "requested_capture_width_mhz",
+    "requested_center_frequency1_mhz",
+    "requested_center_frequency2_mhz",
+    "actual_capture_width_mhz",
+    "actual_center_frequency1_mhz",
+    "actual_center_frequency2_mhz",
+    "actual_capture_verified",
+    "capture_coverage_status",
     "unique_bssid_count",
     "qbss_station_count_sum",
     "unique_client_mac_count",
@@ -60,6 +71,35 @@ class LogMetadata:
     channel: str
     frequency_mhz: Optional[int] = None
     band: Optional[str] = None
+    capture_width_mode: Optional[str] = None
+    requested_capture_width_mhz: Optional[str] = None
+    requested_center_frequency1_mhz: Optional[int] = None
+    requested_center_frequency2_mhz: Optional[int] = None
+    actual_capture_width_mhz: Optional[str] = None
+    actual_center_frequency1_mhz: Optional[int] = None
+    actual_center_frequency2_mhz: Optional[int] = None
+    actual_capture_verified: Optional[bool] = None
+    capture_coverage_status: Optional[str] = None
+
+    def with_channel_definition(
+        self,
+        *,
+        requested: ChannelDefinition,
+        actual: ChannelDefinition,
+        verified: bool,
+        coverage_status: str,
+    ) -> "LogMetadata":
+        return replace(
+            self,
+            requested_capture_width_mhz=requested.width.value,
+            requested_center_frequency1_mhz=requested.center_frequency1_mhz,
+            requested_center_frequency2_mhz=requested.center_frequency2_mhz,
+            actual_capture_width_mhz=actual.width.value,
+            actual_center_frequency1_mhz=actual.center_frequency1_mhz,
+            actual_center_frequency2_mhz=actual.center_frequency2_mhz,
+            actual_capture_verified=verified,
+            capture_coverage_status=coverage_status,
+        )
 
 
 @dataclass(frozen=True)
@@ -158,6 +198,9 @@ class CaptureLogWriter:
             self._beacons_file.close()
             self._beacons_file = None
 
+    def set_metadata(self, metadata: LogMetadata) -> None:
+        self._metadata = metadata
+
     def write_stats(self, stats: SecondStats) -> None:
         if self._stats_writer is None or self._stats_file is None:
             return
@@ -228,6 +271,11 @@ class LoggingEvent(str, Enum):
 
     LOW_DISK_STOP = "low_disk_stop"
     ROTATED = "rotated"
+
+
+@dataclass(frozen=True)
+class _MetadataUpdate:
+    metadata: LogMetadata
 
 
 class LoggingService:
@@ -327,6 +375,22 @@ class LoggingService:
 
     def write_beacon(self, record: BeaconRecord) -> None:
         self._enqueue(record)
+
+    def update_channel_definition(
+        self,
+        *,
+        requested: ChannelDefinition,
+        actual: ChannelDefinition,
+        verified: bool,
+        coverage_status: str,
+    ) -> None:
+        self._metadata = self._metadata.with_channel_definition(
+            requested=requested,
+            actual=actual,
+            verified=verified,
+            coverage_status=coverage_status,
+        )
+        self._enqueue(_MetadataUpdate(self._metadata))
 
     def maintain(self, *, now: Optional[float] = None) -> Optional[LoggingEvent]:
         """Run deterministic disk and rollover checks when their deadlines pass."""
@@ -486,6 +550,8 @@ class LoggingService:
                     writer.write_beacon(record)
                 elif isinstance(record, SecondStats):
                     writer.write_stats(record)
+                elif isinstance(record, _MetadataUpdate):
+                    writer.set_metadata(record.metadata)
             except OSError:
                 write_failed = True
                 self._write_failed.set()
@@ -504,6 +570,29 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
         "channel": metadata.channel,
         "frequency_mhz": _optional_value(metadata.frequency_mhz),
         "band": metadata.band or "",
+        "capture_width_mode": metadata.capture_width_mode or "",
+        "requested_capture_width_mhz": (
+            metadata.requested_capture_width_mhz or ""
+        ),
+        "requested_center_frequency1_mhz": _optional_value(
+            metadata.requested_center_frequency1_mhz
+        ),
+        "requested_center_frequency2_mhz": _optional_value(
+            metadata.requested_center_frequency2_mhz
+        ),
+        "actual_capture_width_mhz": metadata.actual_capture_width_mhz or "",
+        "actual_center_frequency1_mhz": _optional_value(
+            metadata.actual_center_frequency1_mhz
+        ),
+        "actual_center_frequency2_mhz": _optional_value(
+            metadata.actual_center_frequency2_mhz
+        ),
+        "actual_capture_verified": (
+            ""
+            if metadata.actual_capture_verified is None
+            else int(metadata.actual_capture_verified)
+        ),
+        "capture_coverage_status": metadata.capture_coverage_status or "",
         "unique_bssid_count": stats.unique_bssid_count,
         "qbss_station_count_sum": stats.qbss_station_count_sum,
         "unique_client_mac_count": stats.unique_client_mac_count,

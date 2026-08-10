@@ -5,6 +5,8 @@ from dataclasses import field
 from functools import cached_property
 from typing import Optional
 
+from beacon_live.channel import ChannelDefinition
+
 
 # Available Admission Capacity uses 32-microsecond units: 31,250 is 100%.
 QBSS_ADMISSION_CAPACITY_MAX = 31_250
@@ -23,6 +25,7 @@ class BeaconRecord:
     beacon_interval_tu: Optional[int] = None
     ap_name: Optional[str] = None
     vendor: Optional[str] = None
+    channel_definition: Optional[ChannelDefinition] = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,16 @@ class FrameRecord:
     destination_address: Optional[str] = None
     ap_name: Optional[str] = None
     vendor: Optional[str] = None
+    channel_definition: Optional[ChannelDefinition] = None
+    captured_length: Optional[int] = None
+    original_length: Optional[int] = None
+    radio_frequency_mhz: Optional[int] = None
+    phy_bandwidth: Optional[str] = None
+    fcs_status: Optional[int] = None
+    sequence_number: Optional[int] = None
+    fragment_number: Optional[int] = None
+    qos_tid: Optional[int] = None
+    ampdu_reference: Optional[int] = None
 
     @property
     def is_management_frame(self) -> bool:
@@ -118,6 +131,7 @@ class FrameRecord:
             beacon_interval_tu=self.beacon_interval_tu,
             ap_name=self.ap_name,
             vendor=self.vendor,
+            channel_definition=self.channel_definition,
         )
 
 

@@ -32,6 +32,10 @@ monitor interface / replay input
             │
             ▼
  acquisition and parsing ── one normalized FrameRecord per decoded frame
+            │                 └── beacon channel-definition observations
+            │                              │
+            │                              ▼
+            │                    capability/coverage planner ── in-place iw tune
             │
             ▼
       shared Analyzer ───── rolling frames, latest beacons, derived metrics
@@ -50,18 +54,36 @@ creates another analyzer or capture worker.
 
 ## Acquisition layer
 
-Live capture configures one interface in monitor mode on a selected 20 MHz
-channel and launches one line-buffered TShark process. The TShark display filter
-accepts decoded WLAN frames; it does not filter for traffic addressed to the
-WLAN Pi.
+Live capture configures one interface in monitor mode on the selected primary
+at HT20 and launches one line-buffered TShark process. Supported HT, VHT, HE
+6 GHz, and EHT operation fields form immutable `ChannelDefinition` values.
+Fresh per-BSSID observations feed a pure coverage planner. After a candidate is
+stable, the hardware boundary retunes that interface in place; TShark, the
+analyzer, renderers, screen state, logging state, and graph history remain
+alive. Explicit CLI width/center definitions bypass automatic selection.
+
+The planner chooses the widest capability-supported definition containing the
+advertised bandwidth of every fresh BSSID with the selected primary. A single
+continuous definition naturally covers narrower BSSIDs nested inside it. A
+conflicting 80+80 layout, puncturing unsupported by `iw`/kernel/driver, missing center,
+disabled segment, unsupported PHY width, failed tune, or failed read-back
+produces an explicit partial/fallback status. It never derives width from the
+primary alone and never channel-hops between incompatible definitions.
 
 The live TShark process enables only the Radiotap/802.11 dissector chain and
 disables WLAN decryption and defragmentation. None of the analyzer metrics
 requires payload or higher-layer protocol dissection. A 16 MiB capture buffer
 provides headroom during short scheduler stalls. Capture snapshot length remains
-unrestricted: TShark's snapshot length is global, so shortening data frames
+unrestricted (`-s 0` is explicit for raw diagnostics): TShark's snapshot length is global, so shortening data frames
 would also risk truncating beacon information elements used for QBSS, AP-name,
 vendor, and radio-grouping output.
+
+Optional `--raw-pcapng` adds `-P -w` to that same TShark process. It therefore
+saves the raw packets feeding live decoding without a second competing capture.
+The adjacent JSON sidecar records requested/actual definitions, verification and
+coverage status, negotiated fields, full-snapshot policy, decoded/normalized
+counts, and a drop count when TShark reports one. PCAPNG interface statistics
+remain the authoritative source when TShark does not expose a drop count.
 
 The parser normalizes available fields into `FrameRecord`, including:
 
@@ -71,7 +93,17 @@ The parser normalizes available fields into `FrameRecord`, including:
 - SSID and RSSI;
 - beacon interval (and frame length when present in older replay exports);
 - QBSS channel utilization, station count, and admission capacity; and
-- supported vendor AP-name/vendor clues.
+- supported vendor AP-name/vendor clues;
+- advertised primary, width, centers, completeness/ambiguity, and EHT
+  puncturing when exposed; and
+- optional PHY bandwidth, captured/original lengths, FCS, sequence, fragment,
+  QoS TID, and A-MPDU reference diagnostics.
+
+TShark fields are negotiated from `tshark -G fields`, retaining compatibility
+with older installations. The export uses `occurrence=a` with a fixed
+aggregator. Drivers normally supply one capture record per MPDU; if a dissector
+does expose multiple WLAN headers in one record, the parser emits each aligned
+MPDU and Retry bit rather than retaining only the first occurrence.
 
 A valid beacon can also be represented as `BeaconRecord`. Replay inputs feed
 the same aggregation behavior without requiring Wi-Fi hardware.
@@ -107,6 +139,14 @@ rolling window and merged for snapshot publication. If the retained BSSID set
 changes, affected projections are rebuilt from the single raw-frame store so
 address-based association keeps the same meaning. The completed projection is
 also reused when publishing that second, avoiding a second window scan.
+
+When live capture supplies a selected primary frequency, retry projection is
+temporally scoped. A frame must associate through BSSID/TA/RA/SA/DA with a
+BSSID whose channel definition was observed at or before that frame, remains
+fresh, and advertises that primary. Pre-discovery frames, unknown associations,
+stale definitions, and BSSIDs whose own primary is merely inside a secondary
+portion of the bonded capture are excluded from retry readable/eligible/retry
+counts. Replay without channel-definition fields retains its legacy behavior.
 
 ### Rolling-window and latest-beacon rules
 

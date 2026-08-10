@@ -124,6 +124,27 @@ iw phy
 iw reg get
 ```
 
+For bonded capture, also inspect the actual definition:
+
+```bash
+iw dev wlan0 info
+```
+
+The application starts at HT20 and waits for stable beacon operation fields.
+It will stay at or return to HT20, with a warning, when `iw phy` lacks a width
+or required 20 MHz segment, the beacon center is incomplete/ambiguous, 80+80
+definitions conflict, EHT puncturing is unsupported by the installed stack, the kernel rejects
+the tune, or `iw` reads back a different definition. An explicit override still
+undergoes the same capability check:
+
+```bash
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+  --channel-width 80 --center-frequency1-mhz 5210
+```
+
+Do not choose a wider center from the primary channel alone. Check the AP's
+HT/VHT/HE/EHT operation element and the regulatory/driver capability together.
+
 Use an explicit center frequency when testing 5 GHz or 6 GHz:
 
 ```bash

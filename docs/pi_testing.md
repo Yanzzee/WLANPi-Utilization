@@ -111,44 +111,107 @@ To verify replay output formats:
   --channel 36
 ```
 
-## Capture and audit retry metrics
+## Validate bonded capture and retry metrics
 
-The retry analyzer uses all decoded monitor-mode WLAN frames on the tuned
-channel, not only frames addressed to the WLAN Pi. Create a reproducible
-60-second channel-36 capture:
-
-```bash
-sudo ip link set wlan0 down
-sudo iw dev wlan0 set type monitor
-sudo ip link set wlan0 up
-sudo iw dev wlan0 set channel 36 HT20
-sudo dumpcap -i wlan0 -a duration:60 -s 0 \
-  -w /tmp/wlanpi-retry-debug.pcapng
-```
-
-For an explicit center frequency, replace the last `iw` command with, for
-example:
+Use one application-owned PCAPNG for both live analysis and the independent
+comparison. This avoids a second capture process competing for the adapter:
 
 ```bash
-sudo iw dev wlan0 set freq 5975 HT20
+sudo .venv/bin/wlanpi-beacon-live \
+  --iface wlan0 --band 5 --channel 36 \
+  --log --log-dir /tmp/beacon-live-validation \
+  --raw-pcapng /tmp/beacon-live-validation/channel36.pcapng
 ```
 
-Do not add a MAC-address capture filter. Full frames are needed to audit retry
-eligibility and BSSID association.
+Let it run for at least 60 seconds, then stop it normally. Keep all of:
 
-Run the audit:
+- `channel36.pcapng`, the full-length packets written by the exact TShark
+  process that supplied live fields;
+- `channel36.pcapng.json`, containing requested/actual definitions, read-back
+  status, coverage warnings, negotiated TShark fields, record counts, and
+  reported drops when available; and
+- the application stats CSV and beacon JSONL.
+
+Do not add a MAC filter or snap length. Snapshot truncation occurs after RF
+demodulation and cannot make a 20 MHz receiver decode an 80 MHz transmission.
+A global short snap length can also truncate variable Radiotap/MAC headers or
+the beacon IEs required by existing metrics, so live diagnostics use `-s 0`.
+
+Run the application audit, explicitly naming the selected primary frequency:
 
 ```bash
 .venv/bin/beacon-live retry-debug \
-  --input /tmp/wlanpi-retry-debug.pcapng \
-  --output-csv /tmp/wlanpi-retry-audit.csv
+  --input /tmp/beacon-live-validation/channel36.pcapng \
+  --target-frequency-mhz 5180 \
+  --output-csv /tmp/beacon-live-validation/retry-seconds.csv \
+  --frames-csv /tmp/beacon-live-validation/retry-frames.csv
 ```
 
-The audit emits one channel row and zero or more known-BSSID rows per capture
-second. It includes decoded/readable counts, group-address/missing-bit/type
-exclusions, eligible denominator, retry numerator/percentage, and footer
-selection. A blank percentage means no eligible frames; `0.000000` means
-eligible frames existed with no Retry bit set.
+The per-second audit reports out-of-primary-scope exclusions separately. The
+packet CSV adds PHY bandwidth, captured/original lengths, FCS status, Retry,
+sequence, fragment, QoS TID, A-MPDU reference, and BSSID/TA/RA/SA/DA wherever
+the driver and installed TShark expose them.
+
+### Independent Wireshark/TShark comparison
+
+The packet CSV and application audit share application parsing, so they are
+diagnostics—not independent proof. Open the raw PCAPNG in Wireshark and add
+columns for `wlan.fc.retry`, `wlan.seq`, `wlan.frag`, `wlan.qos.tid`,
+`wlan.bssid`, `wlan.ta`, `wlan.ra`, `wlan.sa`, `wlan.da`, `frame.cap_len`,
+`frame.len`, `wlan.fcs.status`, and the Radiotap VHT/HE/EHT bandwidth fields
+available in that installation.
+
+For each target BSSID and one-second interval:
+
+1. Build the denominator from unicast data and retry-capable unicast management
+   MPDUs with a readable Retry bit. Exclude beacons, probe requests, Action No
+   Ack, control/extension frames, group RA/DA, and unreadable Retry bits.
+2. Count the same eligible rows with Retry set for the numerator. Count repeated
+   sequence/fragment/TID tuples separately; each captured retry transmission is
+   an MPDU observation.
+3. Confirm BSSID association through any of BSSID/TA/RA/SA/DA, and confirm its
+   latest preceding beacon advertises primary 5180 MHz.
+4. Compare those independent counts to `retry-seconds.csv` and the live stats
+   CSV. Investigate timestamp-boundary, malformed, FCS, and drop diagnostics
+   before attributing a difference to the ratio calculation.
+
+You can export independent fields without the application parser for a separate
+spreadsheet/pivot-table count:
+
+```bash
+tshark -n -r /tmp/beacon-live-validation/channel36.pcapng \
+  -Y wlan -T fields -E header=y -E separator=, -E quote=d \
+  -E occurrence=a \
+  -e frame.time_epoch -e wlan.fc.type -e wlan.fc.subtype \
+  -e wlan.fc.retry -e wlan.bssid -e wlan.ta -e wlan.ra \
+  -e wlan.sa -e wlan.da -e wlan.seq -e wlan.frag -e wlan.qos.tid \
+  > /tmp/beacon-live-validation/independent-tshark.csv
+```
+
+### Controlled width matrix
+
+Repeat the same-primary test with controlled AP/client traffic at 20, 40+, 40-,
+80, and 160 MHz where the adapter supports each mode. For every run:
+
+1. Keep primary/control channel 36 (5180 MHz); change only advertised width and
+   center. Generate sustained unicast traffic in both directions and introduce
+   controlled attenuation/interference so nonzero retries occur.
+2. Confirm the beacon JSONL definition and `iw dev wlan0 info` actual width and
+   centers. The sidecar must say `complete`; otherwise treat the run as partial.
+3. Confirm Radiotap shows frames using the wider bandwidth and that application
+   retry counts include them.
+4. Add a second AP whose own primary is channel 40 inside the captured 80 MHz
+   block. Confirm its eligible traffic appears in the raw PCAPNG but is counted
+   under `out_of_primary_scope_excluded_count`, not the channel-36 ratio.
+5. Exercise mixed BSSIDs on primary 36 advertising narrower widths. Confirm one
+   widest compatible definition covers them without channel hopping.
+6. If available, repeat 80+80, HE 6 GHz, and EHT 320/punctured cases. Unsupported
+   or unrepresentable modes must warn and report partial/HT20 coverage rather
+   than claim complete capture.
+
+Passive monitor capture cannot obtain literally every transmitted frame. The
+validation target is every valid frame that this configured radio, PHY, driver,
+regulatory state, and TShark can successfully decode.
 
 See [screens.md](screens.md#4-retries) for the metric rules.
 

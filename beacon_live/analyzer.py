@@ -129,14 +129,22 @@ class Analyzer:
         *,
         window_seconds: int = DEFAULT_WINDOW_SECONDS,
         hysteresis_db: int = DEFAULT_RSSI_HYSTERESIS_DB,
+        target_primary_frequency_mhz: Optional[int] = None,
+        channel_definition_max_age_seconds: float = 10.0,
     ) -> None:
         if window_seconds <= 0:
             raise ValueError("window_seconds must be greater than zero")
         if hysteresis_db < 0:
             raise ValueError("hysteresis_db must not be negative")
+        if target_primary_frequency_mhz is not None and target_primary_frequency_mhz <= 0:
+            raise ValueError("target_primary_frequency_mhz must be greater than zero")
+        if channel_definition_max_age_seconds <= 0:
+            raise ValueError("channel_definition_max_age_seconds must be greater than zero")
 
         self.window_seconds = window_seconds
         self.hysteresis_db = hysteresis_db
+        self.target_primary_frequency_mhz = target_primary_frequency_mhz
+        self.channel_definition_max_age_seconds = channel_definition_max_age_seconds
         self._records_by_bssid: dict[
             str, list[tuple[float, int, BeaconRecord]]
         ] = {}
@@ -515,6 +523,11 @@ class Analyzer:
                     ),
                 ),
                 tuple(state.bssid for state in states),
+                retry_scope=self._retry_scope_entries(),
+                target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                channel_definition_max_age_seconds=(
+                    self.channel_definition_max_age_seconds
+                ),
             )
             retry_states = _retry_states_from_projection(second_frames, states)
             window_unique_client_mac_count = len(
@@ -731,13 +744,22 @@ class Analyzer:
             if window_entries:
                 window_entries_by_bssid[bssid] = window_entries
         known_bssids = tuple(window_entries_by_bssid)
+        retry_scope = self._retry_scope_entries()
         frame_projection = (
             self._rolling_frame_projection(
                 int(reference_timestamp) - 1,
                 known_bssids,
             )
             if cache_by_second
-            else _project_frames(frames, known_bssids)
+            else _project_frames(
+                frames,
+                known_bssids,
+                retry_scope=retry_scope,
+                target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                channel_definition_max_age_seconds=(
+                    self.channel_definition_max_age_seconds
+                ),
+            )
         )
         states: list[BssidState] = []
         for bssid, window_entries in window_entries_by_bssid.items():
@@ -841,13 +863,18 @@ class Analyzer:
         second: int,
         known_bssids: tuple[str, ...],
     ) -> _FrameProjection:
-        cache_key = tuple(sorted(known_bssids))
+        cache_key = self._projection_cache_key(known_bssids)
         cached = self._frame_projections_by_second.get(second)
         if cached is not None and cached[0] == cache_key:
             return cached[1]
         projection = _project_frames(
             self._frames_between(float(second), float(second + 1)),
-            cache_key,
+            tuple(sorted(known_bssids)),
+            retry_scope=self._retry_scope_entries(),
+            target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+            channel_definition_max_age_seconds=(
+                self.channel_definition_max_age_seconds
+            ),
         )
         self._frame_projections_by_second[second] = (cache_key, projection)
         return projection
@@ -864,6 +891,32 @@ class Analyzer:
                 for second in range(first_second, end_second + 1)
             )
         )
+
+    def _retry_scope_entries(self) -> dict[str, tuple[BeaconRecord, ...]]:
+        if self.target_primary_frequency_mhz is None:
+            return {}
+        return {
+            bssid: tuple(entry[2] for entry in entries)
+            for bssid, entries in self._records_by_bssid.items()
+        }
+
+    def _projection_cache_key(
+        self,
+        known_bssids: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        key = list(sorted(known_bssids))
+        if self.target_primary_frequency_mhz is None:
+            return tuple(key)
+        key.append(f"target={self.target_primary_frequency_mhz}")
+        for bssid, records in sorted(self._retry_scope_entries().items()):
+            for record in records:
+                definition = record.channel_definition
+                if definition is not None:
+                    key.append(
+                        f"{bssid}@{record.timestamp}="
+                        f"{definition.primary_frequency_mhz}"
+                    )
+        return tuple(key)
 
     def _expire_records(self, reference_timestamp: float) -> None:
         cutoff = reference_timestamp - self.window_seconds
@@ -1132,6 +1185,10 @@ def _merge_frame_projections(
 def _project_frames(
     frames: tuple[FrameRecord, ...],
     known_bssids: tuple[str, ...],
+    *,
+    retry_scope: Optional[dict[str, tuple[BeaconRecord, ...]]] = None,
+    target_primary_frequency_mhz: Optional[int] = None,
+    channel_definition_max_age_seconds: float = 10.0,
 ) -> _FrameProjection:
     """Derive retry, association, and client metrics in one frame pass."""
     known_by_address = {
@@ -1145,15 +1202,25 @@ def _project_frames(
     clients: set[str] = set()
 
     for frame in frames:
-        retry_observed = frame.retry_flag is not None
-        retry_eligible = frame.retry_eligible
+        associated_bssid = _associated_bssid(frame, known_by_address)
+        retry_in_scope = (
+            target_primary_frequency_mhz is None
+            or _frame_matches_primary_scope(
+                frame,
+                associated_bssid,
+                retry_scope or {},
+                target_primary_frequency_mhz,
+                channel_definition_max_age_seconds,
+            )
+        )
+        retry_observed = retry_in_scope and frame.retry_flag is not None
+        retry_eligible = retry_in_scope and frame.retry_eligible
         is_retry = retry_eligible and frame.retry_flag is True
         retry_observed_count += retry_observed
         retry_eligible_count += retry_eligible
         retry_count += is_retry
 
-        associated_bssid = _associated_bssid(frame, known_by_address)
-        if associated_bssid is not None:
+        if associated_bssid is not None and retry_in_scope:
             summary = by_bssid.get(associated_bssid)
             if summary is None:
                 summary = _BssidFrameSummary()
@@ -1173,7 +1240,7 @@ def _project_frames(
             ):
                 summary.last_timestamp = frame.timestamp
 
-        if frame.frame_type != 2:
+        if frame.frame_type != 2 or not retry_in_scope:
             continue
 
         # Only TA/RA link endpoints count as observed wireless clients. SA/DA
@@ -1207,6 +1274,32 @@ def _project_frames(
         retry_count=retry_count,
         by_bssid=by_bssid,
         unique_client_macs=frozenset(clients),
+    )
+
+
+def _frame_matches_primary_scope(
+    frame: FrameRecord,
+    associated_bssid: Optional[str],
+    retry_scope: dict[str, tuple[BeaconRecord, ...]],
+    target_primary_frequency_mhz: int,
+    max_age_seconds: float,
+) -> bool:
+    """Require a beacon definition known at capture time and still fresh."""
+    if associated_bssid is None:
+        return False
+    latest: Optional[BeaconRecord] = None
+    for beacon in retry_scope.get(associated_bssid, ()):
+        if beacon.timestamp > frame.timestamp:
+            break
+        if beacon.channel_definition is not None:
+            latest = beacon
+    if latest is None or latest.channel_definition is None:
+        return False
+    if frame.timestamp - latest.timestamp > max_age_seconds:
+        return False
+    return (
+        latest.channel_definition.primary_frequency_mhz
+        == target_primary_frequency_mhz
     )
 
 

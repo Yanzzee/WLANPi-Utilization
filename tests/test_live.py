@@ -15,14 +15,20 @@ from beacon_live.live import _format_survey_unavailable_warning
 from beacon_live.live import build_monitor_setup_commands
 from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
+from beacon_live.live import _write_raw_capture_metadata
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
+from beacon_live.channel import ChannelDefinition
+from beacon_live.channel import ChannelWidth
+from beacon_live.channel import RadioCapabilities
+from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.survey import SurveyCuResult
+from beacon_live.channel import CoverageDecision
 
 
 def test_build_monitor_setup_commands_uses_ht20_channel() -> None:
@@ -117,6 +123,60 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         "wlan.vs.aerohive.hostname",
         "wlan.bssid_resolved",
     ]
+
+
+def test_raw_capture_command_uses_same_process_full_packet_stream(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "capture.pcapng"
+    command = build_tshark_command("wlan9", raw_capture_path=raw)
+
+    assert "-P" in command
+    assert command[command.index("-s") + 1] == "0"
+    assert command[command.index("-w") + 1] == str(raw)
+    assert command[command.index("-F") + 1] == "pcapng"
+    assert "-Y" not in command
+    assert "occurrence=a" in command
+    assert "aggregator=|" in command
+
+
+def test_raw_capture_sidecar_records_width_and_drop_diagnostics(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "capture.pcapng"
+    requested = ChannelDefinition(5180, ChannelWidth.MHZ80, 5210)
+    actual = ChannelDefinition(5180, ChannelWidth.MHZ20, 5180)
+    coverage = CoverageDecision(
+        requested,
+        ("aa",),
+        ("bb",),
+        "partial",
+        "driver fallback",
+    )
+
+    _write_raw_capture_metadata(
+        raw,
+        interface="wlan0",
+        selected_channel="36",
+        requested=requested,
+        actual=actual,
+        actual_verified=True,
+        coverage=coverage,
+        tshark_fields=TSHARK_FRAME_FIELD_NAMES,
+        capture_record_count=10,
+        normalized_frame_count=11,
+        malformed_capture_record_count=1,
+        tshark_stderr="10 packets captured, 2 packets dropped",
+    )
+
+    payload = json.loads(
+        raw.with_suffix(".pcapng.json").read_text(encoding="utf-8")
+    )
+    assert payload["snapshot_length"] == 0
+    assert payload["requested_channel_definition"]["width"] == "80"
+    assert payload["actual_channel_definition"]["width"] == "20"
+    assert payload["coverage_status"] == "partial"
+    assert payload["reported_drop_count"] == 2
 
 
 def test_build_survey_command() -> None:
@@ -532,6 +592,155 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
     assert warmup_filter.remaining_cycles == 1
     assert warmup_filter.filter([stats]) == []
     assert warmup_filter.filter([stats]) == [stats]
+
+
+def test_auto_retune_preserves_process_analyzer_logging_and_dashboard_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optional_fields = (
+        "wlan.ht.info.primarychannel",
+        "wlan.ht.info.secchanoffset",
+        "wlan.vht.op.channelwidth",
+        "wlan.vht.op.channelcenter0",
+        "wlan.vht.op.channelcenter1",
+    )
+    field_names = TSHARK_FRAME_FIELD_NAMES + optional_fields
+    rows = [
+        _wide_beacon_row(field_names, timestamp=1000.1),
+        _wide_beacon_row(field_names, timestamp=1001.1),
+        _wide_beacon_row(field_names, timestamp=1002.1),
+        _wide_data_row(field_names, timestamp=1003.1, retry=True),
+        _wide_data_row(field_names, timestamp=1004.1, retry=False),
+    ]
+
+    class Process:
+        def __init__(self) -> None:
+            self.stdout = io.StringIO("\n".join(rows) + "\n")
+            self.stderr = io.StringIO("")
+
+        def poll(self) -> None:
+            return None
+
+    process_starts: list[str] = []
+    tune_commands: list[list[str]] = []
+    snapshots: list[object] = []
+
+    class Dashboard:
+        def refresh(self, snapshot: object = None) -> None:
+            snapshots.append(snapshot)
+
+        def poll_input(self) -> bool:
+            return False
+
+    monotonic = iter(float(value) for value in range(100))
+    capabilities = RadioCapabilities(
+        frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ40, ChannelWidth.MHZ80}),
+        frozenset({5180, 5200, 5220, 5240}),
+        supports_monitor=True,
+        source_complete=True,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_radio_capabilities_safely",
+        lambda iface: capabilities,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_actual_channel_safely",
+        lambda iface, requested: (requested, True),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.available_tshark_fields",
+        lambda: frozenset(field_names),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.start_tshark_process",
+        lambda iface: (process_starts.append(iface) or Process()),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.run_checked_command",
+        tune_commands.append,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.terminate_tshark_process",
+        lambda process: None,
+    )
+    monkeypatch.setattr("beacon_live.live.selectors.DefaultSelector", _FakeSelector)
+    monkeypatch.setattr(
+        "beacon_live.live.time.monotonic",
+        lambda: next(monotonic),
+    )
+
+    stats_csv = tmp_path / "stats.csv"
+    beacons_jsonl = tmp_path / "beacons.jsonl"
+    assert run_live(
+        interval_seconds=1.0,
+        stats_csv=stats_csv,
+        beacons_jsonl=beacons_jsonl,
+        min_free_bytes=0,
+        _dashboard=Dashboard(),
+    ) == 0
+
+    assert process_starts == ["wlan0"]
+    assert tune_commands == [
+        ["iw", "dev", "wlan0", "set", "freq", "5180", "80MHz", "5210"]
+    ]
+    assert snapshots
+    assert snapshots[-1].history
+    assert stats_csv.exists() and beacons_jsonl.exists()
+    with stats_csv.open(encoding="utf-8") as input_file:
+        logged = list(csv.DictReader(input_file))
+    assert logged[-1]["actual_capture_width_mhz"] == "80"
+
+
+def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": str(timestamp),
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:aa:aa:aa:aa:aa",
+            "wlan.ta": "aa:aa:aa:aa:aa:aa",
+            "wlan.ra": "ff:ff:ff:ff:ff:ff",
+            "wlan.sa": "aa:aa:aa:aa:aa:aa",
+            "wlan.da": "ff:ff:ff:ff:ff:ff",
+            "wlan.ssid": "Wide",
+            "wlan.fixed.beacon": "100",
+            "wlan.ht.info.primarychannel": "36",
+            "wlan.ht.info.secchanoffset": "1",
+            "wlan.vht.op.channelwidth": "1",
+            "wlan.vht.op.channelcenter0": "42",
+        }
+    )
+    return "\t".join(values[name] for name in field_names)
+
+
+def _wide_data_row(
+    field_names: tuple[str, ...],
+    *,
+    timestamp: float,
+    retry: bool,
+) -> str:
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": str(timestamp),
+            "wlan.fc.type": "2",
+            "wlan.fc.subtype": "0",
+            "wlan.fc.retry": str(int(retry)),
+            "wlan.bssid": "aa:aa:aa:aa:aa:aa",
+            "wlan.ta": "00:11:22:33:44:55",
+            "wlan.ra": "aa:aa:aa:aa:aa:aa",
+            "wlan.sa": "00:11:22:33:44:55",
+            "wlan.da": "aa:aa:aa:aa:aa:aa",
+        }
+    )
+    return "\t".join(values[name] for name in field_names)
 
 
 class _FakeTsharkProcess:
