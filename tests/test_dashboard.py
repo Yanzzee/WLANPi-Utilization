@@ -172,6 +172,17 @@ def test_terminal_dashboard_uses_shared_screen_registry() -> None:
     assert dashboard.snapshot is snapshot
 
 
+def test_terminal_dashboard_renders_runtime_notice_in_band() -> None:
+    dashboard = TerminalDashboard()
+    dashboard.set_notice("Beacon aa exceeds the 1024-byte live snapshot")
+
+    rendered = dashboard.render()
+
+    assert rendered.endswith(
+        "Warning: Beacon aa exceeds the 1024-byte live snapshot"
+    )
+
+
 def _stats(
     second: int,
     *,

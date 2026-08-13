@@ -28,6 +28,10 @@ DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
 COMPOSITION_ROTATION_SECONDS = 2
 ASSUMED_BEACON_INTERVAL_SECONDS = 0.1024
+# Keep a radio eligible through one completely missed reporting second, plus
+# the normal delayed-beacon allowance. Older rolling-window state remains
+# useful elsewhere, but must not pin Beacon Loss to an inactive radio.
+BEACON_RADIO_MAX_AGE_SECONDS = 1.0 + ASSUMED_BEACON_INTERVAL_SECONDS
 
 
 @dataclass
@@ -410,7 +414,12 @@ class Analyzer:
             self._history_retry_bssid,
         )
         strongest_radio = select_strongest_radio(
-            estimate_radio_groups(states),
+            estimate_radio_groups(
+                _recent_radio_states(
+                    states,
+                    reference_timestamp=float(second + 1),
+                )
+            ),
             self._history_strongest_radio_bssids,
         )
         strongest_radio_bssids = (
@@ -557,7 +566,6 @@ class Analyzer:
             states,
             self._current_retry_bssid,
         )
-        composition = self._composition_snapshot(states, current_second)
         interval_end = min(
             float(current_second + 1),
             (
@@ -565,6 +573,11 @@ class Analyzer:
                 if upper_exclusive is not None
                 else reference_timestamp + 1e-9
             ),
+        )
+        composition = self._composition_snapshot(
+            states,
+            current_second,
+            reference_timestamp=interval_end,
         )
         beacon_reception = self._beacon_reception_snapshot(
             second=current_second,
@@ -654,13 +667,21 @@ class Analyzer:
         self,
         states: tuple[BssidState, ...],
         current_second: int,
+        *,
+        reference_timestamp: float,
     ) -> CompositionSnapshot:
         groups = estimate_radio_groups(states)
+        recent_groups = estimate_radio_groups(
+            _recent_radio_states(
+                states,
+                reference_timestamp=reference_timestamp,
+            )
+        )
         rotation_second = self._composition_rotation_second
         previous_radio_bssids = self._strongest_radio_bssids
 
         strongest = select_strongest_radio(
-            groups,
+            recent_groups,
             previous_radio_bssids,
         )
 
@@ -1451,6 +1472,22 @@ def _beacon_loss_percent(
         return None
     missing_count = max(0, expected_count - received_count)
     return missing_count / expected_count * 100
+
+
+def _recent_radio_states(
+    states: tuple[BssidState, ...],
+    *,
+    reference_timestamp: float,
+) -> tuple[BssidState, ...]:
+    """Return BSSIDs recent enough to represent a currently heard radio."""
+    cutoff = reference_timestamp - BEACON_RADIO_MAX_AGE_SECONDS
+    tolerance = 1e-9
+    return tuple(
+        state
+        for state in states
+        if state.latest_beacon_ts >= cutoff - tolerance
+        and state.latest_beacon_ts <= reference_timestamp + tolerance
+    )
 
 
 def _beacon_reception_counts(

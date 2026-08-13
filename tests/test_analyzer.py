@@ -279,23 +279,51 @@ def test_composition_snapshot_selects_strongest_radio_and_rotates_members() -> N
     assert first.displayed_bssid == "00:11:22:33:44:50"
     assert first.displayed_rssi_dbm == -35
 
+    def refresh_strongest_radio(second: int) -> None:
+        analyzer.ingest(
+            _record(
+                second + 0.1,
+                bssid="00:11:22:33:44:50",
+                ssid="Alpha",
+                station_count=4,
+                rssi_dbm=-35,
+                ap_name="Room-101",
+                vendor="Example Wireless",
+            )
+        )
+        analyzer.ingest(
+            _record(
+                second + 0.2,
+                bssid="00:11:22:33:44:51",
+                ssid=None,
+                station_count=2,
+                rssi_dbm=-37,
+                ap_name="Room-101",
+                vendor="Example Wireless",
+            )
+        )
+
+    refresh_strongest_radio(1001)
     analyzer.advance(1002, None)
     one_second_later = analyzer.snapshot.composition
     assert one_second_later.displayed_ssid == "Alpha"
     assert one_second_later.displayed_bssid == "00:11:22:33:44:50"
 
+    refresh_strongest_radio(1002)
     analyzer.advance(1003, None)
     two_seconds_later = analyzer.snapshot.composition
     assert two_seconds_later.displayed_ssid is None
     assert two_seconds_later.displayed_bssid == "00:11:22:33:44:51"
     assert two_seconds_later.displayed_rssi_dbm == -37
 
+    refresh_strongest_radio(1003)
     analyzer.advance(1004, None)
     assert (
         analyzer.snapshot.composition.displayed_bssid
         == "00:11:22:33:44:51"
     )
 
+    refresh_strongest_radio(1004)
     analyzer.advance(1005, None)
     assert (
         analyzer.snapshot.composition.displayed_bssid
@@ -498,6 +526,86 @@ def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop()
         interval_start=1001.0,
         interval_end=1002.0,
     ) == (10, 10)
+
+
+def test_missed_and_delayed_beacon_do_not_shift_later_tbtt_count() -> None:
+    interval = 0.1024
+    timestamps = []
+    for slot in range(23):
+        if slot == 5:
+            continue
+        timestamp = 999.95 + slot * interval
+        if slot == 8:
+            timestamp += 0.05
+        timestamps.append(timestamp)
+
+    assert _beacon_reception_counts(
+        tuple(timestamps),
+        interval_start=1000.0,
+        interval_end=1001.0,
+    ) == (9, 10)
+    assert _beacon_reception_counts(
+        tuple(timestamps),
+        interval_start=1001.0,
+        interval_end=1002.0,
+    ) == (10, 10)
+
+
+def test_inactive_strongest_radio_cannot_pin_beacon_received_at_zero() -> None:
+    analyzer = Analyzer()
+    stale_bssid = "00:11:22:33:44:50"
+    active_bssid = "00:11:23:33:44:50"
+    records = [
+        _radio_beacon(
+            1000.05,
+            stale_bssid,
+            "Transient",
+            -20,
+            "Room-101",
+        )
+    ]
+    records.extend(
+        _radio_beacon(
+            1000.02 + slot * 0.1024,
+            active_bssid,
+            "Active",
+            -40,
+            "Room-202",
+        )
+        for slot in range(35)
+    )
+
+    for record in sorted(records, key=lambda item: item.timestamp):
+        analyzer.ingest(record, publish_snapshot=False)
+    analyzer.flush()
+
+    history = {row.second: row for row in analyzer.snapshot.history}
+    assert history[1001].beacon_received_count > 0
+    assert history[1001].beacon_expected_count in (9, 10)
+    assert analyzer.snapshot.beacons.strongest_radio_bssids == (active_bssid,)
+    assert analyzer.snapshot.beacons.received_count > 0
+
+
+def test_strongest_radio_stays_eligible_for_one_completely_missed_second() -> None:
+    analyzer = Analyzer()
+    bssid = "00:11:22:33:44:50"
+    analyzer.ingest(
+        _radio_beacon(1000.95, bssid, "Alpha", -20, "Room-101"),
+        publish_snapshot=False,
+    )
+    for timestamp in (1001.5, 1002.5, 1003.2):
+        analyzer.ingest(
+            _frame(timestamp, bssid, retry=False),
+            publish_snapshot=False,
+        )
+    analyzer.flush()
+
+    history = {row.second: row for row in analyzer.snapshot.history}
+    assert history[1001].beacon_received_count == 0
+    assert history[1001].beacon_expected_count == 10
+    assert history[1001].beacon_loss_percent == 100.0
+    assert history[1002].beacon_expected_count == 0
+    assert history[1002].beacon_loss_percent is None
 
 
 def test_beacon_delayed_across_second_boundary_is_credited_within_grace() -> None:

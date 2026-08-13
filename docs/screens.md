@@ -182,6 +182,13 @@ received beacon. Gaps in the inferred schedule increase `EXP` without
 increasing `REC`; capture jitter cannot make the displayed percentage exceed
 100%.
 
+`REC` and `EXP` apply only to the BSSIDs grouped with the selected strongest
+radio, not every beacon on the channel. A BSSID remains eligible for that
+selection for one reporting second plus the 102.4 ms delayed-beacon allowance.
+This permits a complete missed second to register as loss, but prevents a stale
+high-RSSI BSSID retained elsewhere in the rolling window from producing a
+continuous `REC 0` while another radio is actively beaconing.
+
 A completed second remains open for one additional 102.4 ms of ordered capture
 time. The analyzer matches each received beacon to at most one inferred
 transmission slot and accepts arrival delays from zero through 102.4 ms. A
@@ -208,6 +215,10 @@ The footer cycles every two seconds through BSSIDs grouped with the strongest
 estimated radio. Radio grouping is an estimate: BSSIDs are compared using OUI,
 AP-name, RSSI, and related-MAC clues. Missing vendor information or unusual
 BSSID allocation can prevent accurate grouping.
+
+Only BSSIDs whose latest beacon is no more than 1.1024 seconds old participate
+in strongest-radio selection. The headline BSSID and estimated-radio counts
+still describe all beacon state retained in the rolling window.
 
 See [Radio grouping](architecture.md#radio-grouping) for the implemented
 heuristics.

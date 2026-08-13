@@ -157,6 +157,13 @@ definitions, and BSSIDs using a secondary portion as their own primary are
 excluded. The result means all valid frames the configured radio, PHY, driver,
 and TShark successfully decode—not literally every frame transmitted over RF.
 
+Hardware capture capability can be narrower than the channel definition that
+`iw` successfully configures. In WLAN Pi testing, an MT7921U could tune an
+80 MHz 6 GHz channel but delivered only Null/QoS Null data frames while another
+capture device received payload-bearing QoS Data. Treat this as a possible
+adapter/driver/firmware limitation, not an application filter; validate retry
+coverage with `--raw-pcapng` before relying on that combination.
+
 ### Interactive SSH dashboard
 
 When both standard input and output are attached to a terminal, live CLI mode

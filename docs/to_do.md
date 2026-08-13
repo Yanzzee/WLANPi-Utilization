@@ -92,10 +92,15 @@ Features & changes
 29. DONE    improve CLI commands as supported, not just in dev mode
 30. Review accuracy of frame retry capture and calculation
         are we looking at all frames, including wider channels?
-        are frames being trunkated correctly on capture to get all headers?
+        are frames being truncated correctly on capture to get all headers?
         compare to a raw capture to test
 31. screenshot of the TUI in the readme
 32. add cross platform support for other linux & MACOS to run CLI at least
-33. truncate frames at 512 bytes to improve processing
+33. DONE    truncate frames at 1024 bytes to improve processing
 34. include OBSS count
         number of BSSIDs that overlap to the selected primary, but have a different primary
+35. add web interface
+        accessible through existing web menu
+        show same metrics as CLI
+        better graphs
+        tab navigation inside of the screen

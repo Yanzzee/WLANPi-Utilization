@@ -51,9 +51,14 @@ class TerminalDashboard:
         self.channel = channel
         self.frequency_mhz = frequency_mhz
         self.capture_width: Optional[str] = None
+        self.notice_message: Optional[str] = None
 
     def set_capture_width(self, width: str) -> None:
         self.capture_width = width
+
+    def set_notice(self, message: str) -> None:
+        """Retain a warning so full-screen refreshes render it in-band."""
+        self.notice_message = message
 
     @property
     def snapshot(self) -> MetricsSnapshot:
@@ -123,7 +128,7 @@ class TerminalDashboard:
             )
             for stats in self.snapshot.history
         )
-        return "\n".join(lines)
+        return "\n".join(self._with_notice(lines))
 
     def _render_metric_screen(self) -> str:
         view = self.screen_manager.view
@@ -144,12 +149,14 @@ class TerminalDashboard:
                 )
                 bssid_line = identity.bssid
             return "\n".join(
-                (
-                    title,
-                    view.summary,
-                    *view.detail_lines,
-                    ssid_line,
-                    bssid_line,
+                self._with_notice(
+                    [
+                        title,
+                        view.summary,
+                        *view.detail_lines,
+                        ssid_line,
+                        bssid_line,
+                    ]
                 )
             )
 
@@ -172,13 +179,20 @@ class TerminalDashboard:
                 f"{secondary_graph or '--'}"
             )
         return "\n".join(
-            [
-                title,
-                view.summary,
-                *graph_lines,
-                f"Source: {_format_identity(view.identity)}",
-            ]
+            self._with_notice(
+                [
+                    title,
+                    view.summary,
+                    *graph_lines,
+                    f"Source: {_format_identity(view.identity)}",
+                ]
+            )
         )
+
+    def _with_notice(self, lines: list[str]) -> list[str]:
+        if self.notice_message is None:
+            return lines
+        return [*lines, f"Warning: {self.notice_message}"]
 
     def _format_rolling_summary(self) -> str:
         summary = self.rolling_summary

@@ -250,6 +250,7 @@ class CursesDashboard:
         self.logging_active = False
         self.logging_paths: tuple[str, ...] = ()
         self.logging_message: Optional[str] = None
+        self.notice_message: Optional[str] = None
         self.last_layout: Optional[DashboardLayout] = None
         self._window: Optional[Any] = None
         self._curses = _curses if curses_module is None else curses_module
@@ -311,6 +312,12 @@ class CursesDashboard:
                 self._window.clearok(True)
             except (AttributeError, self._curses.error):
                 pass
+            self.draw()
+
+    def set_notice(self, message: str) -> None:
+        """Render a runtime notice inside the curses-managed screen."""
+        self.notice_message = message
+        if self._window is not None and not self.display_paused:
             self.draw()
 
     def poll_input(self) -> bool:
@@ -459,8 +466,12 @@ class CursesDashboard:
         self._draw_graphs(layout, views)
         self._draw_table(layout)
         footer = (
-            " ↑/↓ rows  PgUp/PgDn page  Home/End oldest/newest  "
-            "←/→ columns  Space pause/resume  q quit "
+            f" Warning: {self.notice_message} "
+            if self.notice_message
+            else (
+                " ↑/↓ rows  PgUp/PgDn page  Home/End oldest/newest  "
+                "←/→ columns  Space pause/resume  q quit "
+            )
         )
         self._add(layout.footer_row, 0, footer, width, self._attr("A_REVERSE"))
         self._window.refresh()

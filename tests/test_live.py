@@ -110,7 +110,7 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
 
     assert command[:4] == ["tshark", "-l", "-i", "wlan9"]
     assert command[4:6] == ["-B", "16"]
-    assert command[6:8] == ["-s", "512"]
+    assert command[6:8] == ["-s", "1024"]
     assert command[8:12] == [
         "--disable-protocol",
         "ALL",
@@ -753,6 +753,7 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     configured_definitions: list[ChannelDefinition] = []
     snapshots: list[object] = []
     displayed_widths: list[str] = []
+    displayed_notices: list[str] = []
 
     class Dashboard:
         def set_capture_width(self, width: str) -> None:
@@ -763,6 +764,9 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
 
         def poll_input(self) -> bool:
             return False
+
+        def set_notice(self, message: str) -> None:
+            displayed_notices.append(message)
 
     monotonic = iter(float(value) for value in range(100))
     capabilities = RadioCapabilities(
@@ -824,7 +828,9 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     with stats_csv.open(encoding="utf-8") as input_file:
         logged = list(csv.DictReader(input_file))
     assert logged[-1]["actual_capture_width_mhz"] == "80"
-    assert "was truncated to 512" in capsys.readouterr().err
+    assert len(displayed_notices) == 1
+    assert "exceeds the 1024-byte live snapshot" in displayed_notices[0]
+    assert "exceeds the 1024-byte live snapshot" not in capsys.readouterr().err
 
 
 def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
@@ -846,8 +852,8 @@ def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
             "wlan.ht.info.secchanoffset": "1",
             "wlan.vht.op.channelwidth": "1",
             "wlan.vht.op.channelcenter0": "42",
-            "frame.cap_len": "512",
-            "frame.len": "700",
+            "frame.cap_len": "1024",
+            "frame.len": "1400",
         }
     )
     return "\t".join(values[name] for name in field_names)

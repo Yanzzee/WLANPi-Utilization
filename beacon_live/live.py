@@ -50,7 +50,7 @@ TSHARK_CAPTURE_PROTOCOLS = (
     "radiotap,wlan_radio,wlan,wlan_ext,wlan_aggregate"
 )
 TSHARK_CAPTURE_BUFFER_MIB = 16
-LIVE_SNAPSHOT_LENGTH = 512
+LIVE_SNAPSHOT_LENGTH = 1024
 LIVE_DISPLAY_FILTER = "wlan"
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
@@ -1069,16 +1069,19 @@ def run_live(
                     ):
                         warning_key = frame.bssid or "unknown-bssid"
                         if warning_key not in warned_truncated_beacons:
-                            print(
-                                "Warning: beacon "
-                                f"{warning_key} is {frame.original_length} bytes "
-                                f"and was truncated to {frame.captured_length}; "
-                                "information elements beyond the live 512-byte "
-                                "limit may be unavailable. Use --raw-pcapng for "
-                                "a full-length diagnostic capture.",
-                                file=sys.stderr,
-                                flush=True,
+                            message = (
+                                f"Beacon {warning_key} is "
+                                f"{frame.original_length} bytes and exceeds the "
+                                f"{LIVE_SNAPSHOT_LENGTH}-byte live snapshot; "
+                                "late information elements may be unavailable. "
+                                "Use --raw-pcapng for full packets."
                             )
+                            if not _set_dashboard_notice(dashboard, message):
+                                print(
+                                    f"Warning: {message}",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
                             warned_truncated_beacons.add(warning_key)
                     if (
                         frame.is_beacon
@@ -1503,6 +1506,23 @@ def _set_dashboard_logging_status(
             if path is not None
         )
     setter(active=active, paths=path_values, message=message)
+    return True
+
+
+def _set_dashboard_notice(
+    dashboard: LiveDashboard,
+    message: str,
+) -> bool:
+    """Show an in-band notice when the renderer supports one.
+
+    Writing to stderr while curses owns the terminal leaves text below the
+    managed screen. Optional renderer dispatch keeps logging-only and test
+    dashboards backwards compatible while protecting interactive layouts.
+    """
+    setter = getattr(dashboard, "set_notice", None)
+    if not callable(setter):
+        return False
+    setter(message)
     return True
 
 

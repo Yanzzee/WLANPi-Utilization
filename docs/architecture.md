@@ -73,9 +73,10 @@ disables WLAN decryption and defragmentation. The analyzer still receives every
 decoded 802.11 frame; retry eligibility then excludes control and extension
 frames without a separate capture pipeline. None of the metrics requires
 payload or higher-layer protocol dissection. A 16 MiB capture buffer provides
-headroom during short scheduler stalls. Normal live capture uses a 512-byte
+headroom during short scheduler stalls. Normal live capture uses a 1024-byte
 snapshot length and warns once per BSSID when a larger beacon is truncated and
-later information elements may be unavailable.
+later information elements may be unavailable. Interactive terminal renderers
+show that warning inside their managed screen instead of writing beneath it.
 
 Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
 that same TShark process. It therefore saves the raw packets feeding live
@@ -84,6 +85,14 @@ The adjacent JSON sidecar records requested/actual definitions, verification and
 coverage status, negotiated fields, full-snapshot policy, decoded/normalized
 counts, and a drop count when TShark reports one. PCAPNG interface statistics
 remain the authoritative source when TShark does not expose a drop count.
+
+Successful channel tuning does not prove that the adapter can demodulate and
+deliver every PHY/frame combination within that definition. Hardware testing
+found an MT7921U configuration that tuned 80 MHz in 6 GHz but did not deliver
+payload-bearing data frames, although Null/QoS Null frames were present and a
+different capture device saw QoS Data. The application cannot reconstruct
+frames absent from the kernel capture stream; raw-PCAPNG comparison is the
+boundary test for this class of limitation.
 
 The parser normalizes available fields into `FrameRecord`, including:
 
@@ -231,6 +240,13 @@ from collapsing clearly different radios.
 AP names and vendor-specific fields are clues, not standardized identities.
 Composition counts and Beacon Loss screen radio membership must therefore be
 treated as estimates.
+
+Rolling BSSID state remains available for the full two-minute window, but a
+BSSID is eligible for strongest-radio selection only when its latest beacon is
+no more than 1.1024 seconds old. That covers one complete reporting second plus
+the delayed-beacon allowance: a genuinely missed second can still be measured,
+while an old high-RSSI observation cannot hold Beacon Loss at zero after that
+radio stops being heard.
 
 ## Snapshot model
 

@@ -132,7 +132,7 @@ Let it run for at least 60 seconds, then stop it normally. Keep all of:
   reported drops when available; and
 - the application stats CSV and beacon JSONL.
 
-Do not add a MAC filter. Normal live analysis uses the application's 512-byte
+Do not add a MAC filter. Normal live analysis uses the application's 1024-byte
 snapshot limit and reports any larger beacon it encounters. The `--raw-pcapng`
 diagnostic workflow uses full-length `-s 0` capture so the saved evidence is not
 truncated.
@@ -213,6 +213,14 @@ Repeat the same-primary test with controlled AP/client traffic at 20, 40+, 40-,
 Passive monitor capture cannot obtain literally every transmitted frame. The
 validation target is every valid frame that this configured radio, PHY, driver,
 regulatory state, and TShark can successfully decode.
+
+An `iw`-verified width is not proof of complete frame delivery. WLAN Pi testing
+with an MT7921U found that 80 MHz 6 GHz capture could contain Null/QoS Null
+frames but omit payload-bearing QoS Data that a Mac capture device observed.
+If a width/band combination shows this pattern in both the application-owned
+PCAPNG and a direct Dumpcap capture, record it as an adapter/driver/firmware
+limitation and do not interpret the resulting retry percentage as complete
+channel coverage.
 
 See [screens.md](screens.md#4-retries) for the metric rules.
 

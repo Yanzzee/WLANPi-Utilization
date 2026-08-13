@@ -407,6 +407,27 @@ def test_logging_paths_render_below_selected_bssids_with_blank_row() -> None:
     )
 
 
+def test_runtime_notice_replaces_curses_footer_without_adding_a_row() -> None:
+    window = _FakeWindow(30, 140)
+    curses_module = _FakeCurses(window)
+    dashboard = CursesDashboard(curses_module=curses_module)
+
+    def show_notice() -> int:
+        dashboard.refresh(_snapshot(20))
+        dashboard.set_notice(
+            "Beacon aa:aa:aa:aa:aa:aa exceeds the 1024-byte live snapshot"
+        )
+        return 0
+
+    dashboard.run(show_notice)
+
+    assert dashboard.last_layout is not None
+    assert "Warning: Beacon aa:aa:aa:aa:aa:aa" in window.lines[
+        dashboard.last_layout.footer_row
+    ]
+    assert "PgUp/PgDn" not in window.lines[dashboard.last_layout.footer_row]
+
+
 def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> None:
     header = _format_table_header(include_local_cu=True)
     row = _format_table_row(

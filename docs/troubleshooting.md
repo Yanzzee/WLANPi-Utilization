@@ -145,10 +145,11 @@ The automatic 80 MHz center is the standard block containing the selected
 primary. For explicit non-default definitions, check the AP's HT/VHT/HE/EHT
 operation element and the regulatory/driver capability together.
 
-Normal live capture uses a 512-byte snapshot length. A warning naming the BSSID
+Normal live capture uses a 1024-byte snapshot length. A warning naming the BSSID
 and original length means a larger beacon was truncated and late information
-elements may be unavailable. Re-run with `--raw-pcapng` when a full-length
-diagnostic capture is needed.
+elements may be unavailable. Interactive CLI mode renders this warning in its
+managed footer so it does not corrupt the screen. Re-run with `--raw-pcapng`
+when a full-length diagnostic capture is needed.
 
 Use an explicit center frequency when testing 5 GHz or 6 GHz:
 
@@ -258,6 +259,14 @@ TShark versions that do not expose the 6 GHz HE Operation primary-channel
 field, the capture's per-frame radio frequency provides the primary-scope
 fallback instead of excluding every frame from the denominator.
 
+Also inspect the data subtypes in the raw capture. A tested MT7921U could tune
+an 80 MHz 6 GHz definition and capture Null/QoS Null frames while omitting
+payload-bearing QoS Data seen by another capture device; the same adapter did
+capture payload-bearing data in 5 GHz. If direct Dumpcap has the same result,
+this is below the application capture path and should be treated as a possible
+adapter/driver/firmware limitation. Tuning success alone does not establish
+complete frame delivery.
+
 Use the offline retry audit to inspect numerator, denominator, and exclusion
 reasons:
 
@@ -269,6 +278,21 @@ beacon-live retry-debug \
 
 See [screens.md](screens.md#4-retries) and the detailed capture procedure in
 [pi_testing.md](pi_testing.md#capture-and-audit-retry-metrics).
+
+## Beacon received count briefly shows zero
+
+`BCN_REC` is not a count of every beacon on the channel. It is the number of
+phase-matched beacons received for BSSIDs grouped with the automatically
+selected strongest radio during that completed capture second. Other screens
+can still show RSSI, QBSS, or composition values from the latest beacon retained
+in the rolling window.
+
+A zero for one second means no beacon was assigned to the selected radio in
+that second. Strongest-radio eligibility lasts for that reporting second plus
+the 102.4 ms delayed-beacon allowance; after that, an inactive high-RSSI BSSID
+cannot keep the metric at zero while another radio is actively beaconing. If a
+zero persists, use the beacon JSONL timestamps and raw PCAPNG to distinguish a
+capture gap from best-effort radio grouping or missing decoded beacon rows.
 
 ## Logs are missing
 
