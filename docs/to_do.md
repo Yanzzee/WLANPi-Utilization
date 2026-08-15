@@ -82,7 +82,7 @@ Features & changes
 25. unify app name - beacon-live and Utilization
         update log path if necessary
         Utilization is the name of the app, beacon-live is the command to run it, this is probably OK
-26. update the stations screen TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
+26. DONE    update the stations screen TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
         as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS
         may need to add this to the log & CLI
 27. DONE    include beacons in logging, or remove it if it's useless
@@ -90,17 +90,20 @@ Features & changes
         for highest RSSI radio, rotate all BSSID/SSID at 2 second interval
         don't do this - only one BSSID is used for getting CU, ADC, retries. STA count combines all across radios, or looks at the one with the most. this is shown on the composition screen if someone wants to look at it.
 29. DONE    improve CLI commands as supported, not just in dev mode
-30. Review accuracy of frame retry capture and calculation
-        are we looking at all frames, including wider channels?
-        are frames being truncated correctly on capture to get all headers?
-        compare to a raw capture to test
+30. DONE    Review accuracy of frame retry capture and calculation
+        are we looking at all frames, including wider channels? - as wide as the adapter supports
+        are frames being truncated correctly on capture to get all headers? - probably, beacons are the limit
+        compare to a raw capture to test - compared and those are missing 6 GHz data frames too
 31. screenshot of the TUI in the readme
 32. add cross platform support for other linux & MACOS to run CLI at least
 33. DONE    truncate frames at 1024 bytes to improve processing
-34. include OBSS count
+34. include OBSS count in composition screen
         number of BSSIDs that overlap to the selected primary, but have a different primary
+        can this be observed accurately without scanning multiple channels?
 35. add web interface
         accessible through existing web menu
         show same metrics as CLI
         better graphs
         tab navigation inside of the screen
+36. improve start time performance
+        why does it take several seconds to start showing the graphs?

@@ -200,6 +200,8 @@ once. The `*` row is the selected QBSS source; its BSSID and SSID are bold in
 the live terminal, and its available CU, ADC, station, retry, and beacon-loss
 values appear together below the radio list. The right column identifies the
 BSSIDs independently selected for the highest station count and retry value.
+The station selection compares each BSSID's latest advertised QBSS count with
+its rolling observed client-MAC count; QBSS wins an equal-count tie.
 
 Controls:
 
@@ -225,8 +227,9 @@ resize prompt.
 
 Multiword table headers use underscores. Raw QBSS CU, Retry-bit-readable frame
 count, and selected beacon rate remain in the analyzer state but are omitted
-from the scrolling display table. The existing CSV schema is unchanged; its
-retry-observed count and selected beacon-rate fields remain available there.
+from the scrolling display table. The CSV retains retry-observed and selected
+beacon-rate fields and also records the top station count, whether its source
+was `qbss` or `mac`, and its SSID/BSSID.
 
 If the command is piped, redirected, run without a TTY, or Python lacks
 `curses`, Beacon Live uses the existing plain renderer. This also keeps

@@ -438,6 +438,8 @@ def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> 
 
     assert "STA_SUM" in header
     assert "SEL_STA" in header
+    assert "TOP_STA" in header
+    assert "TOP_SRC" in header
     assert "RET_ELIG" in header
     assert "QBSS_BSSID" in header
     assert "TOP_RETRY_BSSID" in header

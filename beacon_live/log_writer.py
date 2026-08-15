@@ -38,6 +38,10 @@ STATS_CSV_FIELDS = [
     "unique_bssid_count",
     "qbss_station_count_sum",
     "unique_client_mac_count",
+    "top_station_count",
+    "top_station_source",
+    "top_station_ssid",
+    "top_station_bssid",
     "selected_qbss_cu_percent",
     "selected_qbss_ssid",
     "selected_qbss_bssid",
@@ -596,6 +600,10 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
         "unique_bssid_count": stats.unique_bssid_count,
         "qbss_station_count_sum": stats.qbss_station_count_sum,
         "unique_client_mac_count": stats.unique_client_mac_count,
+        "top_station_count": _optional_value(stats.top_station_count),
+        "top_station_source": stats.top_station_source or "",
+        "top_station_ssid": stats.top_station_ssid or "",
+        "top_station_bssid": stats.top_station_bssid or "",
         "selected_qbss_cu_percent": _format_optional_float(
             stats.selected_qbss_cu_percent
         ),

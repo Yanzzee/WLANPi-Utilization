@@ -169,6 +169,83 @@ def test_top_station_bssid_does_not_use_rssi_as_a_tie_breaker() -> None:
     assert analyzer.snapshot.top_station_bssid == "aa"
 
 
+def test_top_station_uses_per_bssid_observed_clients_when_count_is_higher() -> None:
+    qbss_bssid = "02:00:00:00:00:01"
+    mac_bssid = "02:00:00:00:00:02"
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.0,
+            bssid=qbss_bssid,
+            ssid="QBSS winner",
+            station_count=4,
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.1,
+            bssid=mac_bssid,
+            ssid="MAC winner",
+            station_count=1,
+        )
+    )
+    for index in range(5):
+        analyzer.ingest(
+            _client_data_frame(
+                1000.2 + index / 100,
+                mac_bssid,
+                f"02:00:00:00:10:{index + 1:02x}",
+                from_ap=False,
+            )
+        )
+    analyzer.flush()
+
+    mac_state = analyzer.snapshot.state_for(mac_bssid)
+    assert mac_state is not None
+    assert mac_state.window_unique_client_mac_count == 5
+    assert analyzer.snapshot.top_station_bssid == mac_bssid
+    assert analyzer.snapshot.top_station_count == 5
+    assert analyzer.snapshot.top_station_source == "mac"
+    assert analyzer.snapshot.current.top_station_ssid == "MAC winner"
+    assert analyzer.snapshot.history[-1].top_station_bssid == mac_bssid
+
+
+def test_top_station_prefers_qbss_over_observed_clients_on_equal_count() -> None:
+    qbss_bssid = "02:00:00:00:00:02"
+    mac_bssid = "02:00:00:00:00:01"
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.0,
+            bssid=qbss_bssid,
+            ssid="QBSS tie winner",
+            station_count=5,
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.1,
+            bssid=mac_bssid,
+            ssid="MAC tie loser",
+            station_count=1,
+        )
+    )
+    for index in range(5):
+        analyzer.ingest(
+            _client_data_frame(
+                1000.2 + index / 100,
+                mac_bssid,
+                f"02:00:00:00:10:{index + 1:02x}",
+                from_ap=False,
+            )
+        )
+
+    assert analyzer.snapshot.top_station_bssid == qbss_bssid
+    assert analyzer.snapshot.top_station_count == 5
+    assert analyzer.snapshot.top_station_source == "qbss"
+    assert analyzer.snapshot.current.top_station_ssid == "QBSS tie winner"
+
+
 def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
     analyzer = Analyzer()
     analyzer.ingest(

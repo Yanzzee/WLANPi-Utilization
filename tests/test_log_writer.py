@@ -83,6 +83,10 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
         unique_bssid_count=1,
         qbss_station_count_sum=3,
         unique_client_mac_count=2,
+        top_station_count=4,
+        top_station_source="mac",
+        top_station_ssid="Observed AP",
+        top_station_bssid="aa:bb:cc:dd:ee:00",
         selected_qbss_cu_percent=128 / 255 * 100,
         selected_qbss_ssid="Test AP",
         selected_qbss_bssid="aa:bb:cc:dd:ee:ff",
@@ -128,6 +132,10 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert stats_rows[0]["selected_qbss_bssid"] == "aa:bb:cc:dd:ee:ff"
     assert stats_rows[0]["selected_qbss_rssi_dbm"] == "-47"
     assert stats_rows[0]["unique_client_mac_count"] == "2"
+    assert stats_rows[0]["top_station_count"] == "4"
+    assert stats_rows[0]["top_station_source"] == "mac"
+    assert stats_rows[0]["top_station_ssid"] == "Observed AP"
+    assert stats_rows[0]["top_station_bssid"] == "aa:bb:cc:dd:ee:00"
     assert stats_rows[0]["beacon_received_count"] == "19"
     assert stats_rows[0]["beacon_expected_count"] == "20"
     assert stats_rows[0]["beacon_loss_percent"] == "5.00"

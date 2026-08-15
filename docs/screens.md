@@ -76,10 +76,13 @@ Summary fields:
 - `SUM`: current sum of latest advertised station counts;
 - `MAC`: unique client MAC addresses detected anywhere on the channel during
   the current 120-second window;
-- `TOP`: latest advertised count from the current highest-count BSSID.
+- `TOP`: highest per-BSSID count found either in the latest advertised QBSS
+  station count or in unique client MACs observed for that BSSID during the
+  current 120-second window.
 
-The footer identifies the same BSSID represented by `TOP`. If multiple BSSIDs
-have the same highest count, deterministic BSSID ordering is used.
+The footer identifies the same SSID/BSSID represented by `TOP`. An advertised
+QBSS count wins a tie with an observed client-MAC count. Ties between counts
+from the same source use deterministic BSSID ordering.
 
 Two per-second bar series share the fixed 0–64 station scale and are overlaid:
 the amber series is the summed advertised QBSS count and the cyan series is

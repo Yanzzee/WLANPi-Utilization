@@ -256,7 +256,9 @@ The immutable snapshot contains:
 - current and historical `SecondStats`;
 - current `BssidState` and `RetryBssidState` collections;
 - selected QBSS, station, and retry BSSIDs;
-- the rolling unique client-MAC count; and
+- rolling unique client-MAC counts for the channel and for each retained
+  BSSID, plus the analyzer-selected top count and its `qbss` or `mac` source;
+  and
 - `BeaconReceptionSnapshot` and `CompositionSnapshot` views of the selected
   strongest radio.
 
@@ -285,7 +287,9 @@ log directory. Screenshot capture does not change the active renderer or
 analyzer state.
 
 The Stations renderer overlays the advertised QBSS sum and per-second unique
-client-MAC series from that snapshot. It does not inspect frames itself.
+client-MAC series from that snapshot. Its `TOP` identity and count are also
+selected by the analyzer, with QBSS preferred over MAC discovery on an equal
+count. The renderer does not inspect frames itself.
 
 See [screens.md](screens.md) for exact metric and presentation behavior.
 

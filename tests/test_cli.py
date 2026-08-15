@@ -82,6 +82,13 @@ def test_replay_accepts_pi_smoke_files_and_prints_summary(
     captured = capsys.readouterr()
 
     assert exit_code == 0
+    output_lines = captured.out.splitlines()
+    fields = output_lines[0].split("\t")
+    first_stats = dict(zip(fields, output_lines[1].split("\t")))
+    assert first_stats["top_station_count"] == "3"
+    assert first_stats["top_station_source"] == "qbss"
+    assert first_stats["top_station_ssid"] == "Bravo"
+    assert first_stats["top_station_bssid"] == "bb:bb:bb:bb:bb:bb"
     assert "\t20.00" in captured.out
     assert "Summary" in captured.out
     assert "total_beacon_rows_read: 4" in captured.out

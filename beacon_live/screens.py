@@ -192,9 +192,13 @@ class TotalStationCountScreen:
             else None
         )
         top_station_count = (
-            top_station_state.latest_station_count
-            if top_station_state is not None
-            else None
+            snapshot.top_station_count
+            if snapshot.top_station_count is not None
+            else (
+                top_station_state.latest_station_count
+                if top_station_state is not None
+                else None
+            )
         )
         return ScreenView(
             screen_id=self.screen_id,

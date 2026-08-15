@@ -6,6 +6,7 @@ from bisect import bisect_left
 from bisect import bisect_right
 from bisect import insort
 from dataclasses import dataclass
+from dataclasses import field
 from dataclasses import replace
 from functools import lru_cache
 from math import ceil
@@ -21,6 +22,8 @@ from beacon_live.models import FrameRecord
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
+from beacon_live.models import TOP_STATION_SOURCE_MAC
+from beacon_live.models import TOP_STATION_SOURCE_QBSS
 from beacon_live.radio_grouping import estimate_radio_groups
 from beacon_live.radio_grouping import select_strongest_radio
 
@@ -42,6 +45,7 @@ class _BssidFrameSummary:
     retry_count: int = 0
     first_timestamp: Optional[float] = None
     last_timestamp: Optional[float] = None
+    unique_client_macs: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -73,6 +77,14 @@ class _RetryScopeTimeline:
 
     timestamps: tuple[float, ...]
     records: tuple[BeaconRecord, ...]
+
+
+@dataclass(frozen=True)
+class _TopStationSelection:
+    bssid: str
+    ssid: Optional[str]
+    count: int
+    source: str
 
 
 def select_bssid(
@@ -609,7 +621,9 @@ class Analyzer:
             selected_bssid=self._current_selected_bssid,
             current=current,
             history=history,
-            top_station_bssid=_top_station_bssid(states),
+            top_station_bssid=current.top_station_bssid,
+            top_station_count=current.top_station_count,
+            top_station_source=current.top_station_source,
             top_retry_bssid=self._current_retry_bssid,
             retry_bssids=retry_states,
             composition=composition,
@@ -866,6 +880,11 @@ class Analyzer:
                             )
                         ),
                     ),
+                    window_unique_client_mac_count=(
+                        len(frame_summary.unique_client_macs)
+                        if frame_summary is not None
+                        else 0
+                    ),
                 )
             )
         return (
@@ -1042,19 +1061,39 @@ def _station_count_key(state: BssidState) -> int:
     return state.latest_station_count if state.latest_station_count is not None else -1
 
 
-def _top_station_bssid(states: tuple[BssidState, ...]) -> Optional[str]:
-    candidates = tuple(
-        state for state in states if state.latest_station_count is not None
-    )
+def _top_station(
+    states: tuple[BssidState, ...],
+) -> Optional[_TopStationSelection]:
+    candidates: list[_TopStationSelection] = []
+    for state in states:
+        if state.latest_station_count is not None:
+            candidates.append(
+                _TopStationSelection(
+                    bssid=state.bssid,
+                    ssid=state.ssid,
+                    count=state.latest_station_count,
+                    source=TOP_STATION_SOURCE_QBSS,
+                )
+            )
+        if state.window_unique_client_mac_count > 0:
+            candidates.append(
+                _TopStationSelection(
+                    bssid=state.bssid,
+                    ssid=state.ssid,
+                    count=state.window_unique_client_mac_count,
+                    source=TOP_STATION_SOURCE_MAC,
+                )
+            )
     if not candidates:
         return None
     return min(
         candidates,
-        key=lambda state: (
-            -(state.latest_station_count or 0),
-            state.bssid,
+        key=lambda candidate: (
+            -candidate.count,
+            candidate.source != TOP_STATION_SOURCE_QBSS,
+            candidate.bssid,
         ),
-    ).bssid
+    )
 
 
 def select_retry_bssid(
@@ -1147,6 +1186,7 @@ def _stats_from_states(
         (state for state in states if state.bssid == selected_bssid),
         None,
     )
+    top_station = _top_station(states)
     return SecondStats(
         second=second,
         unique_bssid_count=len(states),
@@ -1189,6 +1229,18 @@ def _stats_from_states(
         ),
         top_retry_bssid=retry_bssid,
         unique_client_mac_count=len(frames.unique_client_macs),
+        top_station_count=(
+            top_station.count if top_station is not None else None
+        ),
+        top_station_source=(
+            top_station.source if top_station is not None else None
+        ),
+        top_station_ssid=(
+            top_station.ssid if top_station is not None else None
+        ),
+        top_station_bssid=(
+            top_station.bssid if top_station is not None else None
+        ),
         beacon_received_count=(
             beacon_reception.received_count
             if beacon_reception is not None
@@ -1232,6 +1284,7 @@ def _merge_frame_projections(
             target.retry_observed_count += source.retry_observed_count
             target.retry_eligible_count += source.retry_eligible_count
             target.retry_count += source.retry_count
+            target.unique_client_macs.update(source.unique_client_macs)
             if source.first_timestamp is not None and (
                 target.first_timestamp is None
                 or source.first_timestamp < target.first_timestamp
@@ -1338,6 +1391,8 @@ def _project_frames(
                 and _is_unicast_mac(address)
             ):
                 clients.add(address)
+                client_bssid = known_by_address[frame_bssid]
+                by_bssid[client_bssid].unique_client_macs.add(address)
     return _FrameProjection(
         frame_count=len(frames),
         retry_observed_count=retry_observed_count,

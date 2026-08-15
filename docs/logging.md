@@ -108,6 +108,8 @@ The stats file contains one row for each emitted capture second. Columns cover:
 - local timestamp, interface, channel, resolved frequency, and band;
 - retained BSSID count, summed latest QBSS station counts, and the unique
   eligible client-MAC count detected during that one-second period;
+- the rolling highest per-BSSID station count, its QBSS or MAC source, and its
+  SSID/BSSID identity;
 - selected QBSS utilization and source identity/RSSI;
 - received, Retry-bit-readable, retry-eligible, and retry-frame counts;
 - retry percentage, selected beacon-rate percentage, and retry footer BSSID;
@@ -142,6 +144,10 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `unique_bssid_count` | BSSIDs whose beacons are retained in the rolling 120-second window at this second. |
 | `qbss_station_count_sum` | Sum of the latest advertised QBSS station counts across retained BSSIDs; missing counts contribute zero. |
 | `unique_client_mac_count` | Unique eligible wireless client MACs observed in BSSID-linked data frames during this one-second period; this is not an associated-station count. |
+| `top_station_count` | Highest per-BSSID value from either the latest advertised QBSS station count or the rolling-window observed client-MAC count. |
+| `top_station_source` | `qbss` when `top_station_count` came from an advertised count, or `mac` when it came from local MAC discovery; QBSS wins an equal-count tie. |
+| `top_station_ssid` | SSID belonging to the BSSID that supplied `top_station_count`. |
+| `top_station_bssid` | BSSID that supplied `top_station_count`. |
 | `selected_qbss_cu_percent` | Channel utilization percentage from the latest beacon of the automatically selected QBSS BSSID. |
 | `selected_qbss_ssid` | SSID belonging to that selected QBSS BSSID. |
 | `selected_qbss_bssid` | Automatically selected BSSID supplying the QBSS utilization fields. |

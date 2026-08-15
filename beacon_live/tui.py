@@ -917,9 +917,13 @@ def _highest_station_identity(
         unavailable_text="<No Station Counts>",
     )
     value = (
-        "--"
-        if state.latest_station_count is None
-        else str(state.latest_station_count)
+        str(snapshot.top_station_count)
+        if snapshot.top_station_count is not None
+        else (
+            "--"
+            if state.latest_station_count is None
+            else str(state.latest_station_count)
+        )
     )
     return identity, value
 
@@ -1013,6 +1017,8 @@ def _format_table_header(include_local_cu: bool) -> str:
         ("BSSIDS", 6),
         ("STA_SUM", 7),
         ("CLIENT", 6),
+        ("TOP_STA", 7),
+        ("TOP_SRC", 7),
         ("CU%", 6),
         ("SEL_STA", 7),
         ("ADC%", 6),
@@ -1056,6 +1062,8 @@ def _format_table_row(
         (str(stats.unique_bssid_count), 6),
         (str(stats.qbss_station_count_sum), 7),
         (str(stats.unique_client_mac_count), 6),
+        (_optional(stats.top_station_count), 7),
+        (stats.top_station_source or "--", 7),
         (_percent(stats.selected_qbss_cu_percent), 6),
         (_optional(stats.selected_qbss_station_count), 7),
         (_percent(adc_percent), 6),

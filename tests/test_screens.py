@@ -177,6 +177,51 @@ def test_total_station_screen_shows_window_mac_total_and_per_second_series() -> 
     assert [point.value for point in view.secondary_graph_points] == [2, 1]
 
 
+def test_total_station_top_and_identity_can_come_from_mac_discovery() -> None:
+    qbss_bssid = "02:00:00:00:00:01"
+    mac_bssid = "02:00:00:00:00:02"
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.0,
+            ssid="Advertised",
+            bssid=qbss_bssid,
+            cu_raw=64,
+            station_count=3,
+            admission_capacity=10_000,
+            rssi_dbm=-40,
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.1,
+            ssid="Observed",
+            bssid=mac_bssid,
+            cu_raw=64,
+            station_count=1,
+            admission_capacity=10_000,
+            rssi_dbm=-50,
+        )
+    )
+    for index in range(4):
+        analyzer.ingest(
+            FrameRecord(
+                timestamp=1000.2 + index / 100,
+                bssid=mac_bssid,
+                frame_type=2,
+                frame_subtype=0,
+                transmitter_address=f"02:00:00:00:10:{index + 1:02x}",
+                receiver_address=mac_bssid,
+            )
+        )
+
+    view = TotalStationCountScreen().render(analyzer.snapshot)
+
+    assert view.summary == "SUM 4 MAC 4 TOP 4"
+    assert view.identity.ssid == "Observed"
+    assert view.identity.bssid == mac_bssid
+
+
 def test_cu_screen_uses_utilization_top_line_label() -> None:
     view = CuScreen().render(_analyzer_with_history().snapshot)
 
