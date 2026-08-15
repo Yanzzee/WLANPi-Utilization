@@ -29,6 +29,7 @@ _WHITE = (255, 255, 255)
 _DEFAULT_METRIC_COLOR = (0, 220, 120)
 _TEXT_LINE_TOPS = (1, 17, 33, 49, 65, 81, 97, 113)
 _TEXT_WIDTH = 124
+_SCANNER_FONT_CACHE: dict[tuple[str, int], tuple[object, ...]] = {}
 
 _24_GHZ_CHANNELS = tuple(range(1, 15))
 _5_GHZ_CHANNELS = (
@@ -864,9 +865,15 @@ def _scanner_font_candidates(smart_font, image_font_module):
     font_path = getattr(smart_font, "path", None)
     if font_path is None:
         return (smart_font,)
-    return tuple(
+    cache_key = (str(font_path), id(image_font_module))
+    cached = _SCANNER_FONT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    fonts = tuple(
         image_font_module.truetype(font_path, size) for size in (10, 9, 8)
     )
+    _SCANNER_FONT_CACHE[cache_key] = fonts
+    return fonts
 
 
 def _select_metadata_font(draw, state: dict[str, object], fonts):

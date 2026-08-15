@@ -1,14 +1,19 @@
 import csv
 import io
 import json
+import os
+import subprocess
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 
 from beacon_live.live import LiveCommandError
-from beacon_live.live import LiveWarmupFilter
+from beacon_live.live import LiveStartupFilter
+from beacon_live.live import TsharkLineReader
 from beacon_live.live import _read_survey_samples_safely
 from beacon_live.live import _format_survey_debug_line
 from beacon_live.live import _format_survey_unavailable_warning
@@ -499,6 +504,33 @@ def test_non_tty_live_mode_keeps_plain_renderer_fallback(
     assert "WLANPi Beacon Live" in capsys.readouterr().out
 
 
+def test_live_collecting_state_and_input_polling_are_not_frame_rate_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    collecting_states: list[bool] = []
+    input_polls = 0
+
+    class Dashboard:
+        poll_interval_seconds = 100.0
+
+        def refresh(self, snapshot: object = None) -> None:
+            pass
+
+        def set_collecting(self, collecting: bool) -> None:
+            collecting_states.append(collecting)
+
+        def poll_input(self) -> bool:
+            nonlocal input_polls
+            input_polls += 1
+            return False
+
+    assert run_live(interval_seconds=0.1, _dashboard=Dashboard()) == 0
+
+    assert collecting_states == [True, False]
+    assert input_polls == 1
+
+
 def test_logging_only_never_starts_the_curses_dashboard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -602,6 +634,17 @@ def test_survey_parse_failure_is_treated_as_unavailable(
     assert "survey counters unavailable" in captured.err
 
 
+def test_survey_timeout_is_treated_as_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def time_out(*args: object, **kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(["iw", "survey", "dump"], 2.0)
+
+    monkeypatch.setattr("beacon_live.live.subprocess.run", time_out)
+
+    assert _read_survey_samples_safely("wlan0") is None
+
+
 def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -699,8 +742,8 @@ def test_low_disk_cleanly_exits_logging_only_mode(
     assert rows[-1]["record_type"] == "end_of_log"
 
 
-def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
-    warmup_filter = LiveWarmupFilter()
+def test_live_startup_filter_excludes_only_the_partial_capture_second() -> None:
+    startup_filter = LiveStartupFilter()
     stats = SecondStats(
         second=1000,
         unique_bssid_count=1,
@@ -712,10 +755,33 @@ def test_live_warmup_filter_drops_exactly_one_complete_cycle() -> None:
         local_cu_percent=None,
     )
 
-    assert warmup_filter.filter([]) == []
-    assert warmup_filter.remaining_cycles == 1
-    assert warmup_filter.filter([stats]) == []
-    assert warmup_filter.filter([stats]) == [stats]
+    assert startup_filter.filter([]) == []
+    assert startup_filter.collecting is False
+    assert startup_filter.observe(1000.75) is True
+    assert startup_filter.observe(1000.9) is False
+    assert startup_filter.collecting is True
+    assert startup_filter.include_history(1000) is False
+    assert startup_filter.include_history(1001) is True
+    assert startup_filter.filter([stats, replace(stats, second=1001)]) == [
+        replace(stats, second=1001)
+    ]
+
+
+def test_tshark_line_reader_drains_every_buffered_pipe_row() -> None:
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb", buffering=0) as read_stream:
+        os.write(write_fd, b"one\ntwo\nthree\n")
+        os.close(write_fd)
+        reader = TsharkLineReader(read_stream)
+
+        reader.read_ready()
+
+        assert [reader.pop_line(), reader.pop_line(), reader.pop_line()] == [
+            "one",
+            "two",
+            "three",
+        ]
+        assert reader.exhausted is True
 
 
 def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state(
@@ -911,6 +977,35 @@ class _FakeSelector:
         pass
 
 
+class _ImmediateFuture:
+    def __init__(self, callback: object, *args: object) -> None:
+        try:
+            self._result = callback(*args)  # type: ignore[operator]
+            self._error: Optional[Exception] = None
+        except Exception as exc:
+            self._result = None
+            self._error = exc
+
+    def done(self) -> bool:
+        return True
+
+    def result(self) -> object:
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+class _ImmediateExecutor:
+    def __init__(self, **kwargs: object) -> None:
+        pass
+
+    def submit(self, callback: object, *args: object) -> _ImmediateFuture:
+        return _ImmediateFuture(callback, *args)
+
+    def shutdown(self, **kwargs: object) -> None:
+        pass
+
+
 def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monotonic_value = -1.0
 
@@ -932,6 +1027,7 @@ def _prepare_one_interval_live_run(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda process: None,
     )
     monkeypatch.setattr("beacon_live.live.selectors.DefaultSelector", _FakeSelector)
+    monkeypatch.setattr("beacon_live.live.ThreadPoolExecutor", _ImmediateExecutor)
     monkeypatch.setattr("beacon_live.live.time.monotonic", fake_monotonic)
 
 

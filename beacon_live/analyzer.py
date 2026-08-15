@@ -181,6 +181,7 @@ class Analyzer:
         self._local_cu_by_second: dict[int, Optional[float]] = {}
         self._sequence = 0
         self._reference_timestamp: Optional[float] = None
+        self._next_completion_second: Optional[int] = None
         self._latest_local_cu_percent: Optional[float] = None
         self._current_selected_bssid: Optional[str] = None
         self._history_selected_bssid: Optional[str] = None
@@ -191,9 +192,10 @@ class Analyzer:
         self._history_strongest_radio_bssids: tuple[str, ...] = ()
         self._composition_display_bssid: Optional[str] = None
         self._frame_projections_by_second: dict[
-            int, tuple[tuple[str, ...], _FrameProjection]
+            int, tuple[tuple[object, ...], _FrameProjection]
         ] = {}
         self._completed_projection: Optional[_CompletedProjection] = None
+        self._history_start_second: Optional[int] = None
         self._snapshot = MetricsSnapshot.empty(window_seconds=window_seconds)
 
     @property
@@ -209,6 +211,22 @@ class Analyzer:
     def set_local_cu_percent(self, second: int, percent: Optional[float]) -> None:
         self._local_cu_by_second[second] = percent
 
+    def set_history_start_second(self, second: int) -> None:
+        """Exclude earlier partial live buckets from shared graph history."""
+        self._history_start_second = second
+
+    def refresh_current(self, local_cu_percent: Optional[float] = None) -> None:
+        """Publish a provisional snapshot without finalizing a capture second."""
+        if self._reference_timestamp is None:
+            return
+        self._latest_local_cu_percent = local_cu_percent
+        self._expire_records(self._reference_timestamp)
+        self._refresh_current_snapshot(
+            reference_timestamp=self._reference_timestamp,
+            current_second=int(self._reference_timestamp),
+            upper_exclusive=None,
+        )
+
     def ingest(
         self,
         record: Union[BeaconRecord, FrameRecord],
@@ -217,6 +235,8 @@ class Analyzer:
     ) -> None:
         """Analyze one record, optionally deferring immutable publication."""
         record_second = int(record.timestamp)
+        if self._next_completion_second is None:
+            self._next_completion_second = record_second
         self._finalize_pending_after_beacon_grace(record.timestamp)
 
         if self._is_expired_late_record(record.timestamp):
@@ -359,41 +379,38 @@ class Analyzer:
 
     def flush(self, *, include_history: bool = True) -> list[SecondStats]:
         """Publish every observed second still buffered by the analyzer."""
-        for second in sorted(self._pending_seconds):
-            self._complete_second(second)
+        if self._pending_seconds:
+            self._finalize_pending_before(max(self._pending_seconds) + 1)
         published = self._publish_ready(include_history=include_history)
         self._refresh_after_publication()
         return published
 
     def _finalize_pending_before(self, second: int) -> None:
-        for pending_second in sorted(
-            value for value in self._pending_seconds if value < second
-        ):
-            self._complete_second(pending_second)
+        next_second = self._next_completion_second
+        if next_second is None:
+            return
+        while next_second < second:
+            self._complete_second(next_second)
+            next_second += 1
+        self._next_completion_second = next_second
 
     def _finalize_pending_after_beacon_grace(
         self,
         reference_timestamp: float,
     ) -> None:
         """Close seconds only after their delayed-beacon grace has passed."""
-        if not self._pending_seconds:
+        next_second = self._next_completion_second
+        if next_second is None:
             return
         tolerance = 1e-9
-        earliest_pending = min(self._pending_seconds)
-        if (
+        while (
             reference_timestamp
-            - (earliest_pending + 1 + ASSUMED_BEACON_INTERVAL_SECONDS)
-            <= tolerance
-        ):
-            return
-        for pending_second in sorted(
-            value
-            for value in self._pending_seconds
-            if reference_timestamp
-            - (value + 1 + ASSUMED_BEACON_INTERVAL_SECONDS)
+            - (next_second + 1 + ASSUMED_BEACON_INTERVAL_SECONDS)
             > tolerance
         ):
-            self._complete_second(pending_second)
+            self._complete_second(next_second)
+            next_second += 1
+        self._next_completion_second = next_second
 
     def _complete_second(self, second: int) -> None:
         if second in self._completed_seconds:
@@ -493,6 +510,11 @@ class Analyzer:
         return published
 
     def _record_history(self, stats: SecondStats) -> None:
+        if (
+            self._history_start_second is not None
+            and stats.second < self._history_start_second
+        ):
+            return
         self._history_by_second[stats.second] = stats
         latest_second = max(self._history_by_second)
         earliest_second = latest_second - self.window_seconds + 1
@@ -990,10 +1012,10 @@ class Analyzer:
         *,
         second: int,
         retry_scope: dict[str, _RetryScopeTimeline],
-    ) -> tuple[str, ...]:
+    ) -> tuple[object, ...]:
         if self.target_primary_frequency_mhz is None:
             return tuple(sorted(known_bssids))
-        key = [f"target={self.target_primary_frequency_mhz}"]
+        key: list[object] = [("target", self.target_primary_frequency_mhz)]
         lower_bound = second - self.channel_definition_max_age_seconds
         upper_bound = second + 1
         for bssid, timeline in sorted(retry_scope.items()):
@@ -1003,8 +1025,11 @@ class Analyzer:
                 definition = record.channel_definition
                 if definition is not None:
                     key.append(
-                        f"{bssid}@{record.timestamp}="
-                        f"{definition.primary_frequency_mhz}"
+                        (
+                            bssid,
+                            record.timestamp,
+                            definition.primary_frequency_mhz,
+                        )
                     )
         return tuple(key)
 

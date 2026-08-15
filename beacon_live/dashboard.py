@@ -52,6 +52,7 @@ class TerminalDashboard:
         self.frequency_mhz = frequency_mhz
         self.capture_width: Optional[str] = None
         self.notice_message: Optional[str] = None
+        self.collecting = False
 
     def set_capture_width(self, width: str) -> None:
         self.capture_width = width
@@ -59,6 +60,9 @@ class TerminalDashboard:
     def set_notice(self, message: str) -> None:
         """Retain a warning so full-screen refreshes render it in-band."""
         self.notice_message = message
+
+    def set_collecting(self, collecting: bool) -> None:
+        self.collecting = collecting
 
     @property
     def snapshot(self) -> MetricsSnapshot:
@@ -190,9 +194,12 @@ class TerminalDashboard:
         )
 
     def _with_notice(self, lines: list[str]) -> list[str]:
-        if self.notice_message is None:
-            return lines
-        return [*lines, f"Warning: {self.notice_message}"]
+        rendered = [*lines]
+        if self.collecting:
+            rendered.append("Collecting")
+        if self.notice_message is not None:
+            rendered.append(f"Warning: {self.notice_message}")
+        return rendered
 
     def _format_rolling_summary(self) -> str:
         summary = self.rolling_summary

@@ -47,6 +47,8 @@ _GRAPH_COLORS = {
 class LcdDashboard:
     """Render the rolling QBSS series to an atomically replaced PPM frame."""
 
+    poll_interval_seconds = 0.1
+
     def __init__(
         self,
         frame_path: Path,
@@ -64,6 +66,7 @@ class LcdDashboard:
         self.screen_manager = ScreenManager(
             snapshot=MetricsSnapshot.empty(window_seconds=GRAPH_WIDTH)
         )
+        self.collecting = False
         self.refresh()
 
     @property
@@ -72,6 +75,15 @@ class LcdDashboard:
 
     def update(self, snapshot: MetricsSnapshot) -> None:
         self.screen_manager.update(snapshot)
+
+    def set_collecting(self, collecting: bool) -> None:
+        self.collecting = collecting
+
+    def poll_input(self) -> bool:
+        """Apply navigation promptly even between one-second metric samples."""
+        if self._sync_requested_screen():
+            self.refresh()
+        return False
 
     @property
     def active_screen_id(self) -> str:
@@ -135,7 +147,7 @@ class LcdDashboard:
 
         return (
             metadata,
-            view.summary,
+            "Collecting" if self.collecting else view.summary,
             ssid,
             rssi,
             bssid,
@@ -283,13 +295,13 @@ class LcdDashboard:
         )
         _atomic_write(self.frame_path, self.render())
 
-    def _sync_requested_screen(self) -> None:
+    def _sync_requested_screen(self) -> bool:
         try:
             payload = json.loads(self.control_path.read_text(encoding="utf-8"))
             requested_offset = int(payload["active_screen_offset"])
         except (KeyError, OSError, TypeError, ValueError, UnicodeError):
-            return
-        self.set_active_screen(requested_offset)
+            return False
+        return self.set_active_screen(requested_offset)
 
 
 def _whole_percent(value: Optional[float]) -> str:

@@ -251,6 +251,7 @@ class CursesDashboard:
         self.logging_paths: tuple[str, ...] = ()
         self.logging_message: Optional[str] = None
         self.notice_message: Optional[str] = None
+        self.collecting = False
         self.last_layout: Optional[DashboardLayout] = None
         self._window: Optional[Any] = None
         self._curses = _curses if curses_module is None else curses_module
@@ -319,6 +320,9 @@ class CursesDashboard:
         self.notice_message = message
         if self._window is not None and not self.display_paused:
             self.draw()
+
+    def set_collecting(self, collecting: bool) -> None:
+        self.collecting = collecting
 
     def poll_input(self) -> bool:
         """Consume pending keys without waiting and redraw interaction changes."""
@@ -468,6 +472,8 @@ class CursesDashboard:
         footer = (
             f" Warning: {self.notice_message} "
             if self.notice_message
+            else " Collecting "
+            if self.collecting
             else (
                 " ↑/↓ rows  PgUp/PgDn page  Home/End oldest/newest  "
                 "←/→ columns  Space pause/resume  q quit "

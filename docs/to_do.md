@@ -54,6 +54,7 @@ Features & changes
         this is for RSSI except some screens
             stations
             retries
+        consider highlighting the metric type used to select the shown SSID/BSSID - RSSI, top stations, most retries. beacon loss is really just RSSI and the highest loss within that, it can probably be changed to just use RSSI.
 18. additional graph/screen - noise/SNR
         from adapter if possible
         only show if the adapter supports it
@@ -107,3 +108,5 @@ Features & changes
         tab navigation inside of the screen
 36. improve start time performance
         why does it take several seconds to start showing the graphs?
+        why is the display bursty at times instead of regular update cadence?
+        how else can the code be more efficient?

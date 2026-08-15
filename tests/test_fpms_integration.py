@@ -829,3 +829,39 @@ class _FakeImageFontModule:
             path=path,
             character_width={10: 6, 9: 5, 8: 4}[size],
         )
+
+
+def test_scanner_font_candidates_reuses_loaded_fonts() -> None:
+    class CountingImageFontModule:
+        calls: list[tuple[str, int]] = []
+
+        @classmethod
+        def truetype(cls, path: str, size: int) -> _FakeFont:
+            cls.calls.append((path, size))
+            return _FakeFont(
+                size=size,
+                path=path,
+                character_width=6,
+            )
+
+    smart_font = _FakeFont(
+        size=10,
+        path="unique-scanner-cache-test.ttf",
+        character_width=6,
+    )
+
+    first = channel_utilization._scanner_font_candidates(
+        smart_font,
+        CountingImageFontModule,
+    )
+    second = channel_utilization._scanner_font_candidates(
+        smart_font,
+        CountingImageFontModule,
+    )
+
+    assert second is first
+    assert CountingImageFontModule.calls == [
+        ("unique-scanner-cache-test.ttf", 10),
+        ("unique-scanner-cache-test.ttf", 9),
+        ("unique-scanner-cache-test.ttf", 8),
+    ]

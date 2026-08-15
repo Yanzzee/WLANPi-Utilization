@@ -481,7 +481,8 @@ def test_retry_samples_use_independent_one_second_windows() -> None:
     retry_state = analyzer.snapshot.retry_state_for("aa")
     assert retry_state is not None
     assert retry_state.window_retry_percent == 0.0
-    assert [row.second for row in analyzer.snapshot.history] == [1002]
+    assert [row.second for row in analyzer.snapshot.history] == [1001, 1002]
+    assert analyzer.snapshot.history[0].retry_percent is None
 
 
 def test_capture_publication_waits_until_all_rows_for_second_are_ingested() -> None:
@@ -518,6 +519,23 @@ def test_capture_publication_waits_until_all_rows_for_second_are_ingested() -> N
     assert published[0].retry_percent == pytest.approx(50.0)
     assert analyzer.snapshot.current.second == 1000
     assert analyzer.snapshot.current.retry_percent == pytest.approx(50.0)
+
+
+def test_capture_gaps_publish_explicit_evenly_spaced_zero_frame_samples() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_frame(1000.2, "aa", retry=False), publish_snapshot=False)
+    analyzer.ingest(_frame(1003.2, "aa", retry=True), publish_snapshot=False)
+
+    published = analyzer.publish_capture_complete(None)
+
+    assert [row.second for row in published] == [1000, 1001, 1002]
+    assert published[0].received_frame_count == 1
+    for row in published[1:]:
+        assert row.received_frame_count == 0
+        assert row.retry_eligible_frame_count == 0
+        assert row.retry_percent is None
+        assert row.selected_qbss_cu_percent is None
+    assert [row.second for row in analyzer.snapshot.history] == [1000, 1001, 1002]
 
 
 def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:

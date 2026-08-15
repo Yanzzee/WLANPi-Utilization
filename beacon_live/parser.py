@@ -92,6 +92,23 @@ TSHARK_OPTIONAL_FRAME_FIELD_NAMES = (
 
 TSHARK_MULTI_VALUE_SEPARATOR = "|"
 
+_TSHARK_OCCURRENCE_FIELD_NAMES = frozenset(
+    {
+        "wlan.fc",
+        "wlan.fc.type",
+        "wlan.fc.subtype",
+        "wlan.fc.retry",
+        "wlan.bssid",
+        "wlan.ta",
+        "wlan.ra",
+        "wlan.sa",
+        "wlan.da",
+        "wlan.seq",
+        "wlan.frag",
+        "wlan.qos.tid",
+    }
+)
+
 EXPECTED_TSHARK_FRAME_FIELD_COUNT = len(TSHARK_FRAME_FIELD_NAMES)
 # Older exports included the unused ``frame.len`` field. Keep accepting those
 # rows so replay and retry-debug inputs remain backward compatible while the
@@ -386,26 +403,19 @@ def parse_tshark_capture_record(
         legacy = parse_tshark_frame_row(row)
         return (legacy,) if legacy is not None else ()
 
-    occurrence_fields = {
-        "wlan.fc",
-        "wlan.fc.type",
-        "wlan.fc.subtype",
-        "wlan.fc.retry",
-        "wlan.bssid",
-        "wlan.ta",
-        "wlan.ra",
-        "wlan.sa",
-        "wlan.da",
-        "wlan.seq",
-        "wlan.frag",
-        "wlan.qos.tid",
-    }
+    # The overwhelmingly common case is one decoded WLAN header. Avoid
+    # splitting, rebuilding, and reparsing the row solely to discover that it
+    # has one occurrence.
+    if not any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        return (record,) if record is not None else ()
+
     split_fields = [value.split(TSHARK_MULTI_VALUE_SEPARATOR) for value in fields]
     occurrence_count = max(
         (
             len(values)
             for name, values in zip(field_names, split_fields)
-            if name in occurrence_fields
+            if name in _TSHARK_OCCURRENCE_FIELD_NAMES
         ),
         default=1,
     )
@@ -413,7 +423,7 @@ def parse_tshark_capture_record(
     for index in range(occurrence_count):
         expanded = []
         for name, values in zip(field_names, split_fields):
-            if name not in occurrence_fields:
+            if name not in _TSHARK_OCCURRENCE_FIELD_NAMES:
                 # Radiotap can expose one signal value per antenna. Those are
                 # properties of the outer capture record, not extra MPDUs.
                 # Preserve occurrence=f behavior for scalar fields so a
@@ -425,9 +435,9 @@ def parse_tshark_capture_record(
                 expanded.append(values[0])
             else:
                 expanded.append("")
-        record = parse_tshark_frame_row(
-            "\t".join(expanded),
-            field_names=field_names,
+        record = _parse_named_tshark_frame_fields(
+            expanded,
+            field_names,
             band=band,
         )
         if record is not None:
@@ -449,7 +459,9 @@ def _parse_named_tshark_frame_fields(
 
     integers: dict[str, Optional[int]] = {}
     for name in TSHARK_OPTIONAL_FRAME_FIELD_NAMES:
-        parsed = _parse_optional_int(values.get(name, ""), minimum=0)
+        if name not in values:
+            continue
+        parsed = _parse_optional_int(values[name], minimum=0)
         if parsed is _MALFORMED:
             return None
         integers[name] = parsed

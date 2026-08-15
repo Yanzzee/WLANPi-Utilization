@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import selectors
 import subprocess
 import sys
 import time
+from collections import deque
+from concurrent.futures import Future
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import replace
@@ -54,9 +58,9 @@ LIVE_SNAPSHOT_LENGTH = 1024
 LIVE_DISPLAY_FILTER = "wlan"
 
 SUPPORTED_BANDS = {"2.4", "5", "6"}
-LIVE_WARMUP_CYCLES = 1
 LOGGING_CONTROL_POLL_SECONDS = 0.5
 CHANNEL_DEFINITION_MAX_AGE_SECONDS = 10.0
+SURVEY_COMMAND_TIMEOUT_SECONDS = 2.0
 DEFAULT_5_GHZ_80MHZ_CENTER_CHANNELS = (42, 58, 106, 122, 138, 155, 171)
 DEFAULT_6_GHZ_80MHZ_CENTER_CHANNELS = tuple(range(7, 216, 16))
 
@@ -78,6 +82,9 @@ class NullDashboard:
     def poll_input(self) -> bool:
         return False
 
+    def set_collecting(self, collecting: bool) -> None:
+        return None
+
 
 @dataclass(frozen=True)
 class LiveCommandError(Exception):
@@ -98,18 +105,103 @@ class LiveCommandError(Exception):
 
 
 @dataclass
-class LiveWarmupFilter:
-    """Drop complete per-second stats from initial live refresh cycles."""
+class LiveStartupFilter:
+    """Exclude only the partial capture second in which live capture starts."""
 
-    remaining_cycles: int = LIVE_WARMUP_CYCLES
+    partial_second: Optional[int] = None
+
+    @property
+    def collecting(self) -> bool:
+        return self.partial_second is not None
+
+    def observe(self, timestamp: float) -> bool:
+        if self.partial_second is None:
+            self.partial_second = int(timestamp)
+            return True
+        return False
+
+    def include_history(self, second: int) -> bool:
+        return self.partial_second is None or second > self.partial_second
 
     def filter(self, stats_rows: list[SecondStats]) -> list[SecondStats]:
-        if self.remaining_cycles > 0:
-            if not stats_rows:
-                return []
-            self.remaining_cycles -= 1
-            return []
-        return stats_rows
+        if self.partial_second is None:
+            return stats_rows
+        return [row for row in stats_rows if row.second > self.partial_second]
+
+
+# Backwards-compatible import for callers that used the former cycle-based name.
+LiveWarmupFilter = LiveStartupFilter
+
+
+class TsharkLineReader:
+    """Drain a ready TShark descriptor without hiding rows in a text buffer."""
+
+    def __init__(self, fileobj: object) -> None:
+        self._fileobj = fileobj
+        self._buffer = bytearray()
+        self._lines: deque[str] = deque()
+        self._fd: Optional[int] = None
+        self._eof = False
+        try:
+            fd = int(fileobj.fileno())  # type: ignore[attr-defined]
+            os.set_blocking(fd, False)
+            self._fd = fd
+        except (AttributeError, OSError, TypeError, ValueError):
+            # StringIO-like test doubles retain the one-read-per-ready-event
+            # behavior without introducing a second production code path.
+            self._fd = None
+
+    @property
+    def has_line(self) -> bool:
+        return bool(self._lines)
+
+    @property
+    def exhausted(self) -> bool:
+        return self._eof and not self._lines
+
+    def pop_line(self) -> Optional[str]:
+        if not self._lines:
+            return None
+        return self._lines.popleft()
+
+    def read_ready(self) -> None:
+        """Read until EAGAIN, then expose every complete decoded output row."""
+        if self._eof:
+            return
+        if self._fd is None:
+            value = self._fileobj.readline()  # type: ignore[attr-defined]
+            if value in ("", b""):
+                self._eof = True
+                return
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            self._lines.append(value.rstrip("\r\n"))
+            return
+
+        while True:
+            try:
+                chunk = os.read(self._fd, 64 * 1024)
+            except BlockingIOError:
+                break
+            except InterruptedError:
+                continue
+            if not chunk:
+                self._eof = True
+                break
+            self._buffer.extend(chunk)
+
+        while True:
+            newline = self._buffer.find(b"\n")
+            if newline < 0:
+                break
+            line = bytes(self._buffer[:newline])
+            del self._buffer[: newline + 1]
+            self._lines.append(
+                line.rstrip(b"\r").decode("utf-8", errors="replace")
+            )
+        if self._eof and self._buffer:
+            self._lines.append(bytes(self._buffer).decode("utf-8", errors="replace"))
+            self._buffer.clear()
 
 
 def channel_to_frequency_mhz(channel: str, band: str) -> int:
@@ -416,8 +508,8 @@ def start_tshark_process(
     *,
     field_names: Optional[tuple[str, ...]] = None,
     raw_capture_path: Optional[Path] = None,
-    popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
-) -> subprocess.Popen[str]:
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+) -> subprocess.Popen[bytes]:
     if field_names is None:
         field_names = select_tshark_frame_fields(
             available_tshark_fields(),
@@ -433,8 +525,7 @@ def start_tshark_process(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+            bufsize=0,
         )
     except OSError as exc:
         raise LiveCommandError(command=command, stderr=str(exc)) from exc
@@ -447,6 +538,7 @@ def read_survey_samples(iface: str) -> list[SurveySample]:
         capture_output=True,
         text=True,
         check=False,
+        timeout=SURVEY_COMMAND_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         raise LiveCommandError(
@@ -663,7 +755,7 @@ def _read_actual_channel_safely(
 
 
 def terminate_tshark_process(
-    process: subprocess.Popen[str],
+    process: subprocess.Popen[bytes],
     *,
     timeout_seconds: float = 3.0,
 ) -> None:
@@ -905,6 +997,8 @@ def run_live(
         dashboard,
         actual_definition.width.value,
     )
+    _set_dashboard_collecting(dashboard, True)
+    dashboard.refresh(analyzer.snapshot)
     logging_service: Optional[LoggingService] = None
     if stats_csv is not None or beacons_jsonl is not None:
         first_log_path = stats_csv if stats_csv is not None else beacons_jsonl
@@ -967,7 +1061,7 @@ def run_live(
         raw_capture_path=raw_capture_path,
     )
     selector = selectors.DefaultSelector()
-    warmup_filter = LiveWarmupFilter()
+    startup_filter = LiveStartupFilter()
     warned_truncated_beacons: set[str] = set()
     warned_partial_bssids: set[str] = set()
     capture_record_count = 0
@@ -984,10 +1078,27 @@ def run_live(
         if requested is not None:
             initial_logging_requested = requested
 
-    previous_survey_samples = _read_survey_samples_safely(iface) if local_cu else None
+    survey_executor = (
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix="beacon-live-survey")
+        if local_cu
+        else None
+    )
+    survey_future: Optional[Future[Optional[list[SurveySample]]]] = (
+        survey_executor.submit(_read_survey_samples_safely, iface)
+        if survey_executor is not None
+        else None
+    )
+    previous_survey_samples: Optional[list[SurveySample]] = None
     latest_local_cu_percent: Optional[float] = None
     next_survey_poll = time.monotonic() + interval_seconds
     next_logging_control_poll = time.monotonic()
+    dashboard_poll_interval = getattr(dashboard, "poll_interval_seconds", None)
+    if not (
+        isinstance(dashboard_poll_interval, (int, float))
+        and dashboard_poll_interval > 0
+    ):
+        dashboard_poll_interval = None
+    next_dashboard_poll = next_logging_control_poll
     survey_warning_printed = False
     low_disk_latched = False
 
@@ -1003,13 +1114,48 @@ def run_live(
                     _print_logging_started(logging_service)
         if process.stdout is None:
             raise LiveCommandError(build_tshark_command(iface), stderr="missing stdout")
+        line_reader = TsharkLineReader(process.stdout)
         selector.register(process.stdout, selectors.EVENT_READ)
 
         while True:
-            if _dashboard_requests_exit(dashboard):
-                raise KeyboardInterrupt
+            if line_reader.exhausted:
+                completed_stats = analyzer.publish_capture_complete(
+                    latest_local_cu_percent,
+                    capture_ended=True,
+                )
+                visible_stats = startup_filter.filter(completed_stats)
+                if visible_stats:
+                    _set_dashboard_collecting(dashboard, False)
+                _publish_live_stats(
+                    visible_stats,
+                    stats_writer=(
+                        logging_service.write_stats
+                        if logging_service is not None
+                        else _discard_stats
+                    ),
+                    dashboard=dashboard,
+                    snapshot=analyzer.snapshot,
+                )
+                return _handle_tshark_exit(process)
             loop_now = time.monotonic()
-            timeout_deadlines = [next_survey_poll]
+            if dashboard_poll_interval is None:
+                if _dashboard_requests_exit(dashboard):
+                    raise KeyboardInterrupt
+            elif loop_now >= next_dashboard_poll:
+                if _dashboard_requests_exit(dashboard):
+                    raise KeyboardInterrupt
+                next_dashboard_poll = _advance_interval_deadline(
+                    next_dashboard_poll,
+                    dashboard_poll_interval,
+                    loop_now,
+                )
+            timeout_deadlines = []
+            if local_cu:
+                timeout_deadlines.append(
+                    next_survey_poll
+                    if survey_future is None or loop_now < next_survey_poll
+                    else loop_now + min(0.05, interval_seconds)
+                )
             if logging_control_path is not None:
                 timeout_deadlines.append(next_logging_control_poll)
             if logging_service is not None:
@@ -1018,38 +1164,24 @@ def run_live(
                 )
                 if maintenance_wait is not None:
                     timeout_deadlines.append(loop_now + maintenance_wait)
-            dashboard_poll_interval = getattr(
-                dashboard,
-                "poll_interval_seconds",
-                None,
+            if dashboard_poll_interval is not None:
+                timeout_deadlines.append(next_dashboard_poll)
+            timeout = (
+                max(0.0, min(timeout_deadlines) - loop_now)
+                if timeout_deadlines
+                else None
             )
-            if (
-                isinstance(dashboard_poll_interval, (int, float))
-                and dashboard_poll_interval > 0
-            ):
-                timeout_deadlines.append(loop_now + dashboard_poll_interval)
-            timeout = max(0.0, min(timeout_deadlines) - loop_now)
-            events = selector.select(timeout)
+            events = (
+                [(None, None)]
+                if line_reader.has_line
+                else selector.select(timeout)
+            )
             for key, _ in events:
-                line = _read_tshark_line(key.fileobj)
-                if line == "":
-                    include_history = warmup_filter.remaining_cycles <= 0
-                    completed_stats = analyzer.publish_capture_complete(
-                        latest_local_cu_percent,
-                        include_history=include_history,
-                        capture_ended=True,
-                    )
-                    _publish_live_stats(
-                        warmup_filter.filter(completed_stats),
-                        stats_writer=(
-                            logging_service.write_stats
-                            if logging_service is not None
-                            else _discard_stats
-                        ),
-                        dashboard=dashboard,
-                        snapshot=analyzer.snapshot,
-                    )
-                    return _handle_tshark_exit(process)
+                if key is not None:
+                    line_reader.read_ready()
+                line = line_reader.pop_line()
+                if line is None:
+                    continue
                 capture_record_count += 1
                 frames = parse_tshark_capture_record(
                     line,
@@ -1061,6 +1193,9 @@ def run_live(
                 normalized_frame_count += len(frames)
                 for parsed_frame in frames:
                     frame = parsed_frame
+                    first_live_frame = startup_filter.observe(frame.timestamp)
+                    if first_live_frame:
+                        analyzer.set_history_start_second(int(frame.timestamp) + 1)
                     if (
                         frame.is_beacon
                         and frame.original_length is not None
@@ -1164,14 +1299,18 @@ def run_live(
                     # boundary plus beacon-delay grace, avoiding a rebuild for
                     # every busy-channel row.
                     analyzer.ingest(frame, publish_snapshot=False)
+                    if first_live_frame:
+                        analyzer.refresh_current(latest_local_cu_percent)
+                        dashboard.refresh(analyzer.snapshot)
                     if analyzer.has_ready_stats:
-                        include_history = warmup_filter.remaining_cycles <= 0
                         completed_stats = analyzer.publish_capture_complete(
                             latest_local_cu_percent,
-                            include_history=include_history,
                         )
+                        visible_stats = startup_filter.filter(completed_stats)
+                        if visible_stats:
+                            _set_dashboard_collecting(dashboard, False)
                         _publish_live_stats(
-                            warmup_filter.filter(completed_stats),
+                            visible_stats,
                             stats_writer=(
                                 logging_service.write_stats
                                 if logging_service is not None
@@ -1181,8 +1320,8 @@ def run_live(
                             snapshot=analyzer.snapshot,
                         )
 
-            if _dashboard_requests_exit(dashboard):
-                raise KeyboardInterrupt
+            if line_reader.exhausted:
+                continue
 
             current = time.monotonic()
             if (
@@ -1256,9 +1395,13 @@ def run_live(
                             prefix="Log rollover",
                         )
 
-            if current >= next_survey_poll:
+            if survey_future is not None and survey_future.done():
+                try:
+                    current_survey_samples = survey_future.result()
+                except Exception:
+                    current_survey_samples = None
+                survey_future = None
                 if local_cu:
-                    current_survey_samples = _read_survey_samples_safely(iface)
                     if current_survey_samples is None:
                         if not survey_warning_printed:
                             print(
@@ -1299,6 +1442,12 @@ def run_live(
                                 survey_warning_printed = True
                         previous_survey_samples = current_survey_samples
 
+            if local_cu and current >= next_survey_poll and survey_future is None:
+                assert survey_executor is not None
+                survey_future = survey_executor.submit(
+                    _read_survey_samples_safely,
+                    iface,
+                )
                 next_survey_poll = _advance_interval_deadline(
                     next_survey_poll,
                     interval_seconds,
@@ -1306,10 +1455,12 @@ def run_live(
                 )
     except KeyboardInterrupt:
         print("\nStopping live capture...", file=sys.stderr, flush=True)
-        include_history = warmup_filter.remaining_cycles <= 0
-        pending_stats = analyzer.flush(include_history=include_history)
+        pending_stats = analyzer.flush()
+        visible_stats = startup_filter.filter(pending_stats)
+        if visible_stats:
+            _set_dashboard_collecting(dashboard, False)
         _publish_live_stats(
-            warmup_filter.filter(pending_stats),
+            visible_stats,
             stats_writer=(
                 logging_service.write_stats
                 if logging_service is not None
@@ -1320,6 +1471,8 @@ def run_live(
         )
         return 0
     finally:
+        if survey_executor is not None:
+            survey_executor.shutdown(wait=True, cancel_futures=True)
         if logging_service is not None:
             logging_service.stop()
         selector.close()
@@ -1344,7 +1497,13 @@ def run_live(
 def _read_survey_samples_safely(iface: str) -> Optional[list[SurveySample]]:
     try:
         return read_survey_samples(iface)
-    except (LiveCommandError, OSError, ValueError, OverflowError):
+    except (
+        LiveCommandError,
+        OSError,
+        ValueError,
+        OverflowError,
+        subprocess.TimeoutExpired,
+    ):
         return None
 
 
@@ -1365,13 +1524,14 @@ def _primary_scope_field_names(band: str) -> tuple[str, ...]:
     )
 
 
-def _read_tshark_line(fileobj: object) -> str:
-    return fileobj.readline() if hasattr(fileobj, "readline") else ""
-
-
-def _read_process_stderr(process: subprocess.Popen[str]) -> str:
+def _read_process_stderr(process: subprocess.Popen[bytes]) -> str:
     try:
-        return process.stderr.read().strip() if process.stderr is not None else ""
+        if process.stderr is None:
+            return ""
+        value = process.stderr.read()
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace").strip()
+        return value.strip()
     except (OSError, ValueError):
         return ""
 
@@ -1442,14 +1602,19 @@ def _write_raw_capture_metadata(
             pass
 
 
-def _handle_tshark_exit(process: subprocess.Popen[str]) -> int:
+def _handle_tshark_exit(process: subprocess.Popen[bytes]) -> int:
     returncode = process.poll()
     if returncode in (None, 0):
         return 0
 
     stderr = ""
     if process.stderr is not None:
-        stderr = process.stderr.read().strip()
+        value = process.stderr.read()
+        stderr = (
+            value.decode("utf-8", errors="replace").strip()
+            if isinstance(value, bytes)
+            else value.strip()
+        )
     print(
         f"tshark exited with status {returncode}",
         file=sys.stderr,
@@ -1486,6 +1651,15 @@ def _set_dashboard_capture_width(
     setter = getattr(dashboard, "set_capture_width", None)
     if callable(setter):
         setter(width)
+
+
+def _set_dashboard_collecting(
+    dashboard: LiveDashboard,
+    collecting: bool,
+) -> None:
+    setter = getattr(dashboard, "set_collecting", None)
+    if callable(setter):
+        setter(collecting)
 
 
 def _set_dashboard_logging_status(
