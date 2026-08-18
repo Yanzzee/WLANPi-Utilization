@@ -179,9 +179,9 @@ An abridged wide-terminal example looks like this:
  5180 MHz | Band 5 GHz | Channel 36 | WLANPi Beacon Live | 120s history | FOLLOW
 BSSIDs 8 QBSS 6 Radios 3 Radio BSSIDs 4 Radio Stations 28       Selected BSSIDs
 Strongest AP: AP-Lobby  Vendor: Example Vendor  Metric   Value BSSID ...
-  # BSSID                RSSI SSID             STA STA max     17 aa:aa:... -45dBm Alpha
-* 1 aa:aa:aa:aa:aa:aa  -45dBm Alpha             17 RET max     4% aa:aa:... -45dBm Alpha
-  2 aa:aa:aa:aa:aa:ab  -47dBm Guest             11
+  # BSSID                RSSI STA SSID             STA max     17 aa:aa:... -45dBm Alpha
+* 1 aa:aa:aa:aa:aa:aa  -45dBm  17 Alpha            RET max     4% aa:aa:... -45dBm Alpha
+  2 aa:aa:aa:aa:aa:ab  -47dBm  11 Guest
                                                 Logging to logs/beacon_live_..._stats.csv
                                                 Logging to logs/beacon_live_..._beacons.jsonl
 QBSS ADC  ▇▇▆▆▅▅▄▄▃▃...              ADC   48%  AVG   55%  MIN   31%
@@ -190,8 +190,8 @@ QBSS STA  ▂▂▃▃▃▄▄▄▄▅...              SUM    28  MAC     9  T
 FRAME MAC ▁▁▁▂▂▁▃▂▂▃...              SUM    28  MAC     9  TOP    17
 FRAME RET ▁▁▂▁▁▃▂▁▁▂...              RET     4%  AVG    3%  MAX   11%
 BCN LOSS  ▁▁▁▁▂▁▁▃▁▁...              BL      1%  AVG    2%  MAX    8%
-TIME     BSSIDS STA_SUM CLIENT CU% ... SSID                 QBSS_BSSID
-14:30:05 8      28      3      62.0 ... Alpha                aa:aa:aa:aa:aa:aa
+TIME     BSSIDS QBSS_BSSID       SSID                 RSSI  PEAK  ADC%   CU% ...
+14:30:05 8      aa:aa:aa:aa:aa:aa Alpha                -45   -40   48.0   62.0 ...
 ```
 
 All BSSID/SSID pairs assigned to the strongest estimated radio are shown at
@@ -231,30 +231,31 @@ in the analyzer state but are omitted from the scrolling display table. The CSV
 is unchanged: it retains all of those fields and also records the top station
 count, whether its source was `qbss` or `mac`, and its SSID/BSSID.
 
+`TOP_STA` and `TOP_SRC` also remain available in analyzer snapshots and CSV
+logs but are intentionally omitted from the scrolling display table.
+
 Scrolling table columns:
 
 | Column | Meaning |
 | --- | --- |
 | `TIME` | Local wall-clock time for the one-second sample. |
 | `BSSIDS` | BSSIDs whose beacons are retained in the rolling window. |
-| `STA_SUM` | Sum of the latest QBSS station count advertised by every retained BSSID; missing counts contribute zero. |
-| `CLIENT` | Unique eligible wireless client MACs observed during this second; this is not an associated-station count. |
-| `TOP_STA` | Highest per-BSSID value from either its latest QBSS station count or its rolling-window observed client-MAC count. |
-| `TOP_SRC` | Source of `TOP_STA`: `qbss` for the advertised value or `mac` for local client-MAC observation; `qbss` wins an equal-value tie. |
-| `CU%` | Latest channel-utilization percentage from the automatically selected QBSS BSSID. |
-| `SEL_STA` | Latest QBSS station count advertised by the selected QBSS BSSID. |
+| `QBSS_BSSID` | BSSID supplying `CU%`, `SEL_STA`, and `ADC%`. |
+| `SSID` | SSID of the automatically selected QBSS BSSID. |
+| `RSSI` | RSSI from that BSSID's latest retained beacon, in dBm. |
+| `PEAK` | Strongest RSSI retained for that BSSID in the rolling window, in dBm. |
 | `ADC%` | Selected BSSID's latest QBSS admission capacity as a percentage of 31,250. |
-| `LOCAL%` | Optional local survey utilization from `iw`; shown only when local survey collection is enabled. |
+| `CU%` | Latest channel-utilization percentage from the automatically selected QBSS BSSID. |
+| `LOCAL%` | Optional local survey utilization from `iw`; when enabled, it follows `CU%`. |
+| `STA_SUM` | Sum of the latest QBSS station count advertised by every retained BSSID; missing counts contribute zero. |
+| `SEL_STA` | Latest QBSS station count advertised by the selected QBSS BSSID. |
+| `MAC` | Unique eligible wireless client MACs observed during this second; this is not an associated-station count. |
 | `FRAMES` | All decoded 802.11 frames delivered to the analyzer during the second. |
 | `RET_ELIG` | Primary-scoped unicast data and retry-capable unicast management frames eligible for the retry denominator. |
 | `RETRY%` | Eligible frames with the Retry bit set divided by `RET_ELIG`. |
+| `TOP_RETRY_BSSID` | BSSID selected for the one-second retry result: highest retry percentage, retained selection on a tie, or strongest beacon RSSI when no retries occurred. |
 | `BCN_EXP` | Phase-matched beacon transmission slots expected during the second across the strongest estimated radio's BSSIDs. |
 | `LOSS%` | Percentage of `BCN_EXP` slots for which no matching beacon was received. |
-| `SSID` | SSID of the automatically selected QBSS BSSID. |
-| `QBSS_BSSID` | BSSID supplying `CU%`, `SEL_STA`, and `ADC%`. |
-| `RSSI` | RSSI from that BSSID's latest retained beacon, in dBm. |
-| `PEAK` | Strongest RSSI retained for that BSSID in the rolling window, in dBm. |
-| `TOP_RETRY_BSSID` | BSSID selected for the one-second retry result: highest retry percentage, retained selection on a tie, or strongest beacon RSSI when no retries occurred. |
 
 If the command is piped, redirected, run without a TTY, or Python lacks
 `curses`, Beacon Live uses the existing plain renderer. This also keeps

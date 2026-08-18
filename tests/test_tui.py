@@ -333,12 +333,12 @@ def test_header_composition_and_selected_identity_columns_are_deduplicated() -> 
     identity_header = window.lines[
         dashboard.last_layout.composition_start + 2
     ][:left_width]
-    assert identity_header.rstrip().endswith("STA")
+    assert identity_header.split() == ["#", "BSSID", "RSSI", "STA", "SSID"]
     identity_row = window.lines[
         dashboard.last_layout.composition_start + 3
     ][:left_width]
     assert "Alpha" in identity_row
-    assert identity_row.endswith("  12")
+    assert " 12 Alpha" in identity_row
 
     bold_text = "".join(
         text
@@ -442,6 +442,25 @@ def test_runtime_notice_replaces_curses_footer_without_adding_a_row() -> None:
 
 
 def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> None:
+    assert _format_table_header(include_local_cu=False).split() == [
+        "TIME",
+        "BSSIDS",
+        "QBSS_BSSID",
+        "SSID",
+        "RSSI",
+        "PEAK",
+        "ADC%",
+        "CU%",
+        "STA_SUM",
+        "SEL_STA",
+        "MAC",
+        "FRAMES",
+        "RET_ELIG",
+        "RETRY%",
+        "TOP_RETRY_BSSID",
+        "BCN_EXP",
+        "LOSS%",
+    ]
     header = _format_table_header(include_local_cu=True)
     row = _format_table_row(
         _stats(1_000),
@@ -449,13 +468,29 @@ def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> 
         local_timezone=None,
     )
 
-    assert "STA_SUM" in header
-    assert "SEL_STA" in header
-    assert "TOP_STA" in header
-    assert "TOP_SRC" in header
-    assert "RET_ELIG" in header
-    assert "QBSS_BSSID" in header
-    assert "TOP_RETRY_BSSID" in header
+    assert header.split() == [
+        "TIME",
+        "BSSIDS",
+        "QBSS_BSSID",
+        "SSID",
+        "RSSI",
+        "PEAK",
+        "ADC%",
+        "CU%",
+        "LOCAL%",
+        "STA_SUM",
+        "SEL_STA",
+        "MAC",
+        "FRAMES",
+        "RET_ELIG",
+        "RETRY%",
+        "TOP_RETRY_BSSID",
+        "BCN_EXP",
+        "LOSS%",
+    ]
+    assert "TOP_STA" not in header
+    assert "TOP_SRC" not in header
+    assert "CLIENT" not in header
     assert "CU RAW" not in header
     assert "RET OBS" not in header
     assert "BCN RATE" not in header

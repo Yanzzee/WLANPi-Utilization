@@ -601,11 +601,10 @@ class CursesDashboard:
             or station_state.latest_station_count is None
             else str(station_state.latest_station_count)
         )
-        station_field = f" {station:>3}"
-        ssid_width = max(0, width - column - len(station_field))
-        self._add(row, column, f"{ssid:<{ssid_width}}", ssid_width, bold)
-        column += ssid_width
+        station_field = f"{station:>3} "
         self._add(row, column, station_field, width - column)
+        column += len(station_field)
+        self._add(row, column, ssid, width - column, bold)
 
     def _draw_selected_bssids(
         self,
@@ -889,10 +888,7 @@ def _format_dashboard_state(paused: bool, viewport: TableViewport) -> str:
 
 
 def _format_identity_header(width: int) -> str:
-    prefix = f"{'#':>3} {'BSSID':<17} {'RSSI':>7} "
-    suffix = " STA"
-    ssid_width = max(0, width - len(prefix) - len(suffix))
-    return f"{prefix}{'SSID':<{ssid_width}}{suffix}"[:width]
+    return f"{'#':>3} {'BSSID':<17} {'RSSI':>7} {'STA':>3} {'SSID'}"[:width]
 
 
 def _format_selected_header(width: int) -> str:
@@ -986,28 +982,26 @@ def _format_table_header(include_local_cu: bool) -> str:
     cells = [
         ("TIME", 8),
         ("BSSIDS", 6),
-        ("STA_SUM", 7),
-        ("CLIENT", 6),
-        ("TOP_STA", 7),
-        ("TOP_SRC", 7),
-        ("CU%", 6),
-        ("SEL_STA", 7),
+        ("QBSS_BSSID", 17),
+        ("SSID", 20),
+        ("RSSI", 5),
+        ("PEAK", 5),
         ("ADC%", 6),
+        ("CU%", 6),
     ]
     if include_local_cu:
         cells.append(("LOCAL%", 7))
     cells.extend(
         (
+            ("STA_SUM", 7),
+            ("SEL_STA", 7),
+            ("MAC", 6),
             ("FRAMES", 7),
             ("RET_ELIG", 8),
             ("RETRY%", 7),
+            ("TOP_RETRY_BSSID", 17),
             ("BCN_EXP", 7),
             ("LOSS%", 7),
-            ("SSID", 20),
-            ("QBSS_BSSID", 17),
-            ("RSSI", 5),
-            ("PEAK", 5),
-            ("TOP_RETRY_BSSID", 17),
         )
     )
     return " ".join(f"{label:<{width}}"[:width] for label, width in cells)
@@ -1029,28 +1023,26 @@ def _format_table_row(
     values = [
         (_format_second(stats.second, local_timezone), 8),
         (str(stats.unique_bssid_count), 6),
-        (str(stats.qbss_station_count_sum), 7),
-        (str(stats.unique_client_mac_count), 6),
-        (_optional(stats.top_station_count), 7),
-        (stats.top_station_source or "--", 7),
-        (_percent(stats.selected_qbss_cu_percent), 6),
-        (_optional(stats.selected_qbss_station_count), 7),
+        (stats.selected_qbss_bssid or "--", 17),
+        (stats.selected_qbss_ssid or "--", 20),
+        (_optional(stats.selected_qbss_rssi_dbm), 5),
+        (_optional(stats.selected_qbss_strongest_rssi_dbm), 5),
         (_percent(adc_percent), 6),
+        (_percent(stats.selected_qbss_cu_percent), 6),
     ]
     if include_local_cu:
         values.append((_percent(stats.local_cu_percent), 7))
     values.extend(
         (
+            (str(stats.qbss_station_count_sum), 7),
+            (_optional(stats.selected_qbss_station_count), 7),
+            (str(stats.unique_client_mac_count), 6),
             (str(stats.received_frame_count), 7),
             (str(stats.retry_eligible_frame_count), 8),
             (_percent(stats.retry_percent), 7),
+            (stats.top_retry_bssid or "--", 17),
             (str(stats.beacon_expected_count), 7),
             (_percent(stats.beacon_loss_percent), 7),
-            (stats.selected_qbss_ssid or "--", 20),
-            (stats.selected_qbss_bssid or "--", 17),
-            (_optional(stats.selected_qbss_rssi_dbm), 5),
-            (_optional(stats.selected_qbss_strongest_rssi_dbm), 5),
-            (stats.top_retry_bssid or "--", 17),
         )
     )
     return " ".join(_cell(value, width) for value, width in values)
