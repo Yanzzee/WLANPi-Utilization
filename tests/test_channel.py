@@ -103,6 +103,23 @@ def test_he_6ghz_and_eht_320_operation_fields() -> None:
     assert "puncturing" in reason
 
 
+def test_he_6ghz_uses_capture_frequency_when_primary_field_is_missing() -> None:
+    definition = definition_from_operation_fields(
+        band="6",
+        fallback_primary_frequency_mhz=5975,
+        he_width=2,
+        he_center0=7,
+    )
+
+    assert definition is not None
+    assert definition.complete
+    assert not definition.ambiguous
+    assert definition.primary_channel == 5
+    assert definition.primary_frequency_mhz == 5975
+    assert definition.width is ChannelWidth.MHZ80
+    assert definition.center_frequency1_mhz == 5985
+
+
 def test_zero_puncturing_and_ambiguous_center_segments_are_conservative() -> None:
     unpunctured = definition_from_operation_fields(
         band="6",

@@ -700,6 +700,12 @@ def update_fixed_capture_coverage(
         and actual.width is ChannelWidth.MHZ20
         and advertised.primary_frequency_mhz == actual.primary_frequency_mhz
     )
+    if not inferred_ht20 and (
+        not advertised.complete or advertised.ambiguous
+    ):
+        # Incomplete operation fields provide no evidence that this fixed
+        # capture misses any advertised 20 MHz segment.
+        return coverage
     if inferred_ht20 or (
         advertised.complete
         and not advertised.ambiguous
@@ -1275,13 +1281,17 @@ def run_live(
                             beacon.bssid in updated_coverage.partial_bssids
                             and beacon.bssid not in warned_partial_bssids
                         ):
-                            print(
-                                "Warning: fixed capture has partial coverage "
+                            message = (
+                                "Fixed capture has partial coverage "
                                 f"for {beacon.bssid}: "
-                                f"{updated_coverage.warning}.",
-                                file=sys.stderr,
-                                flush=True,
+                                f"{updated_coverage.warning}."
                             )
+                            if not _set_dashboard_notice(dashboard, message):
+                                print(
+                                    f"Warning: {message}",
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
                             warned_partial_bssids.add(beacon.bssid)
                         if updated_coverage != coverage_decision:
                             coverage_decision = updated_coverage

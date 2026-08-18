@@ -133,6 +133,8 @@ def test_layout_reserves_graphs_and_scrollable_table_at_common_sizes() -> None:
     assert wide.compact_graphs is False
     assert wide.graph_rows == 6
     assert wide.table_rows >= 1
+    assert calculate_layout(30, 115).side_by_side is False
+    assert calculate_layout(30, 116).side_by_side is True
     assert narrow.too_small is False
     assert narrow.compact_graphs is True
     assert narrow.graph_rows == 3
@@ -298,7 +300,7 @@ def test_resize_recalculates_layout_and_narrow_terminal_keeps_all_graphs() -> No
 
 
 def test_header_composition_and_selected_identity_columns_are_deduplicated() -> None:
-    window = _FakeWindow(30, 140)
+    window = _FakeWindow(30, 120)
     curses_module = _FakeCurses(window)
     dashboard = CursesDashboard(
         curses_module=curses_module,
@@ -321,11 +323,22 @@ def test_header_composition_and_selected_identity_columns_are_deduplicated() -> 
     assert "Alpha" in window.text
     assert "Bravo" in window.text
     assert "Selected BSSIDs" in window.text
-    assert "QBSS CU  50%" in window.text
-    assert "ADC  50%" in window.text
-    assert "STA  12" in window.text
-    assert "RET  10%" in window.text
-    assert "LOSS   2%" in window.text
+    assert "Radio Stations 24" in window.text
+    assert "QBSS CU  50%" not in window.text
+    assert "ADC  50%" not in window.text
+    assert "RET  10%" not in window.text
+    assert "LOSS   2%" not in window.text
+
+    left_width = (dashboard.last_layout.width - 1) // 2
+    identity_header = window.lines[
+        dashboard.last_layout.composition_start + 2
+    ][:left_width]
+    assert identity_header.rstrip().endswith("STA")
+    identity_row = window.lines[
+        dashboard.last_layout.composition_start + 3
+    ][:left_width]
+    assert "Alpha" in identity_row
+    assert identity_row.endswith("  12")
 
     bold_text = "".join(
         text
@@ -346,13 +359,13 @@ def test_full_graph_fields_have_fixed_edges_and_requested_vertical_order() -> No
     assert dashboard.last_layout is not None
     graph_start = dashboard.last_layout.graph_start
     graph_lines = [window.lines[graph_start + index] for index in range(6)]
-    assert [line.split()[0] for line in graph_lines] == [
-        "CU",
-        "ADC",
-        "MAC",
-        "LOSS",
-        "STA",
-        "RET",
+    assert [line[:9].strip() for line in graph_lines] == [
+        "QBSS ADC",
+        "QBSS CU",
+        "QBSS STA",
+        "FRAME MAC",
+        "FRAME RET",
+        "BCN LOSS",
     ]
     assert {len(line) for line in graph_lines} == {140}
     assert {len(line[-31:]) for line in graph_lines} == {31}
@@ -368,7 +381,7 @@ def test_full_history_graph_summary_follows_graph_on_very_wide_terminal() -> Non
     assert dashboard.last_layout is not None
     graph_start = dashboard.last_layout.graph_start
     graph_lines = [window.lines[graph_start + index] for index in range(6)]
-    assert {len(line) for line in graph_lines} == {158}
+    assert {len(line) for line in graph_lines} == {162}
     assert all(len(line) < 220 for line in graph_lines)
     assert {len(line[-31:]) for line in graph_lines} == {31}
 
@@ -446,6 +459,8 @@ def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> 
     assert "CU RAW" not in header
     assert "RET OBS" not in header
     assert "BCN RATE" not in header
+    assert "RETRIES" not in header
+    assert "BCN_RX" not in header
     assert len(row) == len(header)
 
 
@@ -561,6 +576,7 @@ def _snapshot(row_count: int) -> MetricsSnapshot:
             displayed_ssid=state.ssid,
             displayed_bssid=state.bssid,
             displayed_rssi_dbm=-40,
+            strongest_radio_station_count_sum=24,
         ),
         window_unique_client_mac_count=5,
         beacons=BeaconReceptionSnapshot(

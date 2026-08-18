@@ -64,9 +64,13 @@ definitions are validated and are never silently changed.
 
 Supported HT, VHT, HE 6 GHz, and EHT operation fields still form immutable
 per-BSSID `ChannelDefinition` values. They are used to scope retry metrics to
-the selected primary and to report incomplete fixed-width coverage. Beacon
-contents never cause a retune, channel hop, capture restart, analyzer restart,
-or history reset.
+the selected primary and to report confirmed fixed-width coverage conflicts.
+When a TShark version omits the 6 GHz HE primary field but exposes HE width and
+center fields, the capture frequency supplies the primary and the complete
+advertised definition is still checked. A radio-frequency-only observation
+proves primary scope but does not by itself prove partial bonded coverage.
+Beacon contents never cause a retune, channel hop, capture restart, analyzer
+restart, or history reset.
 
 The live TShark process enables only the Radiotap/802.11 dissector chain and
 disables WLAN decryption and defragmentation. The analyzer still receives every
@@ -76,7 +80,8 @@ payload or higher-layer protocol dissection. A 16 MiB capture buffer provides
 headroom during short scheduler stalls. Normal live capture uses a 1024-byte
 snapshot length and warns once per BSSID when a larger beacon is truncated and
 later information elements may be unavailable. Interactive terminal renderers
-show that warning inside their managed screen instead of writing beneath it.
+show runtime capture warnings, including confirmed partial coverage, inside
+their managed footer instead of writing beneath the curses screen.
 
 Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
 that same TShark process. It therefore saves the raw packets feeding live

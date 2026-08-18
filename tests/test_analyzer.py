@@ -352,6 +352,7 @@ def test_composition_snapshot_selects_strongest_radio_and_rotates_members() -> N
     assert first.strongest_radio_bssid_count == 2
     assert first.strongest_radio_ap_name == "Room-101"
     assert first.strongest_radio_vendor == "Example Wireless"
+    assert first.strongest_radio_station_count_sum == 6
     assert first.displayed_ssid == "Alpha"
     assert first.displayed_bssid == "00:11:22:33:44:50"
     assert first.displayed_rssi_dbm == -35

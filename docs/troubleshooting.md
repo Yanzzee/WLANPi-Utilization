@@ -145,6 +145,21 @@ The automatic 80 MHz center is the standard block containing the selected
 primary. For explicit non-default definitions, check the AP's HT/VHT/HE/EHT
 operation element and the regulatory/driver capability together.
 
+For 6 GHz PSC primaries that can belong to a full 80 MHz channel (the PSC
+sequence 5, 21, …, 213), automatic capture selects that PSC's unique standard
+80 MHz block. PSC 229 is at the upper band edge and has no complete standard
+80 MHz block inside 5925–7125 MHz, so automatic capture falls back to 20 MHz
+there.
+
+`Fixed capture has partial coverage` should appear only when a complete beacon
+operation definition is not contained by the actual fixed capture—for example,
+an AP advertises 160 MHz while the adapter is capturing only 80 MHz, or the
+advertised center conflicts with the configured block. Missing operation
+fields alone are not proof of partial coverage. When only the per-frame radio
+frequency is available, it is used to confirm the primary scope without
+showing this warning. Interactive CLI mode renders any confirmed warning in the
+managed footer so it cannot disrupt the curses layout.
+
 Normal live capture uses a 1024-byte snapshot length. A warning naming the BSSID
 and original length means a larger beacon was truncated and late information
 elements may be unavailable. Interactive CLI mode renders this warning in its

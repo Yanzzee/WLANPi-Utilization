@@ -258,7 +258,7 @@ class BssidState:
 
 @dataclass(frozen=True)
 class CompositionSnapshot:
-    """Analyzer-derived fields required by the text-only Composition screen."""
+    """Analyzer-derived fields shared by composition renderers."""
 
     bssid_count: int
     qbss_bssid_count: int
@@ -270,6 +270,7 @@ class CompositionSnapshot:
     displayed_ssid: Optional[str]
     displayed_bssid: Optional[str]
     displayed_rssi_dbm: Optional[int]
+    strongest_radio_station_count_sum: int = 0
 
     @classmethod
     def empty(cls) -> "CompositionSnapshot":
@@ -284,6 +285,7 @@ class CompositionSnapshot:
             displayed_ssid=None,
             displayed_bssid=None,
             displayed_rssi_dbm=None,
+            strongest_radio_station_count_sum=0,
         )
 
 

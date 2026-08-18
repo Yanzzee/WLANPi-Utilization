@@ -211,6 +211,9 @@ It shows:
 - `QBSS`: retained BSSIDs advertising QBSS information;
 - `Est Radios`: best-effort estimated physical-radio count;
 - `Radio BSSIDs`: BSSIDs grouped with the strongest estimated radio;
+- `Radio Stations` in the interactive CLI: sum of the newest advertised QBSS
+  station counts for those strongest-radio BSSIDs; missing counts are zero and
+  client MACs are not deduplicated across BSSIDs;
 - `AP`: supported vendor AP-name information when present;
 - `Vendor`: supported vendor identification when present.
 
@@ -248,7 +251,8 @@ BSSIDs and timing is not used as a selection tie-breaker.
 - **Local survey channel utilization** is derived from the local adapter's
   `iw dev <iface> survey dump` counter deltas and is optional/driver-dependent.
 - **QBSS station count** is advertised independently by each BSSID.
-- **Observed clients** are not currently tracked.
+- **Observed clients** are locally inferred from eligible BSSID-linked data
+  frames and are not an associated-station count.
 - **Retry percentage** is computed locally from eligible monitor-mode frames
   heard on the tuned channel.
 

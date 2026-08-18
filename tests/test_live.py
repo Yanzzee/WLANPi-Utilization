@@ -28,6 +28,7 @@ from beacon_live.live import frequency_to_band
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.live import select_tshark_frame_fields
+from beacon_live.live import update_fixed_capture_coverage
 from beacon_live.channel import ChannelDefinition
 from beacon_live.channel import ChannelWidth
 from beacon_live.channel import RadioCapabilities
@@ -108,6 +109,62 @@ def test_band_defaults_use_20mhz_on_24_and_80mhz_on_5_and_6ghz() -> None:
     assert definition_5.center_frequency1_mhz == 5210
     assert definition_6.width is ChannelWidth.MHZ80
     assert definition_6.center_frequency1_mhz == 5985
+
+
+@pytest.mark.parametrize("primary_channel", range(5, 214, 16))
+def test_80mhz_capable_6ghz_psc_defaults_to_its_standard_block(
+    primary_channel: int,
+) -> None:
+    primary_frequency = channel_to_frequency_mhz(str(primary_channel), "6")
+    definition = default_channel_definition(
+        primary_frequency_mhz=primary_frequency,
+        band="6",
+    )
+
+    assert definition.width is ChannelWidth.MHZ80
+    assert definition.center_frequency1_mhz == primary_frequency + 10
+    assert primary_frequency in definition.active_20mhz_centers
+
+
+def test_edge_6ghz_psc_229_has_no_standard_80mhz_block() -> None:
+    definition = default_channel_definition(
+        primary_frequency_mhz=7095,
+        band="6",
+    )
+
+    assert definition.width is ChannelWidth.MHZ20
+    assert definition.reason == (
+        "selected primary is not inside a standard 80 MHz block"
+    )
+
+
+def test_primary_frequency_only_beacon_does_not_claim_partial_coverage() -> None:
+    actual = ChannelDefinition(
+        5975,
+        ChannelWidth.MHZ80,
+        5985,
+        primary_channel=5,
+        phy="actual",
+    )
+    coverage = CoverageDecision(actual, (), (), "complete")
+    primary_only = ChannelDefinition(
+        5975,
+        ChannelWidth.MHZ20,
+        5975,
+        phy="radio-frequency",
+        complete=False,
+        ambiguous=True,
+        reason=(
+            "operation fields unavailable; primary inferred from capture frequency"
+        ),
+    )
+
+    assert update_fixed_capture_coverage(
+        coverage,
+        bssid="aa:aa:aa:aa:aa:aa",
+        advertised=primary_only,
+        actual=actual,
+    ) == coverage
 
 
 def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
@@ -800,7 +857,7 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     )
     field_names = TSHARK_FRAME_FIELD_NAMES + optional_fields
     rows = [
-        _wide_beacon_row(field_names, timestamp=1000.1),
+        _wide_beacon_row(field_names, timestamp=1000.1, partial=True),
         _wide_beacon_row(field_names, timestamp=1001.1),
         _wide_beacon_row(field_names, timestamp=1002.1),
         _wide_data_row(field_names, timestamp=1003.1, retry=True),
@@ -894,12 +951,20 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     with stats_csv.open(encoding="utf-8") as input_file:
         logged = list(csv.DictReader(input_file))
     assert logged[-1]["actual_capture_width_mhz"] == "80"
-    assert len(displayed_notices) == 1
+    assert len(displayed_notices) == 2
     assert "exceeds the 1024-byte live snapshot" in displayed_notices[0]
-    assert "exceeds the 1024-byte live snapshot" not in capsys.readouterr().err
+    assert "Fixed capture has partial coverage" in displayed_notices[1]
+    captured_error = capsys.readouterr().err
+    assert "exceeds the 1024-byte live snapshot" not in captured_error
+    assert "fixed capture has partial coverage" not in captured_error.lower()
 
 
-def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
+def _wide_beacon_row(
+    field_names: tuple[str, ...],
+    *,
+    timestamp: float,
+    partial: bool = False,
+) -> str:
     values = {name: "" for name in field_names}
     values.update(
         {
@@ -918,6 +983,7 @@ def _wide_beacon_row(field_names: tuple[str, ...], *, timestamp: float) -> str:
             "wlan.ht.info.secchanoffset": "1",
             "wlan.vht.op.channelwidth": "1",
             "wlan.vht.op.channelcenter0": "42",
+            "wlan.vht.op.channelcenter1": "50" if partial else "",
             "frame.cap_len": "1024",
             "frame.len": "1400",
         }

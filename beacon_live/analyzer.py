@@ -738,6 +738,7 @@ class Analyzer:
                 displayed_ssid=None,
                 displayed_bssid=None,
                 displayed_rssi_dbm=None,
+                strongest_radio_station_count_sum=0,
             )
 
         radio_unchanged = bool(
@@ -790,6 +791,10 @@ class Analyzer:
                 displayed_state.peak_rssi_dbm
                 if displayed_state.peak_rssi_dbm is not None
                 else displayed_state.latest_rssi_dbm
+            ),
+            strongest_radio_station_count_sum=sum(
+                state.latest_station_count or 0
+                for state in strongest.members
             ),
         )
 

@@ -237,6 +237,11 @@ def definition_from_operation_fields(
     )
     if primary_frequency is None:
         return None
+    operation_primary_channel = (
+        primary_channel
+        if primary_channel is not None
+        else frequency_to_channel(primary_frequency)
+    )
 
     if eht_width is not None:
         width = {
@@ -254,7 +259,7 @@ def definition_from_operation_fields(
         center2 = _segment_frequency(eht_center1, band)
         return _operation_definition(
             primary_frequency,
-            primary_channel,
+            operation_primary_channel,
             width,
             center1,
             center2,
@@ -262,7 +267,7 @@ def definition_from_operation_fields(
             puncturing_bitmap=puncturing_bitmap,
         )
 
-    if he_primary_channel is not None and he_width is not None:
+    if he_width is not None:
         width = {
             0: ChannelWidth.MHZ20,
             1: ChannelWidth.MHZ40,
@@ -301,7 +306,7 @@ def definition_from_operation_fields(
         )
         return _operation_definition(
             primary_frequency,
-            primary_channel,
+            operation_primary_channel,
             width,
             center1,
             center2,
@@ -352,7 +357,7 @@ def definition_from_operation_fields(
             )
         return _operation_definition(
             primary_frequency,
-            primary_channel,
+            operation_primary_channel,
             width,
             _segment_frequency(center1_channel, band),
             _segment_frequency(center2_channel, band),
@@ -372,15 +377,29 @@ def definition_from_operation_fields(
         return _ambiguous_definition(
             primary_frequency, primary_channel, "ht", "reserved HT secondary offset"
         )
+    inferred_from_radio = (
+        primary_channel is None
+        and fallback_primary_frequency_mhz is not None
+    )
     definition = ChannelDefinition(
         primary_frequency,
         ChannelWidth.MHZ20,
         primary_frequency,
         primary_channel=primary_channel,
-        phy="ht" if ht_primary_channel is not None else "legacy",
+        phy=(
+            "ht"
+            if ht_primary_channel is not None
+            else "radio-frequency"
+            if inferred_from_radio
+            else "legacy"
+        ),
         complete=primary_channel is not None,
         ambiguous=primary_channel is None,
-        reason=(None if primary_channel is not None else "primary channel not advertised"),
+        reason=(
+            None
+            if primary_channel is not None
+            else "operation fields unavailable; primary inferred from capture frequency"
+        ),
     )
     return definition
 

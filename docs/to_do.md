@@ -39,12 +39,14 @@ Features & changes
         * name it with a timestamp, screen name, and maybe channel/BSSID
         * keep the capture/analysis loop running normally
         * disable/override other buttons while the display application is running
-12. look into the possibility of scanning multiple channels
-        probably not very feasible, beacons are 10 per second per BSSID
+12. CANCELLED   look into the possibility of scanning multiple channels
+        probably not very feasible, beacons are 10 per second per BSSID, and there are many channels
+        it could possibly change channels with a button press, but this would necessitate restarting observations & clearing data
 13. classroom mode
         find likely radios in classroom
         scan beacons for those radios
         record and show analytics from the study
+        alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
 14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. DONE    optimize code for processor utilization and/or use multithreading for multiple cores
         there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
@@ -54,7 +56,7 @@ Features & changes
         this is for RSSI except some screens
             stations
             retries
-        consider highlighting the metric type used to select the shown SSID/BSSID - RSSI, top stations, most retries. beacon loss is really just RSSI and the highest loss within that, it can probably be changed to just use RSSI.
+        consider highlighting the metric type used to select the shown SSID/BSSID - RSSI, top stations, most retries. beacon loss is really just RSSI radio and the highest loss BSSID/SSID within that, it can probably be changed to just use RSSI.
 18. additional graph/screen - noise/SNR
         from adapter if possible
         only show if the adapter supports it
@@ -80,7 +82,7 @@ Features & changes
         start logging hangs for a second before the screen can be navigated again
         add a status as it starts or change the menu to change text
         add confirmation that logging has stopped - logging channel X has started... etc
-25. unify app name - beacon-live and Utilization
+25. CANCELLED   unify app name - beacon-live and Utilization
         update log path if necessary
         Utilization is the name of the app, beacon-live is the command to run it, this is probably OK
 26. DONE    update the stations screen TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
@@ -106,7 +108,7 @@ Features & changes
         show same metrics as CLI
         better graphs
         tab navigation inside of the screen
-36. improve start time performance
+36. PARTIAL    improve start time performance
         why does it take several seconds to start showing the graphs?
         why is the display bursty at times instead of regular update cadence?
         how else can the code be more efficient?

@@ -270,6 +270,48 @@ def test_6ghz_beacon_uses_radio_frequency_when_he_primary_is_unavailable() -> No
     assert definition.primary_frequency_mhz == 5975
     assert definition.complete is False
     assert definition.ambiguous is True
+    assert definition.phy == "radio-frequency"
+    assert definition.reason == (
+        "operation fields unavailable; primary inferred from capture frequency"
+    )
+
+
+def test_6ghz_he_width_remains_complete_without_primary_field() -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + (
+        "wlan_radio.frequency",
+        "wlan.ext_tag.he_operation.6ghz.control.channel_width",
+        "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_0",
+    )
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.125",
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "ff:ff:ff:ff:ff:ff",
+            "wlan.ssid": "Six",
+            "wlan.fixed.beacon": "100",
+            "wlan_radio.frequency": "5975",
+            "wlan.ext_tag.he_operation.6ghz.control.channel_width": "2",
+            "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_0": "7",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+        band="6",
+    )
+
+    assert len(records) == 1
+    definition = records[0].channel_definition
+    assert definition is not None
+    assert definition.complete
+    assert definition.primary_channel == 5
+    assert definition.width.value == "80"
+    assert definition.center_frequency1_mhz == 5985
 
 
 def test_parse_legacy_all_frame_row_without_address_fields() -> None:
