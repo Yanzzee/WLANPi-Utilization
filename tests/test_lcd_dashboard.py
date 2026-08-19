@@ -460,6 +460,35 @@ def test_lcd_refresh_applies_fpms_screen_request_without_losing_history(
     assert state["screen_count"] == 6
 
 
+def test_lcd_poll_applies_screen_request_between_metric_samples(
+    tmp_path: Path,
+) -> None:
+    frame = tmp_path / "display.ppm"
+    control = frame.with_suffix(".control.json")
+    dashboard = LcdDashboard(frame, band="5", channel="36")
+    snapshot = _phase_two_snapshot()
+    dashboard.refresh(snapshot)
+    control.write_text('{"active_screen_offset":2}', encoding="utf-8")
+
+    assert dashboard.poll_input() is False
+
+    assert dashboard.active_screen_id == TOTAL_STATION_COUNT_SCREEN_ID
+    assert dashboard.snapshot is snapshot
+    assert [row.second for row in dashboard.snapshot.history] == [1000, 1001]
+
+
+def test_lcd_collecting_message_is_brief(tmp_path: Path) -> None:
+    frame = tmp_path / "display.ppm"
+    dashboard = LcdDashboard(frame, band="5", channel="36")
+
+    dashboard.set_collecting(True)
+    dashboard.refresh()
+
+    assert dashboard.text_lines[1] == "Collecting"
+    state = json.loads(frame.with_suffix(".json").read_text(encoding="utf-8"))
+    assert state["summary"] == "Collecting"
+
+
 def _stats(
     second: int,
     percent: float,

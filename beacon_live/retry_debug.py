@@ -12,10 +12,13 @@ from typing import Iterable, Optional, TextIO
 
 from beacon_live.analyzer import Analyzer
 from beacon_live.analyzer import associate_frame_bssid
+from beacon_live.live import available_tshark_fields
+from beacon_live.live import select_tshark_frame_fields
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
-from beacon_live.parser import parse_tshark_frame_row
+from beacon_live.parser import TSHARK_MULTI_VALUE_SEPARATOR
+from beacon_live.parser import parse_tshark_capture_record
 
 
 RETRY_AUDIT_FIELD_NAMES = (
@@ -30,9 +33,31 @@ RETRY_AUDIT_FIELD_NAMES = (
     "group_address_excluded_count",
     "missing_retry_bit_excluded_count",
     "non_retryable_type_excluded_count",
+    "out_of_primary_scope_excluded_count",
     "retry_eligible_frame_count",
     "retry_frame_count",
     "retry_percent",
+)
+
+RETRY_FRAME_AUDIT_FIELD_NAMES = (
+    "timestamp",
+    "bssid",
+    "ta",
+    "ra",
+    "sa",
+    "da",
+    "retry_bit",
+    "retry_eligible",
+    "retry_exclusion_reason",
+    "sequence_number",
+    "fragment_number",
+    "qos_tid",
+    "phy_bandwidth",
+    "radio_frequency_mhz",
+    "captured_length",
+    "original_length",
+    "fcs_status",
+    "ampdu_reference",
 )
 
 
@@ -59,6 +84,7 @@ class RetryAuditRow:
     group_address_excluded_count: int
     missing_retry_bit_excluded_count: int
     non_retryable_type_excluded_count: int
+    out_of_primary_scope_excluded_count: int
     retry_eligible_frame_count: int
     retry_frame_count: int
     retry_percent: Optional[float]
@@ -92,6 +118,7 @@ def build_retry_debug_tshark_command(
     input_path: Path,
     *,
     tshark: str = "tshark",
+    field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
 ) -> list[str]:
     """Build the all-decoded-WLAN-frame export used by the live parser."""
     command = [
@@ -106,9 +133,11 @@ def build_retry_debug_tshark_command(
         "-E",
         "separator=\t",
         "-E",
-        "occurrence=f",
+        "occurrence=a",
+        "-E",
+        f"aggregator={TSHARK_MULTI_VALUE_SEPARATOR}",
     ]
-    for field in TSHARK_FRAME_FIELD_NAMES:
+    for field in field_names:
         command.extend(["-e", field])
     return command
 
@@ -119,7 +148,14 @@ def read_retry_debug_capture(
     tshark: str = "tshark",
 ) -> RetryCaptureData:
     """Normalize all decoded 802.11 frames from a PCAP/PCAPNG file."""
-    command = build_retry_debug_tshark_command(input_path, tshark=tshark)
+    field_names = select_tshark_frame_fields(
+        available_tshark_fields(tshark=tshark)
+    )
+    command = build_retry_debug_tshark_command(
+        input_path,
+        tshark=tshark,
+        field_names=field_names,
+    )
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as error_file:
         try:
             process = subprocess.Popen(
@@ -140,11 +176,11 @@ def read_retry_debug_capture(
         malformed_row_count = 0
         for row in process.stdout:
             tshark_row_count += 1
-            frame = parse_tshark_frame_row(row)
-            if frame is None:
+            parsed = parse_tshark_capture_record(row, field_names=field_names)
+            if not parsed:
                 malformed_row_count += 1
             else:
-                frames.append(frame)
+                frames.extend(parsed)
 
         returncode = process.wait()
         error_file.seek(0)
@@ -167,13 +203,19 @@ def analyze_retry_frames(
     frames: Iterable[FrameRecord],
     *,
     window_seconds: int = 120,
+    target_primary_frequency_mhz: Optional[int] = None,
+    channel_definition_max_age_seconds: float = 10.0,
 ) -> tuple[RetryAuditRow, ...]:
     """Return channel and per-known-BSSID retry counts for every second."""
     ordered_frames = tuple(sorted(frames, key=lambda frame: frame.timestamp))
     if not ordered_frames:
         return ()
 
-    analyzer = Analyzer(window_seconds=window_seconds)
+    analyzer = Analyzer(
+        window_seconds=window_seconds,
+        target_primary_frequency_mhz=target_primary_frequency_mhz,
+        channel_definition_max_age_seconds=channel_definition_max_age_seconds,
+    )
     for frame in ordered_frames:
         analyzer.ingest(frame, publish_snapshot=False)
     stats_by_second = {
@@ -194,16 +236,40 @@ def analyze_retry_frames(
             for frame in ordered_frames
             if second <= frame.timestamp < second + 1
         )
+        scoped_second_frames = second_frames
+        out_of_scope_count = 0
+        if target_primary_frequency_mhz is not None:
+            scoped_second_frames = tuple(
+                frame
+                for frame in second_frames
+                if _frame_in_primary_scope(
+                    frame,
+                    beacons,
+                    target_primary_frequency_mhz,
+                    channel_definition_max_age_seconds,
+                )
+            )
+            out_of_scope_count = len(second_frames) - len(scoped_second_frames)
         identities = _beacon_identities_at(
             beacons,
             second=second,
             window_seconds=window_seconds,
         )
+        if target_primary_frequency_mhz is not None:
+            identities = {
+                bssid: beacon
+                for bssid, beacon in identities.items()
+                if beacon.channel_definition is not None
+                and beacon.channel_definition.primary_frequency_mhz
+                == target_primary_frequency_mhz
+                and second + 1 - beacon.timestamp
+                <= channel_definition_max_age_seconds
+            }
         known_bssids = tuple(sorted(identities))
         grouped: dict[str, list[FrameRecord]] = {
             bssid: [] for bssid in known_bssids
         }
-        for frame in second_frames:
+        for frame in scoped_second_frames:
             bssid = associate_frame_bssid(frame, known_bssids)
             if bssid is not None:
                 grouped.setdefault(bssid, []).append(frame)
@@ -220,7 +286,9 @@ def analyze_retry_frames(
                 None,
                 None,
                 footer_bssid,
-                second_frames,
+                scoped_second_frames,
+                out_of_primary_scope_excluded_count=out_of_scope_count,
+                decoded_frame_count_override=len(second_frames),
             )
         )
         for bssid in sorted(grouped):
@@ -267,11 +335,48 @@ def write_retry_audit_csv(
                 "non_retryable_type_excluded_count": (
                     row.non_retryable_type_excluded_count
                 ),
+                "out_of_primary_scope_excluded_count": (
+                    row.out_of_primary_scope_excluded_count
+                ),
                 "retry_eligible_frame_count": row.retry_eligible_frame_count,
                 "retry_frame_count": row.retry_frame_count,
                 "retry_percent": (
                     "" if row.retry_percent is None else f"{row.retry_percent:.6f}"
                 ),
+            }
+        )
+
+
+def write_retry_frame_audit_csv(
+    frames: Iterable[FrameRecord],
+    output: TextIO,
+) -> None:
+    """Write packet-level fields for comparison with an independent export."""
+    writer = csv.DictWriter(output, fieldnames=RETRY_FRAME_AUDIT_FIELD_NAMES)
+    writer.writeheader()
+    for frame in frames:
+        writer.writerow(
+            {
+                "timestamp": f"{frame.timestamp:.9f}",
+                "bssid": frame.bssid or "",
+                "ta": frame.transmitter_address or "",
+                "ra": frame.receiver_address or "",
+                "sa": frame.source_address or "",
+                "da": frame.destination_address or "",
+                "retry_bit": (
+                    "" if frame.retry_flag is None else int(frame.retry_flag)
+                ),
+                "retry_eligible": int(frame.retry_eligible),
+                "retry_exclusion_reason": frame.retry_exclusion_reason or "",
+                "sequence_number": _optional(frame.sequence_number),
+                "fragment_number": _optional(frame.fragment_number),
+                "qos_tid": _optional(frame.qos_tid),
+                "phy_bandwidth": frame.phy_bandwidth or "",
+                "radio_frequency_mhz": _optional(frame.radio_frequency_mhz),
+                "captured_length": _optional(frame.captured_length),
+                "original_length": _optional(frame.original_length),
+                "fcs_status": _optional(frame.fcs_status),
+                "ampdu_reference": _optional(frame.ampdu_reference),
             }
         )
 
@@ -297,6 +402,9 @@ def _audit_row(
     ssid: Optional[str],
     footer_bssid: Optional[str],
     frames: tuple[FrameRecord, ...],
+    *,
+    out_of_primary_scope_excluded_count: int = 0,
+    decoded_frame_count_override: Optional[int] = None,
 ) -> RetryAuditRow:
     reasons = Counter(
         frame.retry_exclusion_reason
@@ -318,7 +426,11 @@ def _audit_row(
         bssid=bssid,
         ssid=ssid,
         footer_bssid=footer_bssid,
-        decoded_frame_count=len(frames),
+        decoded_frame_count=(
+            len(frames)
+            if decoded_frame_count_override is None
+            else decoded_frame_count_override
+        ),
         retry_bit_readable_frame_count=sum(
             frame.retry_flag is not None for frame in frames
         ),
@@ -327,7 +439,43 @@ def _audit_row(
         non_retryable_type_excluded_count=reasons[
             "non_retryable_frame_type"
         ],
+        out_of_primary_scope_excluded_count=(
+            out_of_primary_scope_excluded_count
+        ),
         retry_eligible_frame_count=len(eligible_frames),
         retry_frame_count=retry_frame_count,
         retry_percent=retry_percent,
     )
+
+
+def _frame_in_primary_scope(
+    frame: FrameRecord,
+    beacons: tuple[BeaconRecord, ...],
+    target_primary_frequency_mhz: int,
+    max_age_seconds: float,
+) -> bool:
+    known_bssids = tuple(sorted({beacon.bssid for beacon in beacons}))
+    bssid = associate_frame_bssid(frame, known_bssids)
+    if bssid is None:
+        return False
+    latest = next(
+        (
+            beacon
+            for beacon in reversed(beacons)
+            if beacon.bssid == bssid
+            and beacon.timestamp <= frame.timestamp
+            and beacon.channel_definition is not None
+        ),
+        None,
+    )
+    return bool(
+        latest is not None
+        and frame.timestamp - latest.timestamp <= max_age_seconds
+        and latest.channel_definition is not None
+        and latest.channel_definition.primary_frequency_mhz
+        == target_primary_frequency_mhz
+    )
+
+
+def _optional(value: Optional[object]) -> object:
+    return "" if value is None else value

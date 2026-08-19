@@ -5,9 +5,13 @@ from dataclasses import field
 from functools import cached_property
 from typing import Optional
 
+from beacon_live.channel import ChannelDefinition
+
 
 # Available Admission Capacity uses 32-microsecond units: 31,250 is 100%.
 QBSS_ADMISSION_CAPACITY_MAX = 31_250
+TOP_STATION_SOURCE_QBSS = "qbss"
+TOP_STATION_SOURCE_MAC = "mac"
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,7 @@ class BeaconRecord:
     beacon_interval_tu: Optional[int] = None
     ap_name: Optional[str] = None
     vendor: Optional[str] = None
+    channel_definition: Optional[ChannelDefinition] = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,16 @@ class FrameRecord:
     destination_address: Optional[str] = None
     ap_name: Optional[str] = None
     vendor: Optional[str] = None
+    channel_definition: Optional[ChannelDefinition] = None
+    captured_length: Optional[int] = None
+    original_length: Optional[int] = None
+    radio_frequency_mhz: Optional[int] = None
+    phy_bandwidth: Optional[str] = None
+    fcs_status: Optional[int] = None
+    sequence_number: Optional[int] = None
+    fragment_number: Optional[int] = None
+    qos_tid: Optional[int] = None
+    ampdu_reference: Optional[int] = None
 
     @property
     def is_management_frame(self) -> bool:
@@ -118,6 +133,7 @@ class FrameRecord:
             beacon_interval_tu=self.beacon_interval_tu,
             ap_name=self.ap_name,
             vendor=self.vendor,
+            channel_definition=self.channel_definition,
         )
 
 
@@ -155,6 +171,10 @@ class SecondStats:
     selected_beacon_rate_percent: Optional[float] = None
     top_retry_bssid: Optional[str] = None
     unique_client_mac_count: int = 0
+    top_station_count: Optional[int] = None
+    top_station_source: Optional[str] = None
+    top_station_ssid: Optional[str] = None
+    top_station_bssid: Optional[str] = None
     beacon_received_count: int = 0
     beacon_expected_count: int = 0
     beacon_loss_percent: Optional[float] = None
@@ -183,6 +203,7 @@ class BssidState:
     window_retry_frame_count: int = 0
     window_retry_percent: Optional[float] = None
     window_beacon_rate_percent: Optional[float] = None
+    window_unique_client_mac_count: int = 0
 
     @property
     def qbss_present(self) -> bool:
@@ -237,7 +258,7 @@ class BssidState:
 
 @dataclass(frozen=True)
 class CompositionSnapshot:
-    """Analyzer-derived fields required by the text-only Composition screen."""
+    """Analyzer-derived fields shared by composition renderers."""
 
     bssid_count: int
     qbss_bssid_count: int
@@ -249,6 +270,7 @@ class CompositionSnapshot:
     displayed_ssid: Optional[str]
     displayed_bssid: Optional[str]
     displayed_rssi_dbm: Optional[int]
+    strongest_radio_station_count_sum: int = 0
 
     @classmethod
     def empty(cls) -> "CompositionSnapshot":
@@ -263,6 +285,7 @@ class CompositionSnapshot:
             displayed_ssid=None,
             displayed_bssid=None,
             displayed_rssi_dbm=None,
+            strongest_radio_station_count_sum=0,
         )
 
 
@@ -328,6 +351,8 @@ class MetricsSnapshot:
     current: SecondStats
     history: tuple[SecondStats, ...]
     top_station_bssid: Optional[str] = None
+    top_station_count: Optional[int] = None
+    top_station_source: Optional[str] = None
     top_retry_bssid: Optional[str] = None
     retry_bssids: tuple[RetryBssidState, ...] = ()
     composition: CompositionSnapshot = field(
@@ -359,6 +384,8 @@ class MetricsSnapshot:
             ),
             history=(),
             top_station_bssid=None,
+            top_station_count=None,
+            top_station_source=None,
             top_retry_bssid=None,
             retry_bssids=(),
             composition=CompositionSnapshot.empty(),

@@ -33,7 +33,7 @@ logging-only capture is already active. Stop the logging-only session first.
 Choose one or both live formats:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 \
   --channel 36 \
   --stats-csv \
@@ -41,11 +41,27 @@ sudo .venv/bin/wlanpi-beacon-live \
   --log-dir logs
 ```
 
+Use the convenience option to show the interactive terminal dashboard and
+write both formats together:
+
+```bash
+sudo wlanpi-beacon-live \
+  --iface wlan0 \
+  --channel 36 \
+  --log \
+  --log-dir logs
+```
+
+While logging is active, the TUI shows `Logging to <path>/<filename>` for each
+enabled file below the `Selected BSSIDs` section. Log rollover refreshes those
+paths. A manual or low-disk stop changes the status without stopping capture or
+analysis in display mode.
+
 `--logging-only` disables terminal/LCD rendering and automatically enables both
 formats:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 \
   --channel 36 \
   --logging-only \
@@ -92,6 +108,8 @@ The stats file contains one row for each emitted capture second. Columns cover:
 - local timestamp, interface, channel, resolved frequency, and band;
 - retained BSSID count, summed latest QBSS station counts, and the unique
   eligible client-MAC count detected during that one-second period;
+- the rolling highest per-BSSID station count, its QBSS or MAC source, and its
+  SSID/BSSID identity;
 - selected QBSS utilization and source identity/RSSI;
 - received, Retry-bit-readable, retry-eligible, and retry-frame counts;
 - retry percentage, selected beacon-rate percentage, and retry footer BSSID;
@@ -103,6 +121,48 @@ each row as it writes it.
 The client field is named `unique_client_mac_count`. It is a per-second count,
 matching the cyan Stations graph sample; it is not the 120-second `MAC` summary
 total and does not contain a list of addresses.
+
+The columns are written in this exact order. Percent fields contain numeric
+percent values without a `%` suffix; unavailable optional values are empty.
+
+| Field | Description |
+| --- | --- |
+| `local_time` | Local ISO-8601 timestamp, including UTC offset, for the emitted capture second. |
+| `interface` | Monitor-mode interface configured for the run. |
+| `channel` | Channel value configured for the run. |
+| `frequency_mhz` | Resolved tuned center frequency in MHz, when it can be determined. |
+| `band` | Resolved `2.4`, `5`, or `6` GHz band, when it can be determined. |
+| `capture_width_mode` | `band-default` for fixed 20 MHz (2.4 GHz) or 80 MHz (5/6 GHz) selection, or `explicit` for a CLI override. |
+| `requested_capture_width_mhz` | Most recently requested capture width (`20`, `40`, `80`, `160`, `80+80`, or `320`). |
+| `requested_center_frequency1_mhz` | Requested center frequency 1. |
+| `requested_center_frequency2_mhz` | Requested center frequency 2 for 80+80 MHz. |
+| `actual_capture_width_mhz` | Width reported by `iw dev <iface> info`, or the attempted width when verification is unavailable. |
+| `actual_center_frequency1_mhz` | Actual or attempted center frequency 1. |
+| `actual_center_frequency2_mhz` | Actual or attempted center frequency 2. |
+| `actual_capture_verified` | `1` when the actual definition was read back from `iw`, `0` when it could not be verified. |
+| `capture_coverage_status` | `initial`, `complete`, `partial`, `fallback`, or `unverified`; partial/fallback never claims full bonded-channel coverage. |
+| `unique_bssid_count` | BSSIDs whose beacons are retained in the rolling 120-second window at this second. |
+| `qbss_station_count_sum` | Sum of the latest advertised QBSS station counts across retained BSSIDs; missing counts contribute zero. |
+| `unique_client_mac_count` | Unique eligible wireless client MACs observed in BSSID-linked data frames during this one-second period; this is not an associated-station count. |
+| `top_station_count` | Highest per-BSSID value from either the latest advertised QBSS station count or the rolling-window observed client-MAC count. |
+| `top_station_source` | `qbss` when `top_station_count` came from an advertised count, or `mac` when it came from local MAC discovery; QBSS wins an equal-count tie. |
+| `top_station_ssid` | SSID belonging to the BSSID that supplied `top_station_count`. |
+| `top_station_bssid` | BSSID that supplied `top_station_count`. |
+| `selected_qbss_cu_percent` | Channel utilization percentage from the latest beacon of the automatically selected QBSS BSSID. |
+| `selected_qbss_ssid` | SSID belonging to that selected QBSS BSSID. |
+| `selected_qbss_bssid` | Automatically selected BSSID supplying the QBSS utilization fields. |
+| `selected_qbss_rssi_dbm` | RSSI in dBm from the selected BSSID's latest retained beacon. |
+| `received_frame_count` | All decoded 802.11 frames delivered to the analyzer during this one-second period. |
+| `retry_observed_frame_count` | Primary-scoped frames during the second for which the Retry bit was readable, including frames not eligible for the retry denominator. Unknown, pre-discovery, stale, and non-target-primary associations are excluded. |
+| `retry_eligible_frame_count` | Primary-scoped unicast data and retry-capable unicast management frames eligible for the retry-percentage denominator. |
+| `retry_frame_count` | Retry-eligible frames whose Retry bit was set; repeated retry transmissions are each counted. |
+| `retry_percent` | `retry_frame_count / retry_eligible_frame_count × 100` for the second. |
+| `selected_beacon_rate_percent` | Selected BSSID's rolling-window received-beacon rate relative to the rate expected from its advertised beacon interval, capped at 100%. |
+| `beacon_received_count` | Phase-matched beacons received during the second, summed across BSSIDs in the strongest estimated radio. |
+| `beacon_expected_count` | Beacon transmission slots expected during the second across those strongest-radio BSSIDs. |
+| `beacon_loss_percent` | `(beacon_expected_count - beacon_received_count) / beacon_expected_count × 100`. |
+| `top_retry_bssid` | Automatically selected retry identity: highest one-second retry percentage, previous identity on a tie, or strongest beacon RSSI when no retries occurred. |
+| `local_cu_percent` | Optional local survey utilization from `iw`; separate from AP-advertised QBSS utilization. |
 
 ## Beacon JSONL
 
@@ -198,7 +258,7 @@ Replay accepts explicit output paths because it processes a bounded saved
 input rather than an open-ended live session:
 
 ```bash
-.venv/bin/beacon-live replay \
+beacon-live replay \
   --input samples/tshark_qbss_sample.tsv \
   --stats-csv logs/replay-stats.csv \
   --beacons-jsonl logs/replay-beacons.jsonl

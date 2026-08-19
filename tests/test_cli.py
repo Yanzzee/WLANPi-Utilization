@@ -5,6 +5,7 @@ from typing import Optional
 
 import pytest
 
+from beacon_live.channel import ChannelWidth
 from beacon_live.cli import main
 from beacon_live.live import LiveCommandError
 from beacon_live.models import FrameRecord
@@ -81,6 +82,13 @@ def test_replay_accepts_pi_smoke_files_and_prints_summary(
     captured = capsys.readouterr()
 
     assert exit_code == 0
+    output_lines = captured.out.splitlines()
+    fields = output_lines[0].split("\t")
+    first_stats = dict(zip(fields, output_lines[1].split("\t")))
+    assert first_stats["top_station_count"] == "3"
+    assert first_stats["top_station_source"] == "qbss"
+    assert first_stats["top_station_ssid"] == "Bravo"
+    assert first_stats["top_station_bssid"] == "bb:bb:bb:bb:bb:bb"
     assert "\t20.00" in captured.out
     assert "Summary" in captured.out
     assert "total_beacon_rows_read: 4" in captured.out
@@ -352,6 +360,42 @@ def test_live_logging_only_enables_both_formats_and_disables_rendering(
     assert "lcd_frame" not in calls[0]
 
 
+def test_live_log_enables_both_formats_with_display(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_run_live(**kwargs: object) -> int:
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr("beacon_live.cli.run_live", fake_run_live)
+
+    assert main(
+        ["live", "--log", "--log-dir", str(tmp_path)]
+    ) == 0
+
+    assert isinstance(calls[0]["stats_csv"], Path)
+    assert isinstance(calls[0]["beacons_jsonl"], Path)
+    assert calls[0]["stats_csv"].parent == tmp_path
+    assert calls[0]["beacons_jsonl"].parent == tmp_path
+    assert "logging_only" not in calls[0]
+
+
+def test_live_log_rejects_logging_only(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["live", "--log", "--logging-only"])
+
+    assert exc_info.value.code == 2
+    assert (
+        "--logging-only cannot be combined with --log"
+        in capsys.readouterr().err
+    )
+
+
 def test_live_wires_hidden_lcd_frame_for_fpms_launcher(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -463,6 +507,46 @@ def test_live_accepts_explicit_frequency_mhz(monkeypatch: pytest.MonkeyPatch) ->
             "survey_debug": False,
         }
     ]
+
+
+def test_live_wires_explicit_channel_definition_and_raw_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    raw_capture = tmp_path / "capture.pcapng"
+    monkeypatch.setattr(
+        "beacon_live.cli.run_live",
+        lambda **kwargs: (calls.append(kwargs) or 0),
+    )
+
+    assert main(
+        [
+            "live",
+            "--frequency-mhz",
+            "5180",
+            "--channel-width",
+            "160",
+            "--center-frequency1-mhz",
+            "5250",
+            "--raw-pcapng",
+            str(raw_capture),
+        ]
+    ) == 0
+
+    assert calls[0]["channel_width"] is ChannelWidth.MHZ160
+    assert calls[0]["center_frequency1_mhz"] == 5250
+    assert calls[0]["raw_capture_path"] == raw_capture
+
+
+def test_live_rejects_centers_with_automatic_width(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["live", "--center-frequency1-mhz", "5210"])
+
+    assert exc_info.value.code == 2
+    assert "center-frequency overrides require" in capsys.readouterr().err
 
 
 def test_live_accepts_band_qualified_channel(monkeypatch: pytest.MonkeyPatch) -> None:

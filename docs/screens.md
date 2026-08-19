@@ -31,6 +31,8 @@ SSID/RSSI and BSSID/channel. Long SSIDs are truncated; BSSIDs are retained.
 The Utilization screen graphs AP-advertised QBSS channel utilization for the
 automatically selected QBSS BSSID.
 
+![WLANPi Beacon Live utilization screen](docs/images/channel-utilization_screen.png)
+
 Summary fields:
 
 - `CU`: current advertised utilization percentage;
@@ -49,6 +51,8 @@ currently retained BSSID advertises usable QBSS information.
 The Admission screen uses the same selected QBSS BSSID as Utilization and shows
 its latest advertised admission capacity.
 
+![WLANPi Beacon Live admission capacity screen](docs/images/admission-capacity_screen.png)
+
 Summary fields:
 
 - `ADC`: current admission capacity as a percentage of 31,250;
@@ -65,15 +69,20 @@ It also reports unique client MAC addresses observed in eligible data frames.
 These remain separate metrics: the displayed QBSS sum is AP-advertised, while
 the MAC count is locally observed.
 
+![WLANPi Beacon Live station count screen](docs/images/total-station-count_screen.png)
+
 Summary fields:
 
 - `SUM`: current sum of latest advertised station counts;
 - `MAC`: unique client MAC addresses detected anywhere on the channel during
   the current 120-second window;
-- `TOP`: latest advertised count from the current highest-count BSSID.
+- `TOP`: highest per-BSSID count found either in the latest advertised QBSS
+  station count or in unique client MACs observed for that BSSID during the
+  current 120-second window.
 
-The footer identifies the same BSSID represented by `TOP`. If multiple BSSIDs
-have the same highest count, deterministic BSSID ordering is used.
+The footer identifies the same SSID/BSSID represented by `TOP`. An advertised
+QBSS count wins a tie with an observed client-MAC count. Ties between counts
+from the same source use deterministic BSSID ordering.
 
 Two per-second bar series share the fixed 0–64 station scale and are overlaid:
 the amber series is the summed advertised QBSS count and the cyan series is
@@ -102,6 +111,8 @@ The analyzer excludes:
 ## 4. Retries
 
 Retries graphs one independent percentage for each completed capture second:
+
+![WLANPi Beacon Live retry screen](docs/images/retry-percentage_screen.png)
 
 ```text
 frames with Retry bit set / retry-eligible frames × 100
@@ -151,6 +162,8 @@ beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 Beacon Loss graphs the percentage of expected beacons not received during each
 completed capture second for the strongest estimated radio.
 
+![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
+
 Summary fields:
 
 - `BL`: aggregate loss percentage;
@@ -172,6 +185,13 @@ received beacon. Gaps in the inferred schedule increase `EXP` without
 increasing `REC`; capture jitter cannot make the displayed percentage exceed
 100%.
 
+`REC` and `EXP` apply only to the BSSIDs grouped with the selected strongest
+radio, not every beacon on the channel. A BSSID remains eligible for that
+selection for one reporting second plus the 102.4 ms delayed-beacon allowance.
+This permits a complete missed second to register as loss, but prevents a stale
+high-RSSI BSSID retained elsewhere in the rolling window from producing a
+continuous `REC 0` while another radio is actively beaconing.
+
 A completed second remains open for one additional 102.4 ms of ordered capture
 time. The analyzer matches each received beacon to at most one inferred
 transmission slot and accepts arrival delays from zero through 102.4 ms. A
@@ -183,12 +203,17 @@ does not fill the earlier slot.
 
 Composition is a text screen describing the channel rather than a graph.
 
+![WLANPi Beacon Live composition screen](docs/images/composition_screen.png)
+
 It shows:
 
 - `BSSIDs`: BSSIDs with beacons currently retained in the rolling window;
 - `QBSS`: retained BSSIDs advertising QBSS information;
 - `Est Radios`: best-effort estimated physical-radio count;
 - `Radio BSSIDs`: BSSIDs grouped with the strongest estimated radio;
+- `Radio Stations` in the interactive CLI: sum of the newest advertised QBSS
+  station counts for those strongest-radio BSSIDs; missing counts are zero and
+  client MACs are not deduplicated across BSSIDs;
 - `AP`: supported vendor AP-name information when present;
 - `Vendor`: supported vendor identification when present.
 
@@ -196,6 +221,10 @@ The footer cycles every two seconds through BSSIDs grouped with the strongest
 estimated radio. Radio grouping is an estimate: BSSIDs are compared using OUI,
 AP-name, RSSI, and related-MAC clues. Missing vendor information or unusual
 BSSID allocation can prevent accurate grouping.
+
+Only BSSIDs whose latest beacon is no more than 1.1024 seconds old participate
+in strongest-radio selection. The headline BSSID and estimated-radio counts
+still describe all beacon state retained in the rolling window.
 
 See [Radio grouping](architecture.md#radio-grouping) for the implemented
 heuristics.
@@ -222,7 +251,8 @@ BSSIDs and timing is not used as a selection tie-breaker.
 - **Local survey channel utilization** is derived from the local adapter's
   `iw dev <iface> survey dump` counter deltas and is optional/driver-dependent.
 - **QBSS station count** is advertised independently by each BSSID.
-- **Observed clients** are not currently tracked.
+- **Observed clients** are locally inferred from eligible BSSID-linked data
+  frames and are not an associated-station count.
 - **Retry percentage** is computed locally from eligible monitor-mode frames
   heard on the tuned channel.
 

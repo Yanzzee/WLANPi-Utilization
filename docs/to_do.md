@@ -27,7 +27,7 @@ Features & changes
 9. DONE     when logging, periodically check for free disk space and close if nearly full
     add message to end of log that the disk is full
     for long term logging, write separate files periodically
-10. how much can metrics also be found from hardware instead of just using beacons
+10. DONE    how much can metrics also be found from hardware instead of just using beacons
         channel utilization - depends on hardware
         admission capacity - no
         retries - local only
@@ -39,12 +39,14 @@ Features & changes
         * name it with a timestamp, screen name, and maybe channel/BSSID
         * keep the capture/analysis loop running normally
         * disable/override other buttons while the display application is running
-12. look into the possibility of scanning multiple channels
-        probably not very feasible, beacons are 10 per second per BSSID
+12. CANCELLED   look into the possibility of scanning multiple channels
+        probably not very feasible, beacons are 10 per second per BSSID, and there are many channels
+        it could possibly change channels with a button press, but this would necessitate restarting observations & clearing data
 13. classroom mode
         find likely radios in classroom
         scan beacons for those radios
         record and show analytics from the study
+        alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
 14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. DONE    optimize code for processor utilization and/or use multithreading for multiple cores
         there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
@@ -54,8 +56,11 @@ Features & changes
         this is for RSSI except some screens
             stations
             retries
+        consider highlighting the metric type used to select the shown SSID/BSSID - RSSI, top stations, most retries. beacon loss is really just RSSI radio and the highest loss BSSID/SSID within that, it can probably be changed to just use RSSI.
 18. additional graph/screen - noise/SNR
         from adapter if possible
+        only show if the adapter supports it
+        need to get hardware that supports this to test.
 19. DONE    make the text dynamic per line - only decrease size on the line needed, otherwise size 10 font.
         this should only ever affect line 2 if there is 100%
         line 3 for SSID should just be trunkated
@@ -68,18 +73,42 @@ Features & changes
         for all BSSIDs associated with the strongest radio, count all received beacons and divide by the number of expected beacons
         this may need to track beacon timing instead of a simple 10 beacons per second, because it is actually one beacon per 102.4ms. or 10 beacons per 1.024 seconds, or 9.765625 beacons per second. sometimes there will be 9 per second and often there will be 10 per second. this graph may need to be delayed by one second in order to see if the additional beacons were received in the following window
         alternatively, we could look at all BSSIDs collectively, including those that are far away, but there will be a higher probability that beacons are not received because they are too weak to be demodulated, not because they were dropped because of contention.
-22. improve vendor discover through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Arista, Mist, Ubiquiti, etc
+22. improve vendor discovery through IE fields - currently Cisco, Aruba, Extreme, Aerohive. Add Arista, Mist, Ubiquiti, etc
         add better discovery if possible - MLD identity, controller identifiers, richer vendor-specific device IDs ?
+        get captures, what fields can be reliably used to find vendor?
 23. DONE    reorder screens in a logical way
 24. DONE    logging only seems to be broken
         stop logging does not work
         start logging hangs for a second before the screen can be navigated again
         add a status as it starts or change the menu to change text
         add confirmation that logging has stopped - logging channel X has started... etc
-25. unify app name - beacon-live and Utilization
+25. CANCELLED   unify app name - beacon-live and Utilization
         update log path if necessary
-26. update the stations TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
+        Utilization is the name of the app, beacon-live is the command to run it, this is probably OK
+26. DONE    update the stations screen TOP field to show the top BSSID whether reported by QBSS (current) or total MAC for the SSID
         as this is updated per second, it's not likely to be used very often unless there is a busy AP with no QBSS
+        may need to add this to the log & CLI
 27. DONE    include beacons in logging, or remove it if it's useless
-28. make BSSID display behavior uniform wherever it is displayed
-        for highest RSSI BSSID, rotate all at 2 second interval
+28. CANCELLED   make BSSID display behavior uniform wherever it is displayed ?
+        for highest RSSI radio, rotate all BSSID/SSID at 2 second interval
+        don't do this - only one BSSID is used for getting CU, ADC, retries. STA count combines all across radios, or looks at the one with the most. this is shown on the composition screen if someone wants to look at it.
+29. DONE    improve CLI commands as supported, not just in dev mode
+30. DONE    Review accuracy of frame retry capture and calculation
+        are we looking at all frames, including wider channels? - as wide as the adapter supports
+        are frames being truncated correctly on capture to get all headers? - probably, beacons are the limit
+        compare to a raw capture to test - compared and those are missing 6 GHz data frames too
+31. screenshot of the TUI in the readme
+32. add cross platform support for other linux & MACOS to run CLI at least
+33. DONE    truncate frames at 1024 bytes to improve processing
+34. include OBSS count in composition screen
+        number of BSSIDs that overlap to the selected primary, but have a different primary
+        can this be observed accurately without scanning multiple channels?
+35. add web interface
+        accessible through existing web menu
+        show same metrics as CLI
+        better graphs
+        tab navigation inside of the screen
+36. PARTIAL    improve start time performance
+        why does it take several seconds to start showing the graphs?
+        why is the display bursty at times instead of regular update cadence?
+        how else can the code be more efficient?

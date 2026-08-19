@@ -3,6 +3,9 @@ import pytest
 from beacon_live.models import FrameRecord
 from beacon_live.parser import parse_tshark_row
 from beacon_live.parser import parse_tshark_frame_row
+from beacon_live.parser import parse_tshark_capture_record
+from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
+from beacon_live.parser import TSHARK_OPTIONAL_FRAME_FIELD_NAMES
 
 
 def test_parse_valid_qbss_row_converts_cu_to_percent() -> None:
@@ -126,6 +129,189 @@ def test_parse_all_frame_data_extracts_retry_without_beacon_fields() -> None:
     )
     assert record.qbss_cu_raw is None
     assert record.beacon_record() is None
+
+
+def test_parse_operation_and_packet_diagnostic_fields() -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + TSHARK_OPTIONAL_FRAME_FIELD_NAMES
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.125",
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "ff:ff:ff:ff:ff:ff",
+            "wlan.ssid": "Wide",
+            "radiotap.dbm_antsignal": "-45",
+            "wlan.fixed.beacon": "100",
+            "wlan.ht.info.primarychannel": "36",
+            "wlan.ht.info.secchanoffset": "1",
+            "wlan.vht.op.channelwidth": "1",
+            "wlan.vht.op.channelcenter0": "42",
+            "frame.cap_len": "256",
+            "frame.len": "512",
+            "wlan_radio.frequency": "5180",
+            "wlan_radio.phy": "8",
+            "radiotap.vht.bw": "4",
+            "wlan.fcs.status": "1",
+            "wlan.seq": "123",
+            "wlan.frag": "2",
+            "wlan.qos.tid": "5",
+            "radiotap.ampdu.reference": "99",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+        band="5",
+    )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.channel_definition is not None
+    assert record.channel_definition.width.value == "80"
+    assert record.channel_definition.center_frequency1_mhz == 5210
+    assert record.captured_length == 256
+    assert record.original_length == 512
+    assert record.sequence_number == 123
+    assert record.fragment_number == 2
+    assert record.qos_tid == 5
+    assert record.ampdu_reference == 99
+    assert "radiotap.vht.bw=4" in (record.phy_bandwidth or "")
+
+
+def test_multiple_wlan_occurrences_emit_every_mpdu_and_retry_bit() -> None:
+    values = {name: "" for name in TSHARK_FRAME_FIELD_NAMES}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.250",
+            "wlan.fc.type": "2|2",
+            "wlan.fc.subtype": "0|0",
+            "wlan.fc.retry": "0|1",
+            "wlan.bssid": (
+                "aa:bb:cc:dd:ee:ff|aa:bb:cc:dd:ee:ff"
+            ),
+            "wlan.ra": "00:11:22:33:44:55|00:11:22:33:44:55",
+            "wlan.da": "00:11:22:33:44:55|00:11:22:33:44:55",
+            "radiotap.dbm_antsignal": "-45|-47",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in TSHARK_FRAME_FIELD_NAMES)
+    )
+
+    assert len(records) == 2
+    assert [record.retry_flag for record in records] == [False, True]
+    assert [record.rssi_dbm for record in records] == [-45, -45]
+    assert all(record.retry_eligible for record in records)
+
+
+@pytest.mark.parametrize(
+    ("frame_control", "expected_retry"),
+    (("0x8808", True), ("0x8800", False)),
+)
+def test_frame_control_fallback_recovers_retry_bit(
+    frame_control: str,
+    expected_retry: bool,
+) -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + ("wlan.fc",)
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.250",
+            "wlan.fc": frame_control,
+            "wlan.fc.type": "2",
+            "wlan.fc.subtype": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "00:11:22:33:44:55",
+            "wlan.da": "00:11:22:33:44:55",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+    )
+
+    assert len(records) == 1
+    assert records[0].retry_flag is expected_retry
+    assert records[0].retry_eligible
+
+
+def test_6ghz_beacon_uses_radio_frequency_when_he_primary_is_unavailable() -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + ("wlan_radio.frequency",)
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.125",
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "ff:ff:ff:ff:ff:ff",
+            "wlan.ssid": "Six",
+            "wlan.fixed.beacon": "100",
+            "wlan_radio.frequency": "5975",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+        band="6",
+    )
+
+    assert len(records) == 1
+    definition = records[0].channel_definition
+    assert definition is not None
+    assert definition.primary_frequency_mhz == 5975
+    assert definition.complete is False
+    assert definition.ambiguous is True
+    assert definition.phy == "radio-frequency"
+    assert definition.reason == (
+        "operation fields unavailable; primary inferred from capture frequency"
+    )
+
+
+def test_6ghz_he_width_remains_complete_without_primary_field() -> None:
+    field_names = TSHARK_FRAME_FIELD_NAMES + (
+        "wlan_radio.frequency",
+        "wlan.ext_tag.he_operation.6ghz.control.channel_width",
+        "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_0",
+    )
+    values = {name: "" for name in field_names}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.125",
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ra": "ff:ff:ff:ff:ff:ff",
+            "wlan.ssid": "Six",
+            "wlan.fixed.beacon": "100",
+            "wlan_radio.frequency": "5975",
+            "wlan.ext_tag.he_operation.6ghz.control.channel_width": "2",
+            "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_0": "7",
+        }
+    )
+
+    records = parse_tshark_capture_record(
+        "\t".join(values[name] for name in field_names),
+        field_names=field_names,
+        band="6",
+    )
+
+    assert len(records) == 1
+    definition = records[0].channel_definition
+    assert definition is not None
+    assert definition.complete
+    assert definition.primary_channel == 5
+    assert definition.width.value == "80"
+    assert definition.center_frequency1_mhz == 5985
 
 
 def test_parse_legacy_all_frame_row_without_address_fields() -> None:

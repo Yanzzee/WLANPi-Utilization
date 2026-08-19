@@ -32,6 +32,10 @@ monitor interface / replay input
             │
             ▼
  acquisition and parsing ── one normalized FrameRecord per decoded frame
+            │                 └── beacon channel-definition observations
+            │                              │
+            │                              ▼
+            │                    capability/coverage planner ── in-place iw tune
             │
             ▼
       shared Analyzer ───── rolling frames, latest beacons, derived metrics
@@ -50,18 +54,50 @@ creates another analyzer or capture worker.
 
 ## Acquisition layer
 
-Live capture configures one interface in monitor mode on a selected 20 MHz
-channel and launches one line-buffered TShark process. The TShark display filter
-accepts decoded WLAN frames; it does not filter for traffic addressed to the
-WLAN Pi.
+Live capture configures one interface in monitor mode and launches one
+line-buffered TShark process. Automatic width selection uses a fixed 20 MHz
+definition on 2.4 GHz and the standard 80 MHz block containing the selected
+primary on 5 GHz and 6 GHz. This reflects the supported WLAN Pi USB-adapter
+capture limit. If the default 80 MHz definition is unsupported or rejected, the
+hardware boundary warns and retries once at 20 MHz. Explicit CLI width/center
+definitions are validated and are never silently changed.
+
+Supported HT, VHT, HE 6 GHz, and EHT operation fields still form immutable
+per-BSSID `ChannelDefinition` values. They are used to scope retry metrics to
+the selected primary and to report confirmed fixed-width coverage conflicts.
+When a TShark version omits the 6 GHz HE primary field but exposes HE width and
+center fields, the capture frequency supplies the primary and the complete
+advertised definition is still checked. A radio-frequency-only observation
+proves primary scope but does not by itself prove partial bonded coverage.
+Beacon contents never cause a retune, channel hop, capture restart, analyzer
+restart, or history reset.
 
 The live TShark process enables only the Radiotap/802.11 dissector chain and
-disables WLAN decryption and defragmentation. None of the analyzer metrics
-requires payload or higher-layer protocol dissection. A 16 MiB capture buffer
-provides headroom during short scheduler stalls. Capture snapshot length remains
-unrestricted: TShark's snapshot length is global, so shortening data frames
-would also risk truncating beacon information elements used for QBSS, AP-name,
-vendor, and radio-grouping output.
+disables WLAN decryption and defragmentation. The analyzer still receives every
+decoded 802.11 frame; retry eligibility then excludes control and extension
+frames without a separate capture pipeline. None of the metrics requires
+payload or higher-layer protocol dissection. A 16 MiB capture buffer provides
+headroom during short scheduler stalls. Normal live capture uses a 1024-byte
+snapshot length and warns once per BSSID when a larger beacon is truncated and
+later information elements may be unavailable. Interactive terminal renderers
+show runtime capture warnings, including confirmed partial coverage, inside
+their managed footer instead of writing beneath the curses screen.
+
+Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
+that same TShark process. It therefore saves the raw packets feeding live
+decoding without a second competing capture.
+The adjacent JSON sidecar records requested/actual definitions, verification and
+coverage status, negotiated fields, full-snapshot policy, decoded/normalized
+counts, and a drop count when TShark reports one. PCAPNG interface statistics
+remain the authoritative source when TShark does not expose a drop count.
+
+Successful channel tuning does not prove that the adapter can demodulate and
+deliver every PHY/frame combination within that definition. Hardware testing
+found an MT7921U configuration that tuned 80 MHz in 6 GHz but did not deliver
+payload-bearing data frames, although Null/QoS Null frames were present and a
+different capture device saw QoS Data. The application cannot reconstruct
+frames absent from the kernel capture stream; raw-PCAPNG comparison is the
+boundary test for this class of limitation.
 
 The parser normalizes available fields into `FrameRecord`, including:
 
@@ -71,7 +107,17 @@ The parser normalizes available fields into `FrameRecord`, including:
 - SSID and RSSI;
 - beacon interval (and frame length when present in older replay exports);
 - QBSS channel utilization, station count, and admission capacity; and
-- supported vendor AP-name/vendor clues.
+- supported vendor AP-name/vendor clues;
+- advertised primary, width, centers, completeness/ambiguity, and EHT
+  puncturing when exposed; and
+- optional PHY bandwidth, captured/original lengths, FCS, sequence, fragment,
+  QoS TID, and A-MPDU reference diagnostics.
+
+TShark fields are negotiated from `tshark -G fields`, retaining compatibility
+with older installations. The export uses `occurrence=a` with a fixed
+aggregator. Drivers normally supply one capture record per MPDU; if a dissector
+does expose multiple WLAN headers in one record, the parser emits each aligned
+MPDU and Retry bit rather than retaining only the first occurrence.
 
 A valid beacon can also be represented as `BeaconRecord`. Replay inputs feed
 the same aggregation behavior without requiring Wi-Fi hardware.
@@ -107,6 +153,20 @@ rolling window and merged for snapshot publication. If the retained BSSID set
 changes, affected projections are rebuilt from the single raw-frame store so
 address-based association keeps the same meaning. The completed projection is
 also reused when publishing that second, avoiding a second window scan.
+
+Target-primary association uses timestamp-indexed beacon timelines and binary
+search instead of scanning every retained beacon for every frame. Projection
+cache keys contain only the channel definitions that can affect that capture
+second, so a later beacon does not invalidate and recompute the preceding
+two-minute history.
+
+When live capture supplies a selected primary frequency, retry projection is
+temporally scoped. A frame must associate through BSSID/TA/RA/SA/DA with a
+BSSID whose channel definition was observed at or before that frame, remains
+fresh, and advertises that primary. Pre-discovery frames, unknown associations,
+stale definitions, and BSSIDs whose own primary is merely inside a secondary
+portion of the bonded capture are excluded from retry readable/eligible/retry
+counts. Replay without channel-definition fields retains its legacy behavior.
 
 ### Rolling-window and latest-beacon rules
 
@@ -186,6 +246,13 @@ AP names and vendor-specific fields are clues, not standardized identities.
 Composition counts and Beacon Loss screen radio membership must therefore be
 treated as estimates.
 
+Rolling BSSID state remains available for the full two-minute window, but a
+BSSID is eligible for strongest-radio selection only when its latest beacon is
+no more than 1.1024 seconds old. That covers one complete reporting second plus
+the delayed-beacon allowance: a genuinely missed second can still be measured,
+while an old high-RSSI observation cannot hold Beacon Loss at zero after that
+radio stops being heard.
+
 ## Snapshot model
 
 The immutable snapshot contains:
@@ -194,7 +261,9 @@ The immutable snapshot contains:
 - current and historical `SecondStats`;
 - current `BssidState` and `RetryBssidState` collections;
 - selected QBSS, station, and retry BSSIDs;
-- the rolling unique client-MAC count; and
+- rolling unique client-MAC counts for the channel and for each retained
+  BSSID, plus the analyzer-selected top count and its `qbss` or `mac` source;
+  and
 - `BeaconReceptionSnapshot` and `CompositionSnapshot` views of the selected
   strongest radio.
 
@@ -223,7 +292,9 @@ log directory. Screenshot capture does not change the active renderer or
 analyzer state.
 
 The Stations renderer overlays the advertised QBSS sum and per-second unique
-client-MAC series from that snapshot. It does not inspect frames itself.
+client-MAC series from that snapshot. Its `TOP` identity and count are also
+selected by the analyzer, with QBSS preferred over MAC discovery on an equal
+count. The renderer does not inspect frames itself.
 
 See [screens.md](screens.md) for exact metric and presentation behavior.
 

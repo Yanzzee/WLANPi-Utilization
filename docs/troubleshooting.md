@@ -73,18 +73,27 @@ runtime dependency; the `dev` extra adds pytest.
 
 ## `sudo: beacon-live: command not found`
 
-`sudo` may not preserve the activated virtual environment's `PATH`. Call the
-venv launcher explicitly:
+The normal FPMS installer creates both commands in `/usr/local/bin`. Rerun it
+after an application or FPMS upgrade, then inspect the launchers and their
+isolated targets:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+sudo ./scripts/install_wlanpi_fpms.sh
+command -v wlanpi-beacon-live beacon-live
+ls -l /usr/local/bin/wlanpi-beacon-live /usr/local/bin/beacon-live
+ls -l /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live \
+  /opt/wlanpi-beacon-live/bin/beacon-live
 ```
 
-or:
+If a custom `sudo` configuration omits `/usr/local/bin` from its secure PATH,
+use the absolute system launcher:
 
 ```bash
-sudo .venv/bin/python -m beacon_live.cli live --iface wlan0 --channel 36
+sudo /usr/local/bin/wlanpi-beacon-live --iface wlan0 --channel 36
 ```
+
+The `.venv/bin` commands are separate and are intended only for repository
+development.
 
 ## The Wi-Fi interface is missing
 
@@ -115,16 +124,58 @@ iw phy
 iw reg get
 ```
 
+For bonded capture, also inspect the actual definition:
+
+```bash
+iw dev wlan0 info
+```
+
+The default is fixed at 20 MHz on 2.4 GHz and 80 MHz on 5 GHz and 6 GHz. The
+application does not retune in response to beacon operation fields. If the
+default 80 MHz definition is unsupported or rejected, it warns and retries once
+at 20 MHz. An explicit override undergoes the same capability check and is not
+silently changed:
+
+```bash
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+  --channel-width 80 --center-frequency1-mhz 5210
+```
+
+The automatic 80 MHz center is the standard block containing the selected
+primary. For explicit non-default definitions, check the AP's HT/VHT/HE/EHT
+operation element and the regulatory/driver capability together.
+
+For 6 GHz PSC primaries that can belong to a full 80 MHz channel (the PSC
+sequence 5, 21, …, 213), automatic capture selects that PSC's unique standard
+80 MHz block. PSC 229 is at the upper band edge and has no complete standard
+80 MHz block inside 5925–7125 MHz, so automatic capture falls back to 20 MHz
+there.
+
+`Fixed capture has partial coverage` should appear only when a complete beacon
+operation definition is not contained by the actual fixed capture—for example,
+an AP advertises 160 MHz while the adapter is capturing only 80 MHz, or the
+advertised center conflicts with the configured block. Missing operation
+fields alone are not proof of partial coverage. When only the per-frame radio
+frequency is available, it is used to confirm the primary scope without
+showing this warning. Interactive CLI mode renders any confirmed warning in the
+managed footer so it cannot disrupt the curses layout.
+
+Normal live capture uses a 1024-byte snapshot length. A warning naming the BSSID
+and original length means a larger beacon was truncated and late information
+elements may be unavailable. Interactive CLI mode renders this warning in its
+managed footer so it does not corrupt the screen. Re-run with `--raw-pcapng`
+when a full-length diagnostic capture is needed.
+
 Use an explicit center frequency when testing 5 GHz or 6 GHz:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
 ```
 
 For band-qualified channel notation, 6 GHz channel 5 maps to 5975 MHz:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
+sudo wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
 ```
 
 Do not pass a frequency to `--channel`; `--channel 5975` means channel number
@@ -190,7 +241,7 @@ AP's advertised QBSS utilization.
 Enable diagnostics:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo wlanpi-beacon-live \
   --iface wlan0 --channel 36 --survey-debug
 ```
 
@@ -216,17 +267,47 @@ A blank retry sample means no eligible frame with a readable Retry bit was
 captured in that second. Beacons, group-addressed frames, control frames, and
 several management subtypes are intentionally excluded.
 
+`wlan.fc.retry.expert` in Wireshark is an expert label generated from the same
+Frame Control Retry bit as `wlan.fc.retry`; it is not a separate retry source.
+The live parser also reads the complete `wlan.fc` value as a fallback. For older
+TShark versions that do not expose the 6 GHz HE Operation primary-channel
+field, the capture's per-frame radio frequency provides the primary-scope
+fallback instead of excluding every frame from the denominator.
+
+Also inspect the data subtypes in the raw capture. A tested MT7921U could tune
+an 80 MHz 6 GHz definition and capture Null/QoS Null frames while omitting
+payload-bearing QoS Data seen by another capture device; the same adapter did
+capture payload-bearing data in 5 GHz. If direct Dumpcap has the same result,
+this is below the application capture path and should be treated as a possible
+adapter/driver/firmware limitation. Tuning success alone does not establish
+complete frame delivery.
+
 Use the offline retry audit to inspect numerator, denominator, and exclusion
 reasons:
 
 ```bash
-.venv/bin/beacon-live retry-debug \
+beacon-live retry-debug \
   --input /path/to/capture.pcapng \
   --output-csv /tmp/retry-audit.csv
 ```
 
 See [screens.md](screens.md#4-retries) and the detailed capture procedure in
 [pi_testing.md](pi_testing.md#capture-and-audit-retry-metrics).
+
+## Beacon received count briefly shows zero
+
+`BCN_REC` is not a count of every beacon on the channel. It is the number of
+phase-matched beacons received for BSSIDs grouped with the automatically
+selected strongest radio during that completed capture second. Other screens
+can still show RSSI, QBSS, or composition values from the latest beacon retained
+in the rolling window.
+
+A zero for one second means no beacon was assigned to the selected radio in
+that second. Strongest-radio eligibility lasts for that reporting second plus
+the 102.4 ms delayed-beacon allowance; after that, an inactive high-RSSI BSSID
+cannot keep the metric at zero while another radio is actively beaconing. If a
+zero persists, use the beacon JSONL timestamps and raw PCAPNG to distinguish a
+capture gap from best-effort radio grouping or missing decoded beacon rows.
 
 ## Logs are missing
 

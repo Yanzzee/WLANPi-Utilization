@@ -1,7 +1,9 @@
-"""Parsing helpers for legacy beacon and lightweight all-frame TShark output."""
+"""Parsing helpers for legacy and capability-negotiated TShark output."""
 
+from dataclasses import replace
 from typing import Iterable, Iterator, Optional, Union
 
+from beacon_live.channel import definition_from_operation_fields
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
@@ -40,6 +42,71 @@ TSHARK_FRAME_FIELD_NAMES = (
     "wlan.vs.extreme.ap_name",
     "wlan.vs.aerohive.hostname",
     "wlan.bssid_resolved",
+)
+
+# These fields are appended only when ``tshark -G fields`` reports them. This
+# lets one source tree work with the older TShark commonly installed on WLAN Pi
+# images while using HE/EHT and packet-audit data on newer versions.
+TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
+    "wlan.fc",
+    "wlan_radio.frequency",
+    "radiotap.channel.freq",
+    "wlan.ds.current_channel",
+    "wlan.ht.info.primarychannel",
+    "wlan.ht.info.secchanoffset",
+    "wlan.vht.op.channelwidth",
+    "wlan.vht.op.channelcenter0",
+    "wlan.vht.op.channelcenter1",
+    "wlan.ext_tag.he_operation.6ghz.primary_channel",
+    "wlan.ext_tag.he_operation.6ghz.control.channel_width",
+    "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_0",
+    "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_1",
+    "wlan.eht.eht_operation_information.control.channel_width",
+    "wlan.eht.eht_operation_information.ccfs0",
+    "wlan.eht.eht_operation_information.ccfs1",
+    "wlan.eht.eht_operation_information.disabled_subchannel_bitmap",
+    "frame.cap_len",
+    "frame.len",
+)
+
+TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES = (
+    "wlan_radio.phy",
+    "radiotap.mcs.bw",
+    "radiotap.vht.bw",
+    "radiotap.he.data_5.data_bw_ru_allocation",
+    "radiotap.he_mu.bw_from_sig_a",
+    "radiotap.u_sig.common.bw",
+    "radiotap.u_sig.value.mu_ppdu.punctured_channel_information",
+    "radiotap.flags.badfcs",
+    "wlan.fcs.status",
+    "wlan.seq",
+    "wlan.frag",
+    "wlan.qos.tid",
+    "radiotap.ampdu.reference",
+)
+
+TSHARK_OPTIONAL_FRAME_FIELD_NAMES = (
+    TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
+    + TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES
+)
+
+TSHARK_MULTI_VALUE_SEPARATOR = "|"
+
+_TSHARK_OCCURRENCE_FIELD_NAMES = frozenset(
+    {
+        "wlan.fc",
+        "wlan.fc.type",
+        "wlan.fc.subtype",
+        "wlan.fc.retry",
+        "wlan.bssid",
+        "wlan.ta",
+        "wlan.ra",
+        "wlan.sa",
+        "wlan.da",
+        "wlan.seq",
+        "wlan.frag",
+        "wlan.qos.tid",
+    }
 )
 
 EXPECTED_TSHARK_FRAME_FIELD_COUNT = len(TSHARK_FRAME_FIELD_NAMES)
@@ -121,13 +188,24 @@ def parse_tshark_rows(rows: Iterable[str]) -> Iterator[BeaconRecord]:
             yield record
 
 
-def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
+def parse_tshark_frame_row(
+    row: str,
+    *,
+    field_names: Optional[tuple[str, ...]] = None,
+    band: Optional[str] = None,
+) -> Optional[FrameRecord]:
     """Parse one lightweight all-frame TShark row for live analysis."""
     line = row.rstrip("\r\n")
     if not line:
         return None
 
     fields = line.split("\t")
+    if (
+        field_names is not None
+        and tuple(field_names) != TSHARK_FRAME_FIELD_NAMES
+        and len(fields) == len(field_names)
+    ):
+        return _parse_named_tshark_frame_fields(fields, field_names, band=band)
     if len(fields) not in (
         LEGACY_TSHARK_FRAME_FIELD_COUNT,
         PHASE_THREE_TSHARK_FRAME_FIELD_COUNT,
@@ -301,9 +379,181 @@ def parse_tshark_frame_row(row: str) -> Optional[FrameRecord]:
 
 def parse_tshark_frame_rows(rows: Iterable[str]) -> Iterator[FrameRecord]:
     for row in rows:
-        record = parse_tshark_frame_row(row)
+        yield from parse_tshark_capture_record(row)
+
+
+def parse_tshark_capture_record(
+    row: str,
+    *,
+    field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
+    band: Optional[str] = None,
+) -> tuple[FrameRecord, ...]:
+    """Expand every decoded WLAN MPDU occurrence in one capture record.
+
+    Monitor drivers normally deliver each A-MPDU member as its own capture
+    record. If a dissector does expose several WLAN headers in one record,
+    ``occurrence=a`` produces aligned values and this function emits one
+    normalized frame for each instead of silently discarding later Retry bits.
+    """
+    line = row.rstrip("\r\n")
+    if not line:
+        return ()
+    fields = line.split("\t")
+    if len(fields) != len(field_names):
+        legacy = parse_tshark_frame_row(row)
+        return (legacy,) if legacy is not None else ()
+
+    # The overwhelmingly common case is one decoded WLAN header. Avoid
+    # splitting, rebuilding, and reparsing the row solely to discover that it
+    # has one occurrence.
+    if not any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        return (record,) if record is not None else ()
+
+    split_fields = [value.split(TSHARK_MULTI_VALUE_SEPARATOR) for value in fields]
+    occurrence_count = max(
+        (
+            len(values)
+            for name, values in zip(field_names, split_fields)
+            if name in _TSHARK_OCCURRENCE_FIELD_NAMES
+        ),
+        default=1,
+    )
+    records: list[FrameRecord] = []
+    for index in range(occurrence_count):
+        expanded = []
+        for name, values in zip(field_names, split_fields):
+            if name not in _TSHARK_OCCURRENCE_FIELD_NAMES:
+                # Radiotap can expose one signal value per antenna. Those are
+                # properties of the outer capture record, not extra MPDUs.
+                # Preserve occurrence=f behavior for scalar fields so a
+                # multi-antenna RSSI never turns into an empty value.
+                expanded.append(values[0])
+            elif len(values) == occurrence_count:
+                expanded.append(values[index])
+            elif len(values) == 1:
+                expanded.append(values[0])
+            else:
+                expanded.append("")
+        record = _parse_named_tshark_frame_fields(
+            expanded,
+            field_names,
+            band=band,
+        )
         if record is not None:
-            yield record
+            records.append(record)
+    return tuple(records)
+
+
+def _parse_named_tshark_frame_fields(
+    fields: list[str],
+    field_names: tuple[str, ...],
+    *,
+    band: Optional[str],
+) -> Optional[FrameRecord]:
+    values = dict(zip(field_names, fields))
+    core_row = "\t".join(values.get(name, "") for name in TSHARK_FRAME_FIELD_NAMES)
+    record = parse_tshark_frame_row(core_row)
+    if record is None or record.frame_type is None:
+        return None
+
+    integers: dict[str, Optional[int]] = {}
+    for name in TSHARK_OPTIONAL_FRAME_FIELD_NAMES:
+        if name not in values:
+            continue
+        parsed = _parse_optional_int(values[name], minimum=0)
+        if parsed is _MALFORMED:
+            return None
+        integers[name] = parsed
+
+    radio_frequency = (
+        integers.get("wlan_radio.frequency")
+        or integers.get("radiotap.channel.freq")
+    )
+    resolved_band = band or _band_from_frequency(radio_frequency)
+    definition = None
+    if record.is_beacon and resolved_band is not None:
+        definition = definition_from_operation_fields(
+            band=resolved_band,
+            fallback_primary_frequency_mhz=radio_frequency,
+            ds_primary_channel=integers.get("wlan.ds.current_channel"),
+            ht_primary_channel=integers.get("wlan.ht.info.primarychannel"),
+            ht_secondary_offset=integers.get("wlan.ht.info.secchanoffset"),
+            vht_width=integers.get("wlan.vht.op.channelwidth"),
+            vht_center0=integers.get("wlan.vht.op.channelcenter0"),
+            vht_center1=integers.get("wlan.vht.op.channelcenter1"),
+            he_primary_channel=integers.get(
+                "wlan.ext_tag.he_operation.6ghz.primary_channel"
+            ),
+            he_width=integers.get(
+                "wlan.ext_tag.he_operation.6ghz.control.channel_width"
+            ),
+            he_center0=integers.get(
+                "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_0"
+            ),
+            he_center1=integers.get(
+                "wlan.ext_tag.he_operation.6ghz.chan_center_freq_seg_1"
+            ),
+            eht_width=integers.get(
+                "wlan.eht.eht_operation_information.control.channel_width"
+            ),
+            eht_center0=integers.get(
+                "wlan.eht.eht_operation_information.ccfs0"
+            ),
+            eht_center1=integers.get(
+                "wlan.eht.eht_operation_information.ccfs1"
+            ),
+            puncturing_bitmap=integers.get(
+                "wlan.eht.eht_operation_information.disabled_subchannel_bitmap"
+            ),
+        )
+
+    phy_bandwidth_parts = tuple(
+        f"{name}={values[name]}"
+        for name in (
+            "wlan_radio.phy",
+            "radiotap.mcs.bw",
+            "radiotap.vht.bw",
+            "radiotap.he.data_5.data_bw_ru_allocation",
+            "radiotap.he_mu.bw_from_sig_a",
+            "radiotap.u_sig.common.bw",
+            "radiotap.u_sig.value.mu_ppdu.punctured_channel_information",
+        )
+        if values.get(name, "")
+    )
+    retry_flag = record.retry_flag
+    frame_control = integers.get("wlan.fc")
+    if retry_flag is None and frame_control is not None:
+        # Wireshark renders wlan.fc in wire order: the first octet (type and
+        # subtype) is the high byte and the second, flags octet is the low
+        # byte. Retry is bit 3 of that low byte.
+        retry_flag = bool(frame_control & 0x0008)
+    return replace(
+        record,
+        retry_flag=retry_flag,
+        channel_definition=definition,
+        captured_length=integers.get("frame.cap_len"),
+        original_length=integers.get("frame.len"),
+        radio_frequency_mhz=radio_frequency,
+        phy_bandwidth=(";".join(phy_bandwidth_parts) or None),
+        fcs_status=integers.get("wlan.fcs.status"),
+        sequence_number=integers.get("wlan.seq"),
+        fragment_number=integers.get("wlan.frag"),
+        qos_tid=integers.get("wlan.qos.tid"),
+        ampdu_reference=integers.get("radiotap.ampdu.reference"),
+    )
+
+
+def _band_from_frequency(frequency_mhz: Optional[int]) -> Optional[str]:
+    if frequency_mhz is None:
+        return None
+    if 2400 <= frequency_mhz <= 2500:
+        return "2.4"
+    if 5000 < frequency_mhz < 5925:
+        return "5"
+    if 5925 <= frequency_mhz <= 7125:
+        return "6"
+    return None
 
 
 class _Malformed:
@@ -374,7 +624,7 @@ def _parse_optional_int(
         return None
 
     try:
-        parsed = int(text)
+        parsed = int(text, 16) if text.lower().startswith("0x") else int(text)
     except ValueError:
         return _MALFORMED
 

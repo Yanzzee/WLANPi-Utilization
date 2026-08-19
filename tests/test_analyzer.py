@@ -6,8 +6,47 @@ import pytest
 from beacon_live.analyzer import Analyzer
 from beacon_live.analyzer import _beacon_reception_counts
 from beacon_live.analyzer import select_bssid
+from beacon_live.channel import ChannelDefinition
+from beacon_live.channel import ChannelWidth
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
+
+
+def test_future_beacons_do_not_recompute_completed_frame_projections() -> None:
+    analyzer = Analyzer(target_primary_frequency_mhz=5180)
+
+    def beacon(timestamp: float) -> FrameRecord:
+        return FrameRecord(
+            timestamp=timestamp,
+            bssid="aa:aa:aa:aa:aa:aa",
+            frame_type=0,
+            frame_subtype=8,
+            retry_flag=False,
+            receiver_address="ff:ff:ff:ff:ff:ff",
+            channel_definition=ChannelDefinition(
+                5180,
+                ChannelWidth.MHZ80,
+                5210,
+                primary_channel=36,
+            ),
+        )
+
+    analyzer.ingest(beacon(1000.0), publish_snapshot=False)
+    analyzer.ingest(
+        _frame(
+            1000.2,
+            "aa:aa:aa:aa:aa:aa",
+            retry=True,
+            receiver_address="00:11:22:33:44:55",
+        ),
+        publish_snapshot=False,
+    )
+    analyzer.ingest(beacon(1001.2), publish_snapshot=False)
+    original = analyzer._frame_projections_by_second[1000][1]
+
+    analyzer.ingest(beacon(1002.4), publish_snapshot=False)
+
+    assert analyzer._frame_projections_by_second[1000][1] is original
 
 
 def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:
@@ -130,6 +169,83 @@ def test_top_station_bssid_does_not_use_rssi_as_a_tie_breaker() -> None:
     assert analyzer.snapshot.top_station_bssid == "aa"
 
 
+def test_top_station_uses_per_bssid_observed_clients_when_count_is_higher() -> None:
+    qbss_bssid = "02:00:00:00:00:01"
+    mac_bssid = "02:00:00:00:00:02"
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.0,
+            bssid=qbss_bssid,
+            ssid="QBSS winner",
+            station_count=4,
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.1,
+            bssid=mac_bssid,
+            ssid="MAC winner",
+            station_count=1,
+        )
+    )
+    for index in range(5):
+        analyzer.ingest(
+            _client_data_frame(
+                1000.2 + index / 100,
+                mac_bssid,
+                f"02:00:00:00:10:{index + 1:02x}",
+                from_ap=False,
+            )
+        )
+    analyzer.flush()
+
+    mac_state = analyzer.snapshot.state_for(mac_bssid)
+    assert mac_state is not None
+    assert mac_state.window_unique_client_mac_count == 5
+    assert analyzer.snapshot.top_station_bssid == mac_bssid
+    assert analyzer.snapshot.top_station_count == 5
+    assert analyzer.snapshot.top_station_source == "mac"
+    assert analyzer.snapshot.current.top_station_ssid == "MAC winner"
+    assert analyzer.snapshot.history[-1].top_station_bssid == mac_bssid
+
+
+def test_top_station_prefers_qbss_over_observed_clients_on_equal_count() -> None:
+    qbss_bssid = "02:00:00:00:00:02"
+    mac_bssid = "02:00:00:00:00:01"
+    analyzer = Analyzer()
+    analyzer.ingest(
+        _record(
+            1000.0,
+            bssid=qbss_bssid,
+            ssid="QBSS tie winner",
+            station_count=5,
+        )
+    )
+    analyzer.ingest(
+        _record(
+            1000.1,
+            bssid=mac_bssid,
+            ssid="MAC tie loser",
+            station_count=1,
+        )
+    )
+    for index in range(5):
+        analyzer.ingest(
+            _client_data_frame(
+                1000.2 + index / 100,
+                mac_bssid,
+                f"02:00:00:00:10:{index + 1:02x}",
+                from_ap=False,
+            )
+        )
+
+    assert analyzer.snapshot.top_station_bssid == qbss_bssid
+    assert analyzer.snapshot.top_station_count == 5
+    assert analyzer.snapshot.top_station_source == "qbss"
+    assert analyzer.snapshot.current.top_station_ssid == "QBSS tie winner"
+
+
 def test_snapshot_contains_read_only_cu_screen_state_and_history() -> None:
     analyzer = Analyzer()
     analyzer.ingest(
@@ -236,27 +352,56 @@ def test_composition_snapshot_selects_strongest_radio_and_rotates_members() -> N
     assert first.strongest_radio_bssid_count == 2
     assert first.strongest_radio_ap_name == "Room-101"
     assert first.strongest_radio_vendor == "Example Wireless"
+    assert first.strongest_radio_station_count_sum == 6
     assert first.displayed_ssid == "Alpha"
     assert first.displayed_bssid == "00:11:22:33:44:50"
     assert first.displayed_rssi_dbm == -35
 
+    def refresh_strongest_radio(second: int) -> None:
+        analyzer.ingest(
+            _record(
+                second + 0.1,
+                bssid="00:11:22:33:44:50",
+                ssid="Alpha",
+                station_count=4,
+                rssi_dbm=-35,
+                ap_name="Room-101",
+                vendor="Example Wireless",
+            )
+        )
+        analyzer.ingest(
+            _record(
+                second + 0.2,
+                bssid="00:11:22:33:44:51",
+                ssid=None,
+                station_count=2,
+                rssi_dbm=-37,
+                ap_name="Room-101",
+                vendor="Example Wireless",
+            )
+        )
+
+    refresh_strongest_radio(1001)
     analyzer.advance(1002, None)
     one_second_later = analyzer.snapshot.composition
     assert one_second_later.displayed_ssid == "Alpha"
     assert one_second_later.displayed_bssid == "00:11:22:33:44:50"
 
+    refresh_strongest_radio(1002)
     analyzer.advance(1003, None)
     two_seconds_later = analyzer.snapshot.composition
     assert two_seconds_later.displayed_ssid is None
     assert two_seconds_later.displayed_bssid == "00:11:22:33:44:51"
     assert two_seconds_later.displayed_rssi_dbm == -37
 
+    refresh_strongest_radio(1003)
     analyzer.advance(1004, None)
     assert (
         analyzer.snapshot.composition.displayed_bssid
         == "00:11:22:33:44:51"
     )
 
+    refresh_strongest_radio(1004)
     analyzer.advance(1005, None)
     assert (
         analyzer.snapshot.composition.displayed_bssid
@@ -337,7 +482,8 @@ def test_retry_samples_use_independent_one_second_windows() -> None:
     retry_state = analyzer.snapshot.retry_state_for("aa")
     assert retry_state is not None
     assert retry_state.window_retry_percent == 0.0
-    assert [row.second for row in analyzer.snapshot.history] == [1002]
+    assert [row.second for row in analyzer.snapshot.history] == [1001, 1002]
+    assert analyzer.snapshot.history[0].retry_percent is None
 
 
 def test_capture_publication_waits_until_all_rows_for_second_are_ingested() -> None:
@@ -374,6 +520,23 @@ def test_capture_publication_waits_until_all_rows_for_second_are_ingested() -> N
     assert published[0].retry_percent == pytest.approx(50.0)
     assert analyzer.snapshot.current.second == 1000
     assert analyzer.snapshot.current.retry_percent == pytest.approx(50.0)
+
+
+def test_capture_gaps_publish_explicit_evenly_spaced_zero_frame_samples() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(_frame(1000.2, "aa", retry=False), publish_snapshot=False)
+    analyzer.ingest(_frame(1003.2, "aa", retry=True), publish_snapshot=False)
+
+    published = analyzer.publish_capture_complete(None)
+
+    assert [row.second for row in published] == [1000, 1001, 1002]
+    assert published[0].received_frame_count == 1
+    for row in published[1:]:
+        assert row.received_frame_count == 0
+        assert row.retry_eligible_frame_count == 0
+        assert row.retry_percent is None
+        assert row.selected_qbss_cu_percent is None
+    assert [row.second for row in analyzer.snapshot.history] == [1000, 1001, 1002]
 
 
 def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:
@@ -459,6 +622,86 @@ def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop()
         interval_start=1001.0,
         interval_end=1002.0,
     ) == (10, 10)
+
+
+def test_missed_and_delayed_beacon_do_not_shift_later_tbtt_count() -> None:
+    interval = 0.1024
+    timestamps = []
+    for slot in range(23):
+        if slot == 5:
+            continue
+        timestamp = 999.95 + slot * interval
+        if slot == 8:
+            timestamp += 0.05
+        timestamps.append(timestamp)
+
+    assert _beacon_reception_counts(
+        tuple(timestamps),
+        interval_start=1000.0,
+        interval_end=1001.0,
+    ) == (9, 10)
+    assert _beacon_reception_counts(
+        tuple(timestamps),
+        interval_start=1001.0,
+        interval_end=1002.0,
+    ) == (10, 10)
+
+
+def test_inactive_strongest_radio_cannot_pin_beacon_received_at_zero() -> None:
+    analyzer = Analyzer()
+    stale_bssid = "00:11:22:33:44:50"
+    active_bssid = "00:11:23:33:44:50"
+    records = [
+        _radio_beacon(
+            1000.05,
+            stale_bssid,
+            "Transient",
+            -20,
+            "Room-101",
+        )
+    ]
+    records.extend(
+        _radio_beacon(
+            1000.02 + slot * 0.1024,
+            active_bssid,
+            "Active",
+            -40,
+            "Room-202",
+        )
+        for slot in range(35)
+    )
+
+    for record in sorted(records, key=lambda item: item.timestamp):
+        analyzer.ingest(record, publish_snapshot=False)
+    analyzer.flush()
+
+    history = {row.second: row for row in analyzer.snapshot.history}
+    assert history[1001].beacon_received_count > 0
+    assert history[1001].beacon_expected_count in (9, 10)
+    assert analyzer.snapshot.beacons.strongest_radio_bssids == (active_bssid,)
+    assert analyzer.snapshot.beacons.received_count > 0
+
+
+def test_strongest_radio_stays_eligible_for_one_completely_missed_second() -> None:
+    analyzer = Analyzer()
+    bssid = "00:11:22:33:44:50"
+    analyzer.ingest(
+        _radio_beacon(1000.95, bssid, "Alpha", -20, "Room-101"),
+        publish_snapshot=False,
+    )
+    for timestamp in (1001.5, 1002.5, 1003.2):
+        analyzer.ingest(
+            _frame(timestamp, bssid, retry=False),
+            publish_snapshot=False,
+        )
+    analyzer.flush()
+
+    history = {row.second: row for row in analyzer.snapshot.history}
+    assert history[1001].beacon_received_count == 0
+    assert history[1001].beacon_expected_count == 10
+    assert history[1001].beacon_loss_percent == 100.0
+    assert history[1002].beacon_expected_count == 0
+    assert history[1002].beacon_loss_percent is None
 
 
 def test_beacon_delayed_across_second_boundary_is_credited_within_grace() -> None:

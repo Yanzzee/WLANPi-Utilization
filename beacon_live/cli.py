@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from beacon_live.aggregator import aggregate_records
+from beacon_live.channel import parse_channel_width
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
 from beacon_live.parser import parse_tshark_row
@@ -27,6 +28,7 @@ from beacon_live.retry_debug import RetryDebugCommandError
 from beacon_live.retry_debug import analyze_retry_frames
 from beacon_live.retry_debug import read_retry_debug_capture
 from beacon_live.retry_debug import write_retry_audit_csv
+from beacon_live.retry_debug import write_retry_frame_audit_csv
 from beacon_live.survey import (
     compute_local_cu_percent_from_samples,
     parse_survey_dump,
@@ -87,12 +89,27 @@ def _run_live_command(
             f"{command_prefix}accepts --frequency-mhz or --band/--channel, "
             "not both"
         )
+    if args.channel_width == "auto" and (
+        args.center_frequency1_mhz is not None
+        or args.center_frequency2_mhz is not None
+    ):
+        parser.error(
+            f"{command_prefix}center-frequency overrides require an explicit "
+            "--channel-width"
+        )
     if args.logging_only and args.lcd_frame is not None:
         parser.error(
             f"{command_prefix}--logging-only cannot be combined with --lcd-frame"
         )
-    write_stats_csv = args.stats_csv or args.logging_only
-    write_beacons_jsonl = args.beacons_jsonl or args.logging_only
+    if args.logging_only and args.log:
+        parser.error(
+            f"{command_prefix}--logging-only cannot be combined with "
+            "--log"
+        )
+    write_stats_csv = args.stats_csv or args.logging_only or args.log
+    write_beacons_jsonl = (
+        args.beacons_jsonl or args.logging_only or args.log
+    )
     log_paths = build_live_log_paths(
         args.log_dir,
         write_stats_csv=write_stats_csv,
@@ -112,6 +129,14 @@ def _run_live_command(
         )
         if args.lcd_frame is not None:
             live_options["lcd_frame"] = args.lcd_frame
+        if args.channel_width != "auto":
+            live_options["channel_width"] = parse_channel_width(args.channel_width)
+        if args.center_frequency1_mhz is not None:
+            live_options["center_frequency1_mhz"] = args.center_frequency1_mhz
+        if args.center_frequency2_mhz is not None:
+            live_options["center_frequency2_mhz"] = args.center_frequency2_mhz
+        if args.raw_pcapng is not None:
+            live_options["raw_capture_path"] = args.raw_pcapng
         if args.logging_only:
             live_options["logging_only"] = True
         if args.logging_control is not None:
@@ -213,6 +238,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Monitor-mode PCAP or PCAPNG file to analyze with TShark.",
     )
     retry_debug.add_argument(
+        "--target-frequency-mhz",
+        type=int,
+        help=(
+            "Limit retry numerator/denominator to BSSIDs with a fresh beacon "
+            "advertising this primary frequency."
+        ),
+    )
+    retry_debug.add_argument(
+        "--channel-definition-max-age-seconds",
+        type=float,
+        default=10.0,
+        help="Maximum age of a BSSID channel definition. Default: 10.",
+    )
+    retry_debug.add_argument(
+        "--frames-csv",
+        type=Path,
+        help="Write packet-level PHY/MAC/retry fields for manual comparison.",
+    )
+    retry_debug.add_argument(
         "--output-csv",
         required=False,
         type=Path,
@@ -231,13 +275,16 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--channel",
         default="36",
-        help="Channel number to tune with HT20. Default: 36.",
+        help="Primary channel number to monitor. Default: 36.",
     )
     parser.add_argument(
         "--frequency-mhz",
         required=False,
         type=int,
-        help="Explicit center frequency in MHz, for example 5975 for 6 GHz PSC channel 5.",
+        help=(
+            "Explicit primary/control frequency in MHz, for example 5975 "
+            "for 6 GHz PSC channel 5."
+        ),
     )
     parser.add_argument(
         "--band",
@@ -246,6 +293,33 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Band used to map --channel to frequency. Use 6 with --channel 5 "
             "for 5975 MHz."
+        ),
+    )
+    parser.add_argument(
+        "--channel-width",
+        default="auto",
+        choices=("auto", "20", "40", "80", "160", "80+80", "320"),
+        help=(
+            "Capture width. Default: auto, meaning fixed 20 MHz on 2.4 GHz "
+            "and fixed 80 MHz on 5/6 GHz."
+        ),
+    )
+    parser.add_argument(
+        "--center-frequency1-mhz",
+        type=int,
+        help="Explicit center frequency 1; required for explicit widths above 20 MHz.",
+    )
+    parser.add_argument(
+        "--center-frequency2-mhz",
+        type=int,
+        help="Explicit center frequency 2 for 80+80 MHz.",
+    )
+    parser.add_argument(
+        "--raw-pcapng",
+        type=Path,
+        help=(
+            "Save full packets from the exact TShark process used by live "
+            "analysis, plus a .json diagnostic sidecar."
         ),
     )
     parser.add_argument(
@@ -295,6 +369,14 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Capture and write both log formats without rendering a terminal "
             "or LCD display."
+        ),
+    )
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        help=(
+            "Render the live display while writing both CSV and JSONL log "
+            "formats."
         ),
     )
     parser.add_argument(
@@ -413,7 +495,19 @@ def _run_retry_debug_command(args: argparse.Namespace) -> int:
             print(exc.stderr, file=sys.stderr)
         return 1
 
-    rows = analyze_retry_frames(capture.frames)
+    if args.channel_definition_max_age_seconds <= 0:
+        print(
+            "--channel-definition-max-age-seconds must be greater than zero",
+            file=sys.stderr,
+        )
+        return 2
+    rows = analyze_retry_frames(
+        capture.frames,
+        target_primary_frequency_mhz=args.target_frequency_mhz,
+        channel_definition_max_age_seconds=(
+            args.channel_definition_max_age_seconds
+        ),
+    )
     if args.output_csv is None:
         write_retry_audit_csv(rows, sys.stdout)
     else:
@@ -421,6 +515,12 @@ def _run_retry_debug_command(args: argparse.Namespace) -> int:
         with args.output_csv.open("w", encoding="utf-8", newline="") as output:
             write_retry_audit_csv(rows, output)
         print(f"Retry audit CSV: {args.output_csv}", file=sys.stderr)
+
+    if args.frames_csv is not None:
+        args.frames_csv.parent.mkdir(parents=True, exist_ok=True)
+        with args.frames_csv.open("w", encoding="utf-8", newline="") as output:
+            write_retry_frame_audit_csv(capture.frames, output)
+        print(f"Retry frame CSV: {args.frames_csv}", file=sys.stderr)
 
     channel_seconds = sum(row.scope == "channel" for row in rows)
     print(
@@ -524,6 +624,10 @@ def _format_header() -> str:
             "unique_bssids",
             "qbss_station_sum",
             "unique_client_macs",
+            "top_station_count",
+            "top_station_source",
+            "top_station_ssid",
+            "top_station_bssid",
             "selected_qbss_cu",
             "selected_qbss_ssid",
             "selected_qbss_bssid",
@@ -540,6 +644,10 @@ def _format_stats(stats: SecondStats) -> str:
             str(stats.unique_bssid_count),
             str(stats.qbss_station_count_sum),
             str(stats.unique_client_mac_count),
+            _format_optional_int(stats.top_station_count),
+            stats.top_station_source or "",
+            stats.top_station_ssid or "",
+            stats.top_station_bssid or "",
             _format_optional_float(stats.selected_qbss_cu_percent),
             stats.selected_qbss_ssid or "",
             stats.selected_qbss_bssid or "",

@@ -12,6 +12,7 @@ from beacon_live.log_writer import LOW_DISK_END_MESSAGE
 from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import LoggingEvent
 from beacon_live.log_writer import LoggingService
+from beacon_live.log_writer import STATS_CSV_FIELDS
 from beacon_live.log_writer import build_live_log_paths
 from beacon_live.models import BeaconRecord
 from beacon_live.models import SecondStats
@@ -43,6 +44,19 @@ def test_live_log_paths_use_generated_timestamped_filenames() -> None:
     )
 
 
+def test_logging_reference_documents_every_stats_csv_field() -> None:
+    reference = (
+        Path(__file__).parents[1] / "docs" / "logging.md"
+    ).read_text(encoding="utf-8")
+
+    field_positions = []
+    for field in STATS_CSV_FIELDS:
+        marker = f"| `{field}` |"
+        assert marker in reference
+        field_positions.append(reference.index(marker))
+    assert field_positions == sorted(field_positions)
+
+
 def test_capture_log_writer_creates_directories_and_flushes_rows(
     tmp_path: Path,
 ) -> None:
@@ -69,6 +83,10 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
         unique_bssid_count=1,
         qbss_station_count_sum=3,
         unique_client_mac_count=2,
+        top_station_count=4,
+        top_station_source="mac",
+        top_station_ssid="Observed AP",
+        top_station_bssid="aa:bb:cc:dd:ee:00",
         selected_qbss_cu_percent=128 / 255 * 100,
         selected_qbss_ssid="Test AP",
         selected_qbss_bssid="aa:bb:cc:dd:ee:ff",
@@ -114,6 +132,10 @@ def test_capture_log_writer_creates_directories_and_flushes_rows(
     assert stats_rows[0]["selected_qbss_bssid"] == "aa:bb:cc:dd:ee:ff"
     assert stats_rows[0]["selected_qbss_rssi_dbm"] == "-47"
     assert stats_rows[0]["unique_client_mac_count"] == "2"
+    assert stats_rows[0]["top_station_count"] == "4"
+    assert stats_rows[0]["top_station_source"] == "mac"
+    assert stats_rows[0]["top_station_ssid"] == "Observed AP"
+    assert stats_rows[0]["top_station_bssid"] == "aa:bb:cc:dd:ee:00"
     assert stats_rows[0]["beacon_received_count"] == "19"
     assert stats_rows[0]["beacon_expected_count"] == "20"
     assert stats_rows[0]["beacon_loss_percent"] == "5.00"
