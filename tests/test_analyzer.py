@@ -49,6 +49,33 @@ def test_future_beacons_do_not_recompute_completed_frame_projections() -> None:
     assert analyzer._frame_projections_by_second[1000][1] is original
 
 
+def test_rolling_store_keeps_compact_canonical_frame_inputs() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.1,
+            bssid="AA:BB:CC:DD:EE:FF",
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=False,
+            transmitter_address="00:11:22:33:44:55",
+            receiver_address="AA:BB:CC:DD:EE:FF",
+            source_address="00:11:22:33:44:55",
+            destination_address="AA:BB:CC:DD:EE:FF",
+            phy_bandwidth="diagnostic-value-not-needed-by-rolling-analysis",
+        ),
+        publish_snapshot=False,
+    )
+
+    retained = analyzer._frames_by_second[1000][0][2]
+    assert not isinstance(retained, FrameRecord)
+    assert not hasattr(retained, "__dict__")
+    assert retained.bssid == "aa:bb:cc:dd:ee:ff"
+    assert retained.bssid is retained.receiver_address
+    assert retained.transmitter_address is retained.source_address
+    assert not hasattr(retained, "phy_bandwidth")
+
+
 def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:
     analyzer = Analyzer()
 

@@ -8,6 +8,7 @@ import re
 import selectors
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from concurrent.futures import Future
@@ -61,6 +62,9 @@ SUPPORTED_BANDS = {"2.4", "5", "6"}
 LOGGING_CONTROL_POLL_SECONDS = 0.5
 CHANNEL_DEFINITION_MAX_AGE_SECONDS = 10.0
 SURVEY_COMMAND_TIMEOUT_SECONDS = 2.0
+TSHARK_READ_BUDGET_BYTES = 256 * 1024
+TSHARK_PROCESS_BATCH_ROWS = 256
+TSHARK_STDERR_TAIL_BYTES = 64 * 1024
 DEFAULT_5_GHZ_80MHZ_CENTER_CHANNELS = (42, 58, 106, 122, 138, 155, 171)
 DEFAULT_6_GHZ_80MHZ_CENTER_CHANNELS = tuple(range(7, 216, 16))
 
@@ -156,6 +160,10 @@ class TsharkLineReader:
         return bool(self._lines)
 
     @property
+    def queued_line_count(self) -> int:
+        return len(self._lines)
+
+    @property
     def exhausted(self) -> bool:
         return self._eof and not self._lines
 
@@ -164,8 +172,16 @@ class TsharkLineReader:
             return None
         return self._lines.popleft()
 
-    def read_ready(self) -> None:
-        """Read until EAGAIN, then expose every complete decoded output row."""
+    def read_ready(self, *, byte_budget: int = TSHARK_READ_BUDGET_BYTES) -> None:
+        """Read one bounded batch and expose its complete decoded rows.
+
+        A busy producer can keep a nonblocking pipe readable indefinitely.
+        Bounding each turn ensures dashboard, logging, and survey deadlines
+        are serviced instead of draining stdout into an unbounded user-space
+        queue.
+        """
+        if byte_budget <= 0:
+            raise ValueError("byte_budget must be greater than zero")
         if self._eof:
             return
         if self._fd is None:
@@ -178,9 +194,13 @@ class TsharkLineReader:
             self._lines.append(value.rstrip("\r\n"))
             return
 
-        while True:
+        bytes_read = 0
+        while bytes_read < byte_budget:
             try:
-                chunk = os.read(self._fd, 64 * 1024)
+                chunk = os.read(
+                    self._fd,
+                    min(64 * 1024, byte_budget - bytes_read),
+                )
             except BlockingIOError:
                 break
             except InterruptedError:
@@ -189,19 +209,68 @@ class TsharkLineReader:
                 self._eof = True
                 break
             self._buffer.extend(chunk)
+            bytes_read += len(chunk)
 
-        while True:
-            newline = self._buffer.find(b"\n")
-            if newline < 0:
-                break
-            line = bytes(self._buffer[:newline])
-            del self._buffer[: newline + 1]
-            self._lines.append(
+        last_newline = self._buffer.rfind(b"\n")
+        if last_newline >= 0:
+            complete = bytes(self._buffer[: last_newline + 1])
+            del self._buffer[: last_newline + 1]
+            self._lines.extend(
                 line.rstrip(b"\r").decode("utf-8", errors="replace")
+                for line in complete.split(b"\n")[:-1]
             )
         if self._eof and self._buffer:
             self._lines.append(bytes(self._buffer).decode("utf-8", errors="replace"))
             self._buffer.clear()
+
+
+class BoundedStderrCollector:
+    """Continuously drain a child stderr pipe while retaining a bounded tail."""
+
+    def __init__(
+        self,
+        fileobj: object,
+        *,
+        max_bytes: int = TSHARK_STDERR_TAIL_BYTES,
+    ) -> None:
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be greater than zero")
+        self._fileobj = fileobj
+        self._max_bytes = max_bytes
+        self._tail = bytearray()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._run,
+            name="beacon-live-tshark-stderr",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def finish(self, *, timeout_seconds: float = 1.0) -> str:
+        self._thread.join(timeout=timeout_seconds)
+        with self._lock:
+            return bytes(self._tail).decode("utf-8", errors="replace").strip()
+
+    def _run(self) -> None:
+        while True:
+            try:
+                value = self._fileobj.read(8 * 1024)  # type: ignore[attr-defined]
+            except (OSError, ValueError):
+                return
+            if value in (b"", ""):
+                return
+            chunk = (
+                value.encode("utf-8", errors="replace")
+                if isinstance(value, str)
+                else value
+            )
+            with self._lock:
+                self._tail.extend(chunk)
+                overflow = len(self._tail) - self._max_bytes
+                if overflow > 0:
+                    del self._tail[:overflow]
 
 
 def channel_to_frequency_mhz(channel: str, band: str) -> int:
@@ -743,6 +812,45 @@ def update_fixed_capture_coverage(
     )
 
 
+def prune_fixed_capture_coverage(
+    coverage: CoverageDecision,
+    *,
+    active_bssids: set[str],
+    fallback_reason: Optional[str],
+    actual_verified: bool,
+) -> CoverageDecision:
+    """Limit best-effort coverage identity state to currently active BSSIDs."""
+    covered = tuple(
+        bssid for bssid in coverage.covered_bssids if bssid in active_bssids
+    )
+    partial = tuple(
+        bssid for bssid in coverage.partial_bssids if bssid in active_bssids
+    )
+    status = (
+        "fallback"
+        if fallback_reason is not None
+        else "unverified"
+        if not actual_verified
+        else "partial"
+        if partial
+        else "complete"
+    )
+    warning = (
+        fallback_reason
+        if status == "fallback"
+        else coverage.warning
+        if partial
+        else None
+    )
+    return CoverageDecision(
+        coverage.requested,
+        tuple(sorted(covered)),
+        tuple(sorted(partial)),
+        status,
+        warning,
+    )
+
+
 def _read_radio_capabilities_safely(iface: str) -> RadioCapabilities:
     try:
         return read_radio_capabilities(iface)
@@ -801,6 +909,8 @@ def run_live(
     rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
     _dashboard: Optional[LiveDashboard] = None,
 ) -> int:
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be greater than zero")
     if logging_only and stats_csv is None and beacons_jsonl is None:
         raise ValueError("logging-only mode requires at least one log format")
     local_cu = local_cu or survey_debug
@@ -1066,10 +1176,17 @@ def run_live(
         field_names=tshark_fields,
         raw_capture_path=raw_capture_path,
     )
+    stderr_collector: Optional[BoundedStderrCollector] = None
+    if process.stderr is not None:
+        stderr_collector = BoundedStderrCollector(process.stderr)
+        stderr_collector.start()
+    tshark_stderr_text = ""
     selector = selectors.DefaultSelector()
     startup_filter = LiveStartupFilter()
     warned_truncated_beacons: set[str] = set()
     warned_partial_bssids: set[str] = set()
+    bssid_last_seen: dict[str, float] = {}
+    last_bssid_prune_second: Optional[int] = None
     capture_record_count = 0
     normalized_frame_count = 0
     malformed_capture_record_count = 0
@@ -1098,6 +1215,7 @@ def run_live(
     latest_local_cu_percent: Optional[float] = None
     next_survey_poll = time.monotonic() + interval_seconds
     next_logging_control_poll = time.monotonic()
+    next_display_refresh = time.monotonic() + interval_seconds
     dashboard_poll_interval = getattr(dashboard, "poll_interval_seconds", None)
     if not (
         isinstance(dashboard_poll_interval, (int, float))
@@ -1142,7 +1260,14 @@ def run_live(
                     dashboard=dashboard,
                     snapshot=analyzer.snapshot,
                 )
-                return _handle_tshark_exit(process)
+                if stderr_collector is not None:
+                    tshark_stderr_text = stderr_collector.finish(
+                        timeout_seconds=0.2
+                    )
+                return _handle_tshark_exit(
+                    process,
+                    tshark_stderr=tshark_stderr_text,
+                )
             loop_now = time.monotonic()
             if dashboard_poll_interval is None:
                 if _dashboard_requests_exit(dashboard):
@@ -1172,13 +1297,22 @@ def run_live(
                     timeout_deadlines.append(loop_now + maintenance_wait)
             if dashboard_poll_interval is not None:
                 timeout_deadlines.append(next_dashboard_poll)
+            timeout_deadlines.append(next_display_refresh)
             timeout = (
                 max(0.0, min(timeout_deadlines) - loop_now)
                 if timeout_deadlines
                 else None
             )
             events = (
-                [(None, None)]
+                [
+                    (None, None)
+                    for _ in range(
+                        min(
+                            line_reader.queued_line_count,
+                            TSHARK_PROCESS_BATCH_ROWS,
+                        )
+                    )
+                ]
                 if line_reader.has_line
                 else selector.select(timeout)
             )
@@ -1265,6 +1399,39 @@ def run_live(
                                 ),
                             )
                     beacon = frame.beacon_record()
+                    if beacon is not None:
+                        bssid_last_seen[beacon.bssid] = beacon.timestamp
+                        beacon_second = int(beacon.timestamp)
+                        if beacon_second != last_bssid_prune_second:
+                            cutoff = beacon.timestamp - analyzer.window_seconds
+                            bssid_last_seen = {
+                                bssid: timestamp
+                                for bssid, timestamp in bssid_last_seen.items()
+                                if timestamp >= cutoff
+                            }
+                            active_bssids = set(bssid_last_seen)
+                            warned_truncated_beacons.intersection_update(
+                                active_bssids
+                            )
+                            warned_partial_bssids.intersection_update(
+                                active_bssids
+                            )
+                            pruned_coverage = prune_fixed_capture_coverage(
+                                coverage_decision,
+                                active_bssids=active_bssids,
+                                fallback_reason=fallback_reason,
+                                actual_verified=actual_verified,
+                            )
+                            if pruned_coverage != coverage_decision:
+                                coverage_decision = pruned_coverage
+                                if logging_service is not None:
+                                    logging_service.update_channel_definition(
+                                        requested=coverage_decision.requested,
+                                        actual=actual_definition,
+                                        verified=actual_verified,
+                                        coverage_status=coverage_decision.status,
+                                    )
+                            last_bssid_prune_second = beacon_second
                     if (
                         beacon is not None
                         and beacon.channel_definition is not None
@@ -1334,6 +1501,17 @@ def run_live(
                 continue
 
             current = time.monotonic()
+            if current >= next_display_refresh:
+                # Refresh provisional statistics on a hard wall-clock cadence.
+                # This never finalizes a capture second; ordered capture time
+                # and beacon grace remain the only completion watermark.
+                analyzer.refresh_current(latest_local_cu_percent)
+                dashboard.refresh(analyzer.snapshot)
+                next_display_refresh = _advance_interval_deadline(
+                    next_display_refresh,
+                    interval_seconds,
+                    current,
+                )
             if (
                 logging_control_path is not None
                 and current >= next_logging_control_poll
@@ -1404,6 +1582,14 @@ def run_live(
                             logging_service,
                             prefix="Log rollover",
                         )
+                elif logging_event is LoggingEvent.SAMPLED:
+                    message = (
+                        "Logging storage is behind; log records are "
+                        "being sampled to keep capture and display responsive "
+                        f"({logging_service.sampled_record_count} skipped)."
+                    )
+                    if not _set_dashboard_notice(dashboard, message):
+                        print(f"Warning: {message}", file=sys.stderr, flush=True)
 
             if survey_future is not None and survey_future.done():
                 try:
@@ -1487,6 +1673,8 @@ def run_live(
             logging_service.stop()
         selector.close()
         terminate_tshark_process(process)
+        if stderr_collector is not None:
+            tshark_stderr_text = stderr_collector.finish()
         if raw_capture_path is not None:
             _write_raw_capture_metadata(
                 raw_capture_path,
@@ -1500,7 +1688,7 @@ def run_live(
                 capture_record_count=capture_record_count,
                 normalized_frame_count=normalized_frame_count,
                 malformed_capture_record_count=malformed_capture_record_count,
-                tshark_stderr=_read_process_stderr(process),
+                tshark_stderr=tshark_stderr_text,
             )
 
 
@@ -1532,18 +1720,6 @@ def _primary_scope_field_names(band: str) -> tuple[str, ...]:
         "wlan.ht.info.primarychannel",
         *radio_fields,
     )
-
-
-def _read_process_stderr(process: subprocess.Popen[bytes]) -> str:
-    try:
-        if process.stderr is None:
-            return ""
-        value = process.stderr.read()
-        if isinstance(value, bytes):
-            return value.decode("utf-8", errors="replace").strip()
-        return value.strip()
-    except (OSError, ValueError):
-        return ""
 
 
 def _write_raw_capture_metadata(
@@ -1612,26 +1788,22 @@ def _write_raw_capture_metadata(
             pass
 
 
-def _handle_tshark_exit(process: subprocess.Popen[bytes]) -> int:
+def _handle_tshark_exit(
+    process: subprocess.Popen[bytes],
+    *,
+    tshark_stderr: str = "",
+) -> int:
     returncode = process.poll()
     if returncode in (None, 0):
         return 0
 
-    stderr = ""
-    if process.stderr is not None:
-        value = process.stderr.read()
-        stderr = (
-            value.decode("utf-8", errors="replace").strip()
-            if isinstance(value, bytes)
-            else value.strip()
-        )
     print(
         f"tshark exited with status {returncode}",
         file=sys.stderr,
         flush=True,
     )
-    if stderr:
-        print(stderr, file=sys.stderr, flush=True)
+    if tshark_stderr:
+        print(tshark_stderr, file=sys.stderr, flush=True)
     return returncode
 
 

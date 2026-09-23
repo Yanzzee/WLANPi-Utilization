@@ -63,6 +63,8 @@ DEFAULT_MIN_FREE_BYTES = 256 * 1024 * 1024
 DEFAULT_DISK_CHECK_INTERVAL_SECONDS = 30.0
 DEFAULT_ROTATION_INTERVAL_SECONDS = 60.0 * 60.0
 DEFAULT_LOG_QUEUE_CAPACITY = 4096
+DEFAULT_LOG_BATCH_SIZE = 256
+DEFAULT_LOG_BATCH_INTERVAL_SECONDS = 0.05
 LOW_DISK_END_MESSAGE = (
     "END_OF_LOG: logging stopped because free disk space was nearly full"
 )
@@ -144,7 +146,7 @@ def build_live_log_paths(
 
 
 class CaptureLogWriter:
-    """Write optional live or replay logs and flush every emitted record."""
+    """Write logs with immediate direct-call or batched-worker flushes."""
 
     def __init__(
         self,
@@ -159,6 +161,7 @@ class CaptureLogWriter:
         self._stats_file: Optional[IO[str]] = None
         self._stats_writer: Optional[csv.DictWriter] = None
         self._beacons_file: Optional[IO[str]] = None
+        self._defer_flush = False
 
     def __enter__(self) -> "CaptureLogWriter":
         self.open()
@@ -209,7 +212,8 @@ class CaptureLogWriter:
         if self._stats_writer is None or self._stats_file is None:
             return
         self._stats_writer.writerow(_stats_csv_row(stats, self._metadata))
-        self._stats_file.flush()
+        if not self._defer_flush:
+            self._stats_file.flush()
 
     def write_beacon(self, record: BeaconRecord) -> None:
         if self._beacons_file is None:
@@ -222,7 +226,29 @@ class CaptureLogWriter:
             **beacon_fields,
         }
         self._beacons_file.write(json.dumps(payload) + "\n")
-        self._beacons_file.flush()
+        if not self._defer_flush:
+            self._beacons_file.flush()
+
+    def write_records(self, records: list[object]) -> None:
+        """Serialize one ordered batch and flush each open file only once."""
+        self._defer_flush = True
+        try:
+            for record in records:
+                if isinstance(record, BeaconRecord):
+                    self.write_beacon(record)
+                elif isinstance(record, SecondStats):
+                    self.write_stats(record)
+                elif isinstance(record, _MetadataUpdate):
+                    self.set_metadata(record.metadata)
+        finally:
+            self._defer_flush = False
+        self.flush()
+
+    def flush(self) -> None:
+        if self._stats_file is not None:
+            self._stats_file.flush()
+        if self._beacons_file is not None:
+            self._beacons_file.flush()
 
     def write_low_disk_end_marker(
         self,
@@ -275,6 +301,7 @@ class LoggingEvent(str, Enum):
 
     LOW_DISK_STOP = "low_disk_stop"
     ROTATED = "rotated"
+    SAMPLED = "sampled"
 
 
 @dataclass(frozen=True)
@@ -328,6 +355,8 @@ class LoggingService:
         self._write_queue: Optional[queue.Queue[object]] = None
         self._writer_thread: Optional[threading.Thread] = None
         self._write_failed = threading.Event()
+        self._sampling_event = threading.Event()
+        self._sampled_record_count = 0
         self._active = False
         self._file_number = 0
         self._next_disk_check: Optional[float] = None
@@ -342,6 +371,10 @@ class LoggingService:
     @property
     def current_paths(self) -> Optional[LiveLogPaths]:
         return self._current_paths
+
+    @property
+    def sampled_record_count(self) -> int:
+        return self._sampled_record_count
 
     def start(self) -> bool:
         """Start logging without changing capture or analysis state."""
@@ -401,6 +434,9 @@ class LoggingService:
         if self._write_failed.is_set():
             self._stop_for_low_disk(None)
             return LoggingEvent.LOW_DISK_STOP
+        if self._sampling_event.is_set():
+            self._sampling_event.clear()
+            return LoggingEvent.SAMPLED
         if self._pending_event is not None:
             event = self._pending_event
             self._pending_event = None
@@ -431,7 +467,11 @@ class LoggingService:
         return None
 
     def seconds_until_maintenance(self, *, now: Optional[float] = None) -> Optional[float]:
-        if self._pending_event is not None or self._write_failed.is_set():
+        if (
+            self._pending_event is not None
+            or self._write_failed.is_set()
+            or self._sampling_event.is_set()
+        ):
             return 0.0
         if not self._active:
             return None
@@ -507,13 +547,18 @@ class LoggingService:
     def _enqueue(self, record: object) -> None:
         work_queue = self._write_queue
         if self._active and work_queue is not None:
-            # Backpressure is deliberate: never discard a log record merely to
-            # keep capture moving. The bounded queue absorbs normal disk jitter
-            # while preserving output correctness during a sustained slowdown.
-            work_queue.put(record)
+            try:
+                work_queue.put_nowait(record)
+            except queue.Full:
+                # Display/capture responsiveness has priority over an
+                # unbounded wait on slow storage. The log remains an ordered
+                # sample of records that entered the bounded queue.
+                self._sampled_record_count += 1
+                self._sampling_event.set()
 
     def _start_writer_worker(self, writer: CaptureLogWriter) -> None:
         self._write_failed.clear()
+        self._sampling_event.clear()
         work_queue: queue.Queue[object] = queue.Queue(
             maxsize=self._write_queue_capacity
         )
@@ -543,22 +588,36 @@ class LoggingService:
         work_queue: queue.Queue[object],
     ) -> None:
         write_failed = False
+        stop_requested = False
         while True:
             record = work_queue.get()
             if record is _STOP_LOG_WRITER:
                 return
+            batch = [record]
+            deadline = time.monotonic() + DEFAULT_LOG_BATCH_INTERVAL_SECONDS
+            while len(batch) < DEFAULT_LOG_BATCH_SIZE:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    record = work_queue.get(timeout=remaining)
+                except queue.Empty:
+                    break
+                if record is _STOP_LOG_WRITER:
+                    stop_requested = True
+                    break
+                batch.append(record)
             if write_failed:
+                if stop_requested:
+                    return
                 continue
             try:
-                if isinstance(record, BeaconRecord):
-                    writer.write_beacon(record)
-                elif isinstance(record, SecondStats):
-                    writer.write_stats(record)
-                elif isinstance(record, _MetadataUpdate):
-                    writer.set_metadata(record.metadata)
+                writer.write_records(batch)
             except OSError:
                 write_failed = True
                 self._write_failed.set()
+            if stop_requested:
+                return
 
 
 def _advance_deadline(deadline: float, interval: float, current: float) -> float:

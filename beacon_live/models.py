@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from dataclasses import field
-from functools import cached_property
 from typing import Optional
 
 from beacon_live.channel import ChannelDefinition
@@ -72,37 +71,28 @@ class FrameRecord:
     def is_beacon(self) -> bool:
         return self.is_management_frame and self.frame_subtype == 8
 
-    @cached_property
+    @property
     def retry_eligible(self) -> bool:
-        """Whether this received MPDU can contribute to a retry ratio."""
+        """Whether this received MPDU can contribute to a retry ratio.
+
+        This deliberately is not cached on the record. Live analysis retains
+        many frames for the rolling window, and adding cached values to each
+        instance expands its dictionary substantially for no useful reuse.
+        """
         return self.retry_exclusion_reason is None
 
-    @cached_property
+    @property
     def retry_exclusion_reason(self) -> Optional[str]:
         """Return why the frame is excluded from retry calculations."""
-        if any(
-            _is_group_address(address)
-            for address in (
-                self.receiver_address,
-                self.destination_address,
-            )
-            if address is not None
-        ):
-            return "group_address"
-        if self.retry_flag is None:
-            return "missing_retry_bit"
-        if self.frame_type == 0:
-            # Unicast management exchanges can be retried. Probe requests,
-            # beacons, Action No Ack, and reserved subtypes cannot.
-            if self.frame_subtype not in {0, 1, 2, 3, 5, 9, 10, 11, 12, 13}:
-                return "non_retryable_frame_type"
-        elif self.frame_type != 2:
-            # Control and extension frames do not use the retry semantics
-            # measured by this screen.
-            return "non_retryable_frame_type"
-        return None
+        return retry_exclusion_reason(
+            frame_type=self.frame_type,
+            frame_subtype=self.frame_subtype,
+            retry_flag=self.retry_flag,
+            receiver_address=self.receiver_address,
+            destination_address=self.destination_address,
+        )
 
-    @cached_property
+    @property
     def mac_addresses(self) -> tuple[str, ...]:
         """Return every available BSSID/TA/RA/SA/DA address once."""
         addresses: list[str] = []
@@ -429,3 +419,32 @@ def _is_group_address(address: str) -> bool:
     except ValueError:
         return False
     return bool(first_octet & 1)
+
+
+def retry_exclusion_reason(
+    *,
+    frame_type: Optional[int],
+    frame_subtype: Optional[int],
+    retry_flag: Optional[bool],
+    receiver_address: Optional[str],
+    destination_address: Optional[str],
+) -> Optional[str]:
+    """Return the shared retry-denominator exclusion for frame-like data."""
+    if any(
+        _is_group_address(address)
+        for address in (receiver_address, destination_address)
+        if address is not None
+    ):
+        return "group_address"
+    if retry_flag is None:
+        return "missing_retry_bit"
+    if frame_type == 0:
+        # Unicast management exchanges can be retried. Probe requests,
+        # beacons, Action No Ack, and reserved subtypes cannot.
+        if frame_subtype not in {0, 1, 2, 3, 5, 9, 10, 11, 12, 13}:
+            return "non_retryable_frame_type"
+    elif frame_type != 2:
+        # Control and extension frames do not use the retry semantics measured
+        # by this screen.
+        return "non_retryable_frame_type"
+    return None

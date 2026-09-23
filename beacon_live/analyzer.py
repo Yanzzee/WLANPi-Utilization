@@ -11,7 +11,7 @@ from dataclasses import replace
 from functools import lru_cache
 from math import ceil
 from math import floor
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 
 from beacon_live.models import BeaconRecord
 from beacon_live.models import BeaconBssidReception
@@ -24,6 +24,7 @@ from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
 from beacon_live.models import TOP_STATION_SOURCE_MAC
 from beacon_live.models import TOP_STATION_SOURCE_QBSS
+from beacon_live.models import retry_exclusion_reason
 from beacon_live.radio_grouping import estimate_radio_groups
 from beacon_live.radio_grouping import select_strongest_radio
 
@@ -48,6 +49,50 @@ class _BssidFrameSummary:
     first_timestamp: Optional[float] = None
     last_timestamp: Optional[float] = None
     unique_client_macs: set[str] = field(default_factory=set)
+
+
+class _RetainedFrame(NamedTuple):
+    """Compact rolling input needed to rebuild address-based projections.
+
+    Full ``FrameRecord`` objects contain beacon, diagnostic, and PHY fields
+    that the rolling retry/client projection never reads. Keeping only these
+    ordered association inputs prevents the two-minute window from retaining
+    a large Python instance dictionary for every captured MPDU.
+    """
+
+    timestamp: float
+    bssid: Optional[str]
+    frame_type: Optional[int]
+    frame_subtype: Optional[int]
+    retry_flag: Optional[bool]
+    transmitter_address: Optional[str]
+    receiver_address: Optional[str]
+    source_address: Optional[str]
+    destination_address: Optional[str]
+
+    @property
+    def retry_eligible(self) -> bool:
+        return retry_exclusion_reason(
+            frame_type=self.frame_type,
+            frame_subtype=self.frame_subtype,
+            retry_flag=self.retry_flag,
+            receiver_address=self.receiver_address,
+            destination_address=self.destination_address,
+        ) is None
+
+    @property
+    def mac_addresses(self) -> tuple[str, ...]:
+        addresses: list[str] = []
+        for address in (
+            self.bssid,
+            self.transmitter_address,
+            self.receiver_address,
+            self.source_address,
+            self.destination_address,
+        ):
+            if address is not None and address not in addresses:
+                addresses.append(address)
+        return tuple(addresses)
 
 
 @dataclass(frozen=True)
@@ -175,7 +220,9 @@ class Analyzer:
         self._records_by_bssid: dict[
             str, list[tuple[float, int, BeaconRecord]]
         ] = {}
-        self._frames: list[tuple[float, int, FrameRecord]] = []
+        self._frames_by_second: dict[
+            int, list[tuple[float, int, _RetainedFrame]]
+        ] = {}
         self._pending_seconds: set[int] = set()
         self._completed_seconds: set[int] = set()
         self._ready_stats: list[SecondStats] = []
@@ -256,11 +303,13 @@ class Analyzer:
         beacon = record if isinstance(record, BeaconRecord) else record.beacon_record()
         if isinstance(record, FrameRecord):
             self._frame_projections_by_second.pop(record_second, None)
-            frame_entry = (record.timestamp, self._sequence, record)
-            if not self._frames or frame_entry[:2] >= self._frames[-1][:2]:
-                self._frames.append(frame_entry)
+            retained = _retain_frame(record)
+            frame_entry = (record.timestamp, self._sequence, retained)
+            second_frames = self._frames_by_second.setdefault(record_second, [])
+            if not second_frames or frame_entry[:2] >= second_frames[-1][:2]:
+                second_frames.append(frame_entry)
             else:
-                insort(self._frames, frame_entry)
+                insort(second_frames, frame_entry)
         if beacon is not None:
             entries = self._records_by_bssid.setdefault(beacon.bssid, [])
             beacon_entry = (beacon.timestamp, self._sequence, beacon)
@@ -554,15 +603,12 @@ class Analyzer:
                 completed_projection.window_unique_client_mac_count
             )
         else:
-            frames = self._frames_at(
-                reference_timestamp=reference_timestamp,
-                upper_exclusive=upper_exclusive,
-            )
             retry_scope = self._retry_scope_entries()
             states, window_frames = self._states_at(
                 reference_timestamp=reference_timestamp,
                 upper_exclusive=upper_exclusive,
-                frames=frames,
+                frames=(),
+                cache_by_second=True,
                 retry_scope=retry_scope,
             )
             second_frames = _project_frames(
@@ -815,7 +861,7 @@ class Analyzer:
         *,
         reference_timestamp: float,
         upper_exclusive: Optional[float],
-        frames: tuple[FrameRecord, ...],
+        frames: tuple[_RetainedFrame, ...],
         cache_by_second: bool = False,
         retry_scope: Optional[dict[str, _RetryScopeTimeline]] = None,
     ) -> tuple[tuple[BssidState, ...], _FrameProjection]:
@@ -836,9 +882,10 @@ class Analyzer:
         if retry_scope is None:
             retry_scope = self._retry_scope_entries()
         frame_projection = (
-            self._rolling_frame_projection(
-                int(reference_timestamp) - 1,
-                known_bssids,
+            self._rolling_frame_projection_at(
+                reference_timestamp=reference_timestamp,
+                upper_exclusive=upper_exclusive,
+                known_bssids=known_bssids,
                 retry_scope=retry_scope,
             )
             if cache_by_second
@@ -931,28 +978,27 @@ class Analyzer:
             frame_projection,
         )
 
-    def _frames_at(
-        self,
-        *,
-        reference_timestamp: float,
-        upper_exclusive: Optional[float],
-    ) -> tuple[FrameRecord, ...]:
-        cutoff = reference_timestamp - self.window_seconds
-        return self._frames_between(cutoff, upper_exclusive)
-
     def _frames_between(
         self,
         lower_inclusive: float,
         upper_exclusive: Optional[float],
-    ) -> tuple[FrameRecord, ...]:
-        """Slice ordered frame storage without scanning unrelated seconds."""
-        start = bisect_left(self._frames, (lower_inclusive, -1))
-        end = (
-            len(self._frames)
+    ) -> tuple[_RetainedFrame, ...]:
+        """Slice second-bucketed storage without shifting the whole window."""
+        if not self._frames_by_second:
+            return ()
+        first_second = floor(lower_inclusive)
+        last_second = (
+            max(self._frames_by_second)
             if upper_exclusive is None
-            else bisect_left(self._frames, (upper_exclusive, -1))
+            else floor(upper_exclusive)
         )
-        return tuple(entry[2] for entry in self._frames[start:end])
+        return tuple(
+            entry[2]
+            for second in range(first_second, last_second + 1)
+            for entry in self._frames_by_second.get(second, ())
+            if entry[0] >= lower_inclusive
+            and (upper_exclusive is None or entry[0] < upper_exclusive)
+        )
 
     def _frame_projection_for_second(
         self,
@@ -987,24 +1033,67 @@ class Analyzer:
         self._frame_projections_by_second[second] = (cache_key, projection)
         return projection
 
-    def _rolling_frame_projection(
+    def _rolling_frame_projection_at(
         self,
-        end_second: int,
-        known_bssids: tuple[str, ...],
         *,
+        reference_timestamp: float,
+        upper_exclusive: Optional[float],
+        known_bssids: tuple[str, ...],
         retry_scope: dict[str, _RetryScopeTimeline],
     ) -> _FrameProjection:
-        first_second = end_second - self.window_seconds + 1
-        return _merge_frame_projections(
-            tuple(
+        """Merge cached whole seconds plus at most two raw boundary slices."""
+        lower = reference_timestamp - self.window_seconds
+        upper = (
+            upper_exclusive
+            if upper_exclusive is not None
+            else reference_timestamp + 1e-9
+        )
+        if upper <= lower:
+            return _project_frames((), known_bssids)
+
+        projections: list[_FrameProjection] = []
+        first_full_second = ceil(lower)
+        if lower < first_full_second:
+            projections.append(
+                _project_frames(
+                    self._frames_between(
+                        lower,
+                        min(float(first_full_second), upper),
+                    ),
+                    known_bssids,
+                    retry_scope=retry_scope,
+                    target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                    channel_definition_max_age_seconds=(
+                        self.channel_definition_max_age_seconds
+                    ),
+                )
+            )
+
+        last_full_second = floor(upper) - 1
+        if last_full_second >= first_full_second:
+            projections.extend(
                 self._frame_projection_for_second(
                     second,
                     known_bssids,
                     retry_scope=retry_scope,
                 )
-                for second in range(first_second, end_second + 1)
+                for second in range(first_full_second, last_full_second + 1)
             )
-        )
+
+        trailing_start = max(lower, float(last_full_second + 1))
+        if trailing_start < upper:
+            projections.append(
+                _project_frames(
+                    self._frames_between(trailing_start, upper),
+                    known_bssids,
+                    retry_scope=retry_scope,
+                    target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                    channel_definition_max_age_seconds=(
+                        self.channel_definition_max_age_seconds
+                    ),
+                )
+            )
+        return _merge_frame_projections(tuple(projections))
 
     def _retry_scope_entries(self) -> dict[str, _RetryScopeTimeline]:
         if self.target_primary_frequency_mhz is None:
@@ -1052,14 +1141,17 @@ class Analyzer:
 
     def _expire_records(self, reference_timestamp: float) -> None:
         cutoff = reference_timestamp - self.window_seconds
-        first_retained_frame = 0
-        while (
-            first_retained_frame < len(self._frames)
-            and self._frames[first_retained_frame][0] < cutoff
-        ):
-            first_retained_frame += 1
-        if first_retained_frame:
-            del self._frames[:first_retained_frame]
+        cutoff_second = floor(cutoff)
+        for second in tuple(self._frames_by_second):
+            if second < cutoff_second:
+                del self._frames_by_second[second]
+        boundary = self._frames_by_second.get(cutoff_second)
+        if boundary is not None:
+            first_retained_frame = bisect_left(boundary, (cutoff, -1))
+            if first_retained_frame:
+                del boundary[:first_retained_frame]
+            if not boundary:
+                del self._frames_by_second[cutoff_second]
 
         earliest_cached_second = floor(cutoff)
         for second in tuple(self._frame_projections_by_second):
@@ -1349,7 +1441,7 @@ def _merge_frame_projections(
 
 
 def _project_frames(
-    frames: tuple[FrameRecord, ...],
+    frames: tuple[_RetainedFrame, ...],
     known_bssids: tuple[str, ...],
     *,
     retry_scope: Optional[dict[str, _RetryScopeTimeline]] = None,
@@ -1446,7 +1538,7 @@ def _project_frames(
 
 
 def _frame_matches_primary_scope(
-    frame: FrameRecord,
+    frame: _RetainedFrame,
     associated_bssid: Optional[str],
     retry_scope: dict[str, _RetryScopeTimeline],
     target_primary_frequency_mhz: int,
@@ -1472,7 +1564,7 @@ def _frame_matches_primary_scope(
 
 
 def _known_frame_bssid(
-    frame: FrameRecord,
+    frame: Union[FrameRecord, _RetainedFrame],
     known_bssids: set[str],
 ) -> Optional[str]:
     for address in frame.mac_addresses:
@@ -1540,7 +1632,7 @@ def associate_frame_bssid(
 
 
 def _associated_bssid(
-    frame: FrameRecord,
+    frame: Union[FrameRecord, _RetainedFrame],
     known_by_address: dict[str, str],
 ) -> Optional[str]:
     for address in frame.mac_addresses:
@@ -1553,6 +1645,24 @@ def _associated_bssid(
 @lru_cache(maxsize=32_768)
 def _canonical_address(address: str) -> str:
     return address.strip().lower()
+
+
+def _retain_frame(frame: FrameRecord) -> _RetainedFrame:
+    """Copy only rolling-analysis fields and share canonical MAC strings."""
+    def address(value: Optional[str]) -> Optional[str]:
+        return _canonical_address(value) if value is not None else None
+
+    return _RetainedFrame(
+        timestamp=frame.timestamp,
+        bssid=address(frame.bssid),
+        frame_type=frame.frame_type,
+        frame_subtype=frame.frame_subtype,
+        retry_flag=frame.retry_flag,
+        transmitter_address=address(frame.transmitter_address),
+        receiver_address=address(frame.receiver_address),
+        source_address=address(frame.source_address),
+        destination_address=address(frame.destination_address),
+    )
 
 
 def _percentage(numerator: int, denominator: int) -> Optional[float]:

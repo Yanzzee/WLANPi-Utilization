@@ -171,17 +171,20 @@ logging is active. Objects contain local time, run metadata, SSID/BSSID, QBSS
 values, RSSI, beacon interval, AP-name/vendor clues, and the other normalized
 beacon fields available to the parser.
 
-The logging worker flushes each line as it writes it. Normal beacon objects do
-not include a `record_type` field; the low-disk marker described below does.
+The logging worker writes small ordered batches and flushes once per batch
+(normally within 50 ms). Direct `CaptureLogWriter` callers still receive an
+immediate flush. Normal beacon objects do not include a `record_type` field;
+the low-disk marker described below does.
 
 ## Capture-path isolation
 
 Beacon and completed-second records are handed to one bounded FIFO logging
-queue. A dedicated logging thread serializes and flushes them in capture order,
-so normal filesystem latency does not stall TShark stdout draining or analyzer
-publication. Stop, rollover, and low-disk transitions drain and join the worker
-before files are closed. If the queue fills during a sustained disk slowdown,
-the producer waits rather than dropping output.
+queue. A dedicated logging thread serializes and flushes batches in capture
+order, so normal filesystem latency does not stall TShark stdout draining or
+analyzer publication. Stop, rollover, and low-disk transitions drain and join
+the worker before files are closed. If the queue fills during a sustained disk
+slowdown, new log records are sampled rather than blocking capture or display;
+the dashboard reports the cumulative skipped-record count.
 
 ## Disk-space safety
 

@@ -145,14 +145,24 @@ maintains:
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
 for every busy-channel frame. It publishes a second after ordered capture time
 passes that boundary by the 102.4 ms beacon-delay allowance, and when pending
-data is flushed during shutdown.
+data is flushed during shutdown. Independently, it publishes a provisional
+snapshot on every configured display refresh interval. A provisional refresh
+does not finalize a capture second while TShark may still have buffered rows.
+
+TShark stdout is read in bounded batches. The event loop returns to input,
+display, survey, and logging deadlines between batches instead of draining an
+unbounded user-space row queue. TShark stderr is drained concurrently into a
+bounded diagnostic tail so a full stderr pipe cannot stop capture.
 
 Frame association, retry eligibility, and client detection are projected once
 per capture second. Completed one-second projections are retained for the
 rolling window and merged for snapshot publication. If the retained BSSID set
-changes, affected projections are rebuilt from the single raw-frame store so
-address-based association keeps the same meaning. The completed projection is
-also reused when publishing that second, avoiding a second window scan.
+changes, affected projections are rebuilt from the single compact association-
+input store so address-based association keeps the same meaning. Rolling input
+is stored in per-second buckets as compact timestamp/type/retry/address tuples
+rather than full normalized frame objects. Complete seconds are cached;
+provisional snapshots merge those caches with only the partial boundary
+seconds. The completed projection is also reused when publishing that second.
 
 Target-primary association uses timestamp-indexed beacon timelines and binary
 search instead of scanning every retained beacon for every frame. Projection
@@ -307,10 +317,11 @@ It consumes valid beacon projections and completed analyzer statistics, and it
 owns file state, disk checks, low-disk markers, and rollover. Logging-only mode
 substitutes a no-op renderer but runs the same acquisition and analyzer.
 
-Log records enter a bounded FIFO queue and one logging thread owns record
-serialization, writes, and per-record flushes. Rollover, stop, and low-disk
-handling drain and join that worker before closing or replacing its files.
-Queue saturation applies backpressure rather than dropping records.
+Log records enter a bounded FIFO queue and one logging thread owns ordered
+serialization and batched flushes. Rollover, stop, and low-disk handling drain
+and join that worker before closing or replacing its files. If sustained slow
+storage fills the queue, new log records are sampled and a runtime warning is
+shown; capture, analysis, and display never wait indefinitely for the disk.
 
 Logging state can change without changing the analyzer or capture process. If
 disk pressure stops logging during display mode, display capture continues. If

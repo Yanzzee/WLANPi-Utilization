@@ -13,6 +13,7 @@ import pytest
 
 from beacon_live.live import LiveCommandError
 from beacon_live.live import LiveStartupFilter
+from beacon_live.live import BoundedStderrCollector
 from beacon_live.live import TsharkLineReader
 from beacon_live.live import _read_survey_samples_safely
 from beacon_live.live import _format_survey_debug_line
@@ -25,6 +26,7 @@ from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 from beacon_live.live import default_channel_definition
 from beacon_live.live import frequency_to_band
+from beacon_live.live import prune_fixed_capture_coverage
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.live import select_tshark_frame_fields
@@ -588,6 +590,41 @@ def test_live_collecting_state_and_input_polling_are_not_frame_rate_bound(
     assert input_polls == 1
 
 
+def test_live_refreshes_provisional_statistics_on_the_refresh_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    refresh_calls = 0
+    snapshots: list[object] = []
+
+    from beacon_live.analyzer import Analyzer
+
+    original_refresh = Analyzer.refresh_current
+
+    def counted_refresh(self: Analyzer, value: Optional[float] = None) -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        original_refresh(self, value)
+
+    monkeypatch.setattr(Analyzer, "refresh_current", counted_refresh)
+
+    class Dashboard:
+        poll_interval_seconds = 100.0
+
+        def refresh(self, snapshot: object = None) -> None:
+            snapshots.append(snapshot)
+
+        def poll_input(self) -> bool:
+            return False
+
+    assert run_live(interval_seconds=0.1, _dashboard=Dashboard()) == 0
+
+    # One call publishes the first partial frame; later calls come from the
+    # independent wall-clock display deadline while capture continues.
+    assert refresh_calls >= 2
+    assert len(snapshots) >= refresh_calls
+
+
 def test_logging_only_never_starts_the_curses_dashboard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -839,6 +876,51 @@ def test_tshark_line_reader_drains_every_buffered_pipe_row() -> None:
             "three",
         ]
         assert reader.exhausted is True
+
+
+def test_tshark_line_reader_limits_each_ready_batch() -> None:
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb", buffering=0) as read_stream:
+        os.write(write_fd, b"one\ntwo\nthree\n")
+        os.close(write_fd)
+        reader = TsharkLineReader(read_stream)
+
+        reader.read_ready(byte_budget=len(b"one\ntwo\n"))
+        assert [reader.pop_line(), reader.pop_line()] == ["one", "two"]
+        assert reader.pop_line() is None
+        assert reader.exhausted is False
+
+        reader.read_ready()
+        assert reader.pop_line() == "three"
+        assert reader.exhausted is True
+
+
+def test_tshark_stderr_is_drained_into_a_bounded_tail() -> None:
+    collector = BoundedStderrCollector(
+        io.BytesIO(b"discard-this-prefix\nimportant-tail\n"),
+        max_bytes=len(b"important-tail\n"),
+    )
+    collector.start()
+
+    assert collector.finish() == "important-tail"
+
+
+def test_coverage_pruning_forgets_bssids_outside_the_window() -> None:
+    requested = ChannelDefinition(5180, ChannelWidth.MHZ80, 5210)
+    coverage = CoverageDecision(
+        requested,
+        ("active", "expired"),
+        ("partial-expired",),
+        "partial",
+        "partial coverage",
+    )
+
+    assert prune_fixed_capture_coverage(
+        coverage,
+        active_bssids={"active"},
+        fallback_reason=None,
+        actual_verified=True,
+    ) == CoverageDecision(requested, ("active",), (), "complete", None)
 
 
 def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state(
