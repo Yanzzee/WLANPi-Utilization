@@ -297,17 +297,16 @@ See [screens.md](screens.md#4-retries) and the detailed capture procedure in
 ## Beacon received count briefly shows zero
 
 `BCN_REC` is not a count of every beacon on the channel. It is the number of
-phase-matched beacons received for BSSIDs grouped with the automatically
-selected strongest radio during that completed capture second. Other screens
-can still show RSSI, QBSS, or composition values from the latest beacon retained
-in the rolling window.
+phase-matched beacons received for recently heard BSSIDs above -67 dBm during
+that completed capture second. Other screens can still show RSSI, QBSS, or
+composition values from the latest beacon retained in the rolling window.
 
-A zero for one second means no beacon was assigned to the selected radio in
-that second. Strongest-radio eligibility lasts for that reporting second plus
-the 102.4 ms delayed-beacon allowance; after that, an inactive high-RSSI BSSID
-cannot keep the metric at zero while another radio is actively beaconing. If a
-zero persists, use the beacon JSONL timestamps and raw PCAPNG to distinguish a
-capture gap from best-effort radio grouping or missing decoded beacon rows.
+A zero for one second means no beacon was assigned to an expected slot for the
+qualifying BSSIDs in that second. Beacon Loss eligibility lasts for that
+reporting second plus the 102.4 ms delayed-beacon allowance; after that, an
+inactive high-RSSI BSSID cannot keep the metric at zero. If a zero persists,
+use the beacon JSONL timestamps and raw PCAPNG to distinguish a capture gap
+from missing decoded beacon rows.
 
 ## Logs are missing
 

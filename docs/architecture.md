@@ -139,7 +139,7 @@ maintains:
 - per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
 - best-effort radio groups;
-- per-second strongest-radio beacon loss; and
+- per-second beacon loss across recently heard BSSIDs above -67 dBm; and
 - channel-composition state.
 
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
@@ -243,15 +243,17 @@ prevent grouping. Complete-link compatibility prevents a chain of weak matches
 from collapsing clearly different radios.
 
 AP names and vendor-specific fields are clues, not standardized identities.
-Composition counts and Beacon Loss screen radio membership must therefore be
-treated as estimates.
+Composition counts and radio membership must therefore be treated as
+estimates. Beacon Loss does not use radio grouping; it includes every recently
+heard BSSID whose latest RSSI is strictly greater than -67 dBm.
 
-Rolling BSSID state remains available for the full two-minute window, but a
-BSSID is eligible for strongest-radio selection only when its latest beacon is
-no more than 1.1024 seconds old. That covers one complete reporting second plus
-the delayed-beacon allowance: a genuinely missed second can still be measured,
-while an old high-RSSI observation cannot hold Beacon Loss at zero after that
-radio stops being heard.
+Rolling BSSID state remains available for the full two-minute window. For
+Beacon Loss, a BSSID above the RSSI threshold remains eligible only when its
+latest beacon is no more than 1.1024 seconds old. That covers one complete
+reporting second plus the delayed-beacon allowance: a genuinely missed second
+can still be measured, while an old high-RSSI observation cannot keep
+contributing after the BSSID stops being heard. Composition independently uses
+this same freshness window when selecting its strongest estimated radio.
 
 ## Snapshot model
 
@@ -264,8 +266,8 @@ The immutable snapshot contains:
 - rolling unique client-MAC counts for the channel and for each retained
   BSSID, plus the analyzer-selected top count and its `qbss` or `mac` source;
   and
-- `BeaconReceptionSnapshot` and `CompositionSnapshot` views of the selected
-  strongest radio.
+- `BeaconReceptionSnapshot` for RSSI-qualified BSSIDs and
+  `CompositionSnapshot` for the selected strongest radio.
 
 UI code reads the snapshot and formats a view. It must not independently parse
 frames, select BSSIDs, or compute metrics.

@@ -160,7 +160,7 @@ beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 ## 5. Beacon Loss
 
 Beacon Loss graphs the percentage of expected beacons not received during each
-completed capture second for the strongest estimated radio.
+completed capture second across all recently heard BSSIDs above -67 dBm.
 
 ![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
 
@@ -171,11 +171,11 @@ Summary fields:
   and
 - `MAX`: maximum available beacon-loss percentage in that history.
 
-The analyzer applies the existing best-effort radio grouping to every retained
-BSSID, including hidden-SSID BSSIDs and BSSIDs without QBSS information. It
-sums `REC` and `EXP` for all BSSIDs in the strongest group and calculates
-`BL = (EXP - REC) / EXP × 100`. The footer uses the same two-second member
-rotation as Composition.
+The analyzer considers every retained BSSID, including hidden-SSID BSSIDs and
+BSSIDs without QBSS information. It includes BSSIDs whose latest RSSI is
+strictly greater than -67 dBm, sums their `REC` and `EXP`, and calculates
+`BL = (EXP - REC) / EXP × 100`. The footer identifies the strongest included
+BSSID using its latest RSSI.
 
 Expected timing assumes a 102.4 ms interval for every BSSID. Retained capture
 timestamps establish the latest schedule phase consistent with no more than
@@ -185,12 +185,11 @@ received beacon. Gaps in the inferred schedule increase `EXP` without
 increasing `REC`; capture jitter cannot make the displayed percentage exceed
 100%.
 
-`REC` and `EXP` apply only to the BSSIDs grouped with the selected strongest
-radio, not every beacon on the channel. A BSSID remains eligible for that
-selection for one reporting second plus the 102.4 ms delayed-beacon allowance.
-This permits a complete missed second to register as loss, but prevents a stale
-high-RSSI BSSID retained elsewhere in the rolling window from producing a
-continuous `REC 0` while another radio is actively beaconing.
+`REC` and `EXP` apply only to recently heard BSSIDs above -67 dBm, not every
+beacon on the channel. A qualifying BSSID remains eligible for one reporting
+second plus the 102.4 ms delayed-beacon allowance. This permits a complete
+missed second to register as loss, but prevents a stale high-RSSI BSSID retained
+elsewhere in the rolling window from producing a continuous `REC 0`.
 
 A completed second remains open for one additional 102.4 ms of ordered capture
 time. The analyzer matches each received beacon to at most one inferred

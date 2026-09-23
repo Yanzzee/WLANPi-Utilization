@@ -293,7 +293,7 @@ class BeaconsScreen:
                 f"AVG {_whole_percent(_mean(values))}% "
                 f"MAX {_whole_percent(max(values) if values else None)}%"
             ),
-            graph_label="Strongest-radio beacon loss",
+            graph_label="Beacon loss above -67 dBm",
             graph_points=graph_points,
             graph_maximum=100,
             metadata_metric_token_count=2,

@@ -31,9 +31,11 @@ DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
 COMPOSITION_ROTATION_SECONDS = 2
 ASSUMED_BEACON_INTERVAL_SECONDS = 0.1024
-# Keep a radio eligible through one completely missed reporting second, plus
+# Beacon Loss includes every recently heard BSSID above this RSSI threshold.
+BEACON_LOSS_RSSI_THRESHOLD_DBM = -67
+# Keep a BSSID eligible through one completely missed reporting second, plus
 # the normal delayed-beacon allowance. Older rolling-window state remains
-# useful elsewhere, but must not pin Beacon Loss to an inactive radio.
+# useful elsewhere, but must not pin Beacon Loss to an inactive BSSID.
 BEACON_RADIO_MAX_AGE_SECONDS = 1.0 + ASSUMED_BEACON_INTERVAL_SECONDS
 
 
@@ -189,7 +191,6 @@ class Analyzer:
         self._history_retry_bssid: Optional[str] = None
         self._composition_rotation_second: Optional[int] = None
         self._strongest_radio_bssids: tuple[str, ...] = ()
-        self._history_strongest_radio_bssids: tuple[str, ...] = ()
         self._composition_display_bssid: Optional[str] = None
         self._frame_projections_by_second: dict[
             int, tuple[tuple[object, ...], _FrameProjection]
@@ -442,23 +443,17 @@ class Analyzer:
             states,
             self._history_retry_bssid,
         )
-        strongest_radio = select_strongest_radio(
-            estimate_radio_groups(
-                _recent_radio_states(
-                    states,
-                    reference_timestamp=float(second + 1),
-                )
-            ),
-            self._history_strongest_radio_bssids,
+        beacon_loss_bssids = tuple(
+            state.bssid
+            for state in _beacon_loss_states(
+                states,
+                reference_timestamp=float(second + 1),
+            )
         )
-        strongest_radio_bssids = (
-            strongest_radio.bssids if strongest_radio is not None else ()
-        )
-        self._history_strongest_radio_bssids = strongest_radio_bssids
         beacon_reception = self._beacon_reception_snapshot(
             second=second,
             interval_end=float(second + 1),
-            strongest_radio_bssids=strongest_radio_bssids,
+            beacon_loss_bssids=beacon_loss_bssids,
         )
         self._ready_stats.append(
             _stats_from_states(
@@ -613,15 +608,32 @@ class Analyzer:
             current_second,
             reference_timestamp=interval_end,
         )
+        beacon_loss_states = _beacon_loss_states(
+            states,
+            reference_timestamp=interval_end,
+        )
+        beacon_loss_display = _strongest_latest_rssi_state(beacon_loss_states)
         beacon_reception = self._beacon_reception_snapshot(
             second=current_second,
             interval_end=interval_end,
-            strongest_radio_bssids=(
-                composition.strongest_radio_bssids
+            beacon_loss_bssids=tuple(
+                state.bssid for state in beacon_loss_states
             ),
-            displayed_ssid=composition.displayed_ssid,
-            displayed_bssid=composition.displayed_bssid,
-            displayed_rssi_dbm=composition.displayed_rssi_dbm,
+            displayed_ssid=(
+                beacon_loss_display.ssid
+                if beacon_loss_display is not None
+                else None
+            ),
+            displayed_bssid=(
+                beacon_loss_display.bssid
+                if beacon_loss_display is not None
+                else None
+            ),
+            displayed_rssi_dbm=(
+                beacon_loss_display.latest_rssi_dbm
+                if beacon_loss_display is not None
+                else None
+            ),
         )
         current = _stats_from_states(
             current_second,
@@ -658,13 +670,13 @@ class Analyzer:
         *,
         second: int,
         interval_end: float,
-        strongest_radio_bssids: tuple[str, ...],
+        beacon_loss_bssids: tuple[str, ...],
         displayed_ssid: Optional[str] = None,
         displayed_bssid: Optional[str] = None,
         displayed_rssi_dbm: Optional[int] = None,
     ) -> BeaconReceptionSnapshot:
         members: list[BeaconBssidReception] = []
-        for bssid in strongest_radio_bssids:
+        for bssid in beacon_loss_bssids:
             timestamps = tuple(
                 entry[0]
                 for entry in self._records_by_bssid.get(bssid, ())
@@ -686,7 +698,7 @@ class Analyzer:
         received_count = sum(member.received_count for member in members)
         expected_count = sum(member.expected_count for member in members)
         return BeaconReceptionSnapshot(
-            strongest_radio_bssids=strongest_radio_bssids,
+            strongest_radio_bssids=beacon_loss_bssids,
             bssids=tuple(members),
             received_count=received_count,
             expected_count=expected_count,
@@ -1572,6 +1584,42 @@ def _recent_radio_states(
         for state in states
         if state.latest_beacon_ts >= cutoff - tolerance
         and state.latest_beacon_ts <= reference_timestamp + tolerance
+    )
+
+
+def _beacon_loss_states(
+    states: tuple[BssidState, ...],
+    *,
+    reference_timestamp: float,
+) -> tuple[BssidState, ...]:
+    """Return recently heard BSSIDs above the Beacon Loss RSSI threshold."""
+    return tuple(
+        state
+        for state in _recent_radio_states(
+            states,
+            reference_timestamp=reference_timestamp,
+        )
+        if state.latest_rssi_dbm is not None
+        and state.latest_rssi_dbm > BEACON_LOSS_RSSI_THRESHOLD_DBM
+    )
+
+
+def _strongest_latest_rssi_state(
+    states: tuple[BssidState, ...],
+) -> Optional[BssidState]:
+    """Choose a deterministic identity for the shared Beacon Loss metric."""
+    if not states:
+        return None
+    return min(
+        states,
+        key=lambda state: (
+            -(
+                state.latest_rssi_dbm
+                if state.latest_rssi_dbm is not None
+                else -200
+            ),
+            state.bssid,
+        ),
     )
 
 

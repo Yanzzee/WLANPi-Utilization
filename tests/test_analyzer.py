@@ -559,7 +559,7 @@ def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:
     )
 
 
-def test_beacon_reception_uses_all_bssids_on_strongest_radio_including_hidden() -> None:
+def test_beacon_reception_uses_all_bssids_above_rssi_threshold() -> None:
     analyzer = Analyzer()
     visible = "00:11:22:33:44:50"
     hidden = "00:11:22:33:44:51"
@@ -587,19 +587,60 @@ def test_beacon_reception_uses_all_bssids_on_strongest_radio_including_hidden() 
     analyzer.advance(1001, None)
 
     beacons = analyzer.snapshot.beacons
-    assert beacons.strongest_radio_bssids == (visible, hidden)
-    assert tuple(member.bssid for member in beacons.bssids) == (visible, hidden)
-    assert [(member.received_count, member.expected_count) for member in beacons.bssids] == [
+    assert analyzer.snapshot.composition.strongest_radio_bssids == (
+        visible,
+        hidden,
+    )
+    assert beacons.strongest_radio_bssids == (visible, hidden, weaker)
+    assert tuple(member.bssid for member in beacons.bssids) == (
+        visible,
+        hidden,
+        weaker,
+    )
+    assert [
+        (member.received_count, member.expected_count)
+        for member in beacons.bssids
+    ] == [
         (10, 10),
         (9, 10),
+        (10, 10),
     ]
     assert [member.loss_percent for member in beacons.bssids] == pytest.approx(
-        [0.0, 10.0]
+        [0.0, 10.0, 0.0]
     )
-    assert beacons.received_count == 19
-    assert beacons.expected_count == 20
-    assert beacons.loss_percent == pytest.approx(5.0)
-    assert analyzer.snapshot.current.beacon_loss_percent == pytest.approx(5.0)
+    assert beacons.received_count == 29
+    assert beacons.expected_count == 30
+    assert beacons.loss_percent == pytest.approx(100 / 30)
+    assert analyzer.snapshot.current.beacon_loss_percent == pytest.approx(
+        100 / 30
+    )
+
+
+def test_beacon_reception_excludes_rssi_at_or_below_threshold() -> None:
+    analyzer = Analyzer()
+    included = "00:11:22:33:44:50"
+    boundary = "00:11:23:33:44:50"
+    weak = "00:11:24:33:44:50"
+
+    for slot in range(11):
+        timestamp = 999.95 + slot * 0.1024
+        analyzer.ingest(
+            _radio_beacon(timestamp, included, "Included", -66, "Room-101")
+        )
+        analyzer.ingest(
+            _radio_beacon(timestamp, boundary, "Boundary", -67, "Room-202")
+        )
+        analyzer.ingest(
+            _radio_beacon(timestamp, weak, "Weak", -68, "Room-303")
+        )
+
+    analyzer.advance(1001, None)
+
+    beacons = analyzer.snapshot.beacons
+    assert beacons.strongest_radio_bssids == (included,)
+    assert tuple(member.bssid for member in beacons.bssids) == (included,)
+    assert beacons.displayed_bssid == included
+    assert beacons.displayed_rssi_dbm == -66
 
 
 def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop() -> None:

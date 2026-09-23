@@ -301,7 +301,7 @@ class BeaconBssidReception:
 
 @dataclass(frozen=True)
 class BeaconReceptionSnapshot:
-    """Analyzer-derived strongest-radio state for the Beacon Loss screen."""
+    """Analyzer-derived RSSI-qualified state for the Beacon Loss screen."""
 
     strongest_radio_bssids: tuple[str, ...]
     bssids: tuple[BeaconBssidReception, ...]

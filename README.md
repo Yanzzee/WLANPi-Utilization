@@ -254,7 +254,7 @@ Scrolling table columns:
 | `RET_ELIG` | Primary-scoped unicast data and retry-capable unicast management frames eligible for the retry denominator. |
 | `RETRY%` | Eligible frames with the Retry bit set divided by `RET_ELIG`. |
 | `TOP_RETRY_BSSID` | BSSID selected for the one-second retry result: highest retry percentage, retained selection on a tie, or strongest beacon RSSI when no retries occurred. |
-| `BCN_EXP` | Phase-matched beacon transmission slots expected during the second across the strongest estimated radio's BSSIDs. |
+| `BCN_EXP` | Phase-matched beacon transmission slots expected during the second across recently heard BSSIDs above -67 dBm. |
 | `LOSS%` | Percentage of `BCN_EXP` slots for which no matching beacon was received. |
 
 If the command is piped, redirected, run without a TTY, or Python lacks
@@ -288,7 +288,7 @@ launcher while diagnosing an installation with, for example,
 | Admission | The selected BSSID's advertised admission capacity as a percentage. |
 | Stations | AP-advertised QBSS station counts plus unique client MACs observed in BSSID-linked data frames. |
 | Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
-| Beacon Loss | Percentage of phase-aware expected beacons not received across all BSSIDs on the strongest estimated radio. |
+| Beacon Loss | Percentage of phase-aware expected beacons not received across all recently heard BSSIDs above -67 dBm. |
 | Composition | BSSID and QBSS counts plus best-effort physical-radio, `AP` (vendor AP-name), and vendor information. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are

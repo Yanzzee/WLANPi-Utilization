@@ -113,7 +113,7 @@ The stats file contains one row for each emitted capture second. Columns cover:
 - selected QBSS utilization and source identity/RSSI;
 - received, Retry-bit-readable, retry-eligible, and retry-frame counts;
 - retry percentage, selected beacon-rate percentage, and retry footer BSSID;
-- strongest-radio beacon received/expected counts and beacon-loss percentage;
+- RSSI-qualified beacon received/expected counts and beacon-loss percentage;
 - optional local survey utilization.
 
 Rows use local ISO-8601 timestamps with offsets. The logging worker flushes
@@ -158,8 +158,8 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `retry_frame_count` | Retry-eligible frames whose Retry bit was set; repeated retry transmissions are each counted. |
 | `retry_percent` | `retry_frame_count / retry_eligible_frame_count × 100` for the second. |
 | `selected_beacon_rate_percent` | Selected BSSID's rolling-window received-beacon rate relative to the rate expected from its advertised beacon interval, capped at 100%. |
-| `beacon_received_count` | Phase-matched beacons received during the second, summed across BSSIDs in the strongest estimated radio. |
-| `beacon_expected_count` | Beacon transmission slots expected during the second across those strongest-radio BSSIDs. |
+| `beacon_received_count` | Phase-matched beacons received during the second, summed across recently heard BSSIDs above -67 dBm. |
+| `beacon_expected_count` | Beacon transmission slots expected during the second across those RSSI-qualified BSSIDs. |
 | `beacon_loss_percent` | `(beacon_expected_count - beacon_received_count) / beacon_expected_count × 100`. |
 | `top_retry_bssid` | Automatically selected retry identity: highest one-second retry percentage, previous identity on a tie, or strongest beacon RSSI when no retries occurred. |
 | `local_cu_percent` | Optional local survey utilization from `iw`; separate from AP-advertised QBSS utilization. |

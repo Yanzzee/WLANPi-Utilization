@@ -307,7 +307,7 @@ def test_retry_screen_distinguishes_sub_one_percent_from_zero() -> None:
     assert _retry_percent(0.4) == "<1"
 
 
-def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
+def test_beacons_screen_renders_shared_rssi_qualified_metric_and_identity() -> None:
     empty = MetricsSnapshot.empty()
     first = replace(
         empty.current,
@@ -349,7 +349,7 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
     assert view.metadata_tokens == ("Beacon Loss",)
     assert view.metadata_metric_token_count == 2
     assert view.summary == "BL 5% AVG 12% MAX 20%"
-    assert view.graph_label == "Strongest-radio beacon loss"
+    assert view.graph_label == "Beacon loss above -67 dBm"
     assert view.graph_maximum == 100
     assert [point.value for point in view.graph_points] == [20.0, 5.0]
     assert view.identity.ssid == "Alpha"
