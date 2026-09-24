@@ -316,7 +316,7 @@ See [screens.md](screens.md#4-retries) and the detailed capture procedure in
 ## Beacon received count briefly shows zero
 
 `BCN_REC` is not a count of every beacon on the channel. It is the number of
-phase-matched beacons received for recently heard BSSIDs above -67 dBm during
+phase-matched beacons received for recently heard BSSIDs above -75 dBm during
 that completed capture second. Other screens can still show RSSI, QBSS, or
 composition values from the latest beacon retained in the rolling window.
 

@@ -652,13 +652,13 @@ def test_beacon_reception_excludes_rssi_at_or_below_threshold() -> None:
     for slot in range(11):
         timestamp = 999.95 + slot * 0.1024
         analyzer.ingest(
-            _radio_beacon(timestamp, included, "Included", -66, "Room-101")
+            _radio_beacon(timestamp, included, "Included", -74, "Room-101")
         )
         analyzer.ingest(
-            _radio_beacon(timestamp, boundary, "Boundary", -67, "Room-202")
+            _radio_beacon(timestamp, boundary, "Boundary", -75, "Room-202")
         )
         analyzer.ingest(
-            _radio_beacon(timestamp, weak, "Weak", -68, "Room-303")
+            _radio_beacon(timestamp, weak, "Weak", -76, "Room-303")
         )
 
     analyzer.advance(1001, None)
@@ -667,7 +667,7 @@ def test_beacon_reception_excludes_rssi_at_or_below_threshold() -> None:
     assert beacons.strongest_radio_bssids == (included,)
     assert tuple(member.bssid for member in beacons.bssids) == (included,)
     assert beacons.displayed_bssid == included
-    assert beacons.displayed_rssi_dbm == -66
+    assert beacons.displayed_rssi_dbm == -74
 
 
 def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop() -> None:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Protocol, Sequence
 
 from beacon_live.models import BssidState
+from beacon_live.models import BEACON_LOSS_RSSI_THRESHOLD_DBM
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
 from beacon_live.models import RetryBssidState
@@ -315,7 +316,10 @@ class BeaconsScreen:
                 f"AVG {_whole_percent(_mean(values))}% "
                 f"MAX {_whole_percent(max(values) if values else None)}%"
             ),
-            graph_label="Beacon loss above -67 dBm",
+            graph_label=(
+                "Beacon loss above "
+                f"{BEACON_LOSS_RSSI_THRESHOLD_DBM} dBm"
+            ),
             graph_points=graph_points,
             graph_maximum=100,
             metadata_metric_token_count=2,

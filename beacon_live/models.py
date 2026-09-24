@@ -9,6 +9,7 @@ from beacon_live.channel import ChannelDefinition
 
 # Available Admission Capacity uses 32-microsecond units: 31,250 is 100%.
 QBSS_ADMISSION_CAPACITY_MAX = 31_250
+BEACON_LOSS_RSSI_THRESHOLD_DBM = -75
 TOP_STATION_SOURCE_QBSS = "qbss"
 TOP_STATION_SOURCE_MAC = "mac"
 

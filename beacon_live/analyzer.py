@@ -14,6 +14,7 @@ from math import floor
 from typing import NamedTuple, Optional, Union
 
 from beacon_live.models import BeaconRecord
+from beacon_live.models import BEACON_LOSS_RSSI_THRESHOLD_DBM
 from beacon_live.models import BeaconBssidReception
 from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import BssidState
@@ -32,8 +33,6 @@ DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
 COMPOSITION_ROTATION_SECONDS = 2
 ASSUMED_BEACON_INTERVAL_SECONDS = 0.1024
-# Beacon Loss includes every recently heard BSSID above this RSSI threshold.
-BEACON_LOSS_RSSI_THRESHOLD_DBM = -67
 # Keep a BSSID eligible through one completely missed reporting second, plus
 # the normal delayed-beacon allowance. Older rolling-window state remains
 # useful elsewhere, but must not pin Beacon Loss to an inactive BSSID.

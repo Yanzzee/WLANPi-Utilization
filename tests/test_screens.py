@@ -379,7 +379,7 @@ def test_beacons_screen_renders_shared_rssi_qualified_metric_and_identity() -> N
     assert view.metadata_tokens == ("Beacon Loss",)
     assert view.metadata_metric_token_count == 2
     assert view.summary == "BL 5% AVG 12% MAX 20%"
-    assert view.graph_label == "Beacon loss above -67 dBm"
+    assert view.graph_label == "Beacon loss above -75 dBm"
     assert view.graph_maximum == 100
     assert [point.value for point in view.graph_points] == [20.0, 5.0]
     assert view.identity.ssid == "Alpha"

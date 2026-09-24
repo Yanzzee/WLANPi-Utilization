@@ -166,7 +166,7 @@ maintains:
 - per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
 - best-effort radio groups;
-- per-second beacon loss across recently heard BSSIDs above -67 dBm; and
+- per-second beacon loss across recently heard BSSIDs above -75 dBm; and
 - channel-composition state.
 
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
@@ -282,7 +282,7 @@ from collapsing clearly different radios.
 AP names and vendor-specific fields are clues, not standardized identities.
 Composition counts and radio membership must therefore be treated as
 estimates. Beacon Loss does not use radio grouping; it includes every recently
-heard BSSID whose latest RSSI is strictly greater than -67 dBm.
+heard BSSID whose latest RSSI is strictly greater than -75 dBm.
 
 Rolling BSSID state remains available for the full two-minute window. For
 Beacon Loss, a BSSID above the RSSI threshold remains eligible only when its
