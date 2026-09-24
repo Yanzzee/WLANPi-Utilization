@@ -172,20 +172,40 @@ class TotalStationCountScreen:
         graph_points = tuple(
             GraphPoint(
                 second=stats.second,
-                value=stats.qbss_station_count_sum,
-                display_value=float(stats.qbss_station_count_sum),
+                value=(
+                    float(stats.qbss_station_count_sum)
+                    if stats.sample_available
+                    else None
+                ),
+                display_value=(
+                    float(stats.qbss_station_count_sum)
+                    if stats.sample_available
+                    else None
+                ),
             )
             for stats in snapshot.history
         )
         mac_graph_points = tuple(
             GraphPoint(
                 second=stats.second,
-                value=stats.unique_client_mac_count,
-                display_value=float(stats.unique_client_mac_count),
+                value=(
+                    float(stats.unique_client_mac_count)
+                    if stats.sample_available
+                    else None
+                ),
+                display_value=(
+                    float(stats.unique_client_mac_count)
+                    if stats.sample_available
+                    else None
+                ),
             )
             for stats in snapshot.history
         )
-        current_sum = snapshot.current.qbss_station_count_sum
+        current_sum = (
+            snapshot.current.qbss_station_count_sum
+            if snapshot.current.sample_available
+            else None
+        )
         top_station_state = (
             snapshot.state_for(snapshot.top_station_bssid)
             if snapshot.top_station_bssid is not None
@@ -246,7 +266,7 @@ class RetryScreen:
             if snapshot.top_retry_bssid is not None
             else None
         )
-        latest = snapshot.history[-1] if snapshot.history else None
+        latest = snapshot.current if snapshot.current.sample_available else None
         return ScreenView(
             screen_id=self.screen_id,
             title="Retry Percentage",
@@ -285,7 +305,7 @@ class BeaconsScreen:
             if point.display_value is not None
         )
         beacons = snapshot.beacons
-        latest = snapshot.history[-1] if snapshot.history else None
+        latest = snapshot.current if snapshot.current.sample_available else None
         return ScreenView(
             screen_id=self.screen_id,
             title="Beacon Loss",
@@ -321,6 +341,9 @@ DEFAULT_SCREENS: tuple[ScreenDefinition, ...] = (
 def _cu_graph_points(snapshot: MetricsSnapshot) -> tuple[GraphPoint, ...]:
     points: list[GraphPoint] = []
     for stats in snapshot.history:
+        if not stats.sample_available:
+            points.append(GraphPoint(stats.second, None, None))
+            continue
         raw = stats.selected_qbss_cu_raw
         if raw is None and stats.selected_qbss_cu_percent is not None:
             raw = round(stats.selected_qbss_cu_percent * 255 / 100)
@@ -339,6 +362,9 @@ def _admission_capacity_graph_points(
 ) -> tuple[GraphPoint, ...]:
     points: list[GraphPoint] = []
     for stats in snapshot.history:
+        if not stats.sample_available:
+            points.append(GraphPoint(stats.second, None, None))
+            continue
         percent = _admission_capacity_percent(
             stats.selected_qbss_admission_capacity
         )

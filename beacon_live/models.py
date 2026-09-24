@@ -168,6 +168,9 @@ class SecondStats:
     beacon_received_count: int = 0
     beacon_expected_count: int = 0
     beacon_loss_percent: Optional[float] = None
+    # False only for a display-created wall-clock gap. Analyzer-produced rows,
+    # including real zero-valued samples, are always available.
+    sample_available: bool = True
 
 
 @dataclass(frozen=True)

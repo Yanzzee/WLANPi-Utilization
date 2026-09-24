@@ -95,7 +95,20 @@ Live renderers publish only on the configured monotonic display deadline.
 Capture completion and logging never trigger an extra paint. Display history is
 placed into 120 wall-clock slots ending with the preceding completed second;
 an unavailable second is an explicit gap instead of allowing stale capture
-history to scroll later while a producer backlog is drained.
+history to scroll later while a producer backlog is drained. Headline values
+come from the newest actual completed sample in those slots, not from a
+synthetic right-edge gap. The newest analyzer identities and composition remain
+visible while any actual sample remains in the displayed window; state is
+cleared only when all 120 slots are unavailable.
+
+Live startup has no fixed sleep or multi-sample warm-up. The frame file is
+painted as `Collecting` before radio capability discovery, interface tuning,
+or TShark startup, so those hardware operations do not leave the GUI waiting
+for its first frame. The partial wall-clock second in which capture begins is
+deliberately excluded, and the first complete second is published only after
+its 102.4 ms delayed-beacon allowance. The resulting roughly 1.1–2.1 second
+analysis delay, followed by the next configured display deadline, is required
+to avoid representing a partial capture interval as a full RET/BL sample.
 
 Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
 that same TShark process. It therefore saves the raw packets feeding live

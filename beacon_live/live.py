@@ -1187,6 +1187,37 @@ def run_live(
             center_frequency2_mhz=center_frequency2_mhz,
         )
     )
+    # Publish the initial UI before capability discovery and interface tuning,
+    # which can involve several hardware subprocess calls on a Raspberry Pi.
+    # This is a presentation-only startup frame; capture and analysis still
+    # begin exactly once below.
+    analyzer = Analyzer(
+        target_primary_frequency_mhz=resolved_frequency_mhz,
+        channel_definition_max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
+        streaming=True,
+    )
+    dashboard: LiveDashboard
+    if _dashboard is not None:
+        dashboard = _dashboard
+    elif logging_only:
+        dashboard = NullDashboard()
+    elif lcd_frame is not None:
+        dashboard = LcdDashboard(
+            lcd_frame,
+            band=resolved_band,
+            channel=channel,
+            frequency_mhz=resolved_frequency_mhz,
+        )
+    else:
+        dashboard = TerminalDashboard(
+            include_local_cu=local_cu,
+            band=resolved_band,
+            channel=channel,
+            frequency_mhz=resolved_frequency_mhz,
+        )
+    _set_dashboard_collecting(dashboard, True)
+    dashboard.refresh(analyzer.snapshot)
+
     capabilities = _read_radio_capabilities_safely(iface)
     supported, unsupported_reason = capabilities.supports(requested_definition)
     initial_definition = requested_definition
@@ -1290,36 +1321,10 @@ def run_live(
         ),
         fallback_reason,
     )
-    analyzer = Analyzer(
-        target_primary_frequency_mhz=resolved_frequency_mhz,
-        channel_definition_max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
-        streaming=True,
-    )
-    dashboard: LiveDashboard
-    if _dashboard is not None:
-        dashboard = _dashboard
-    elif logging_only:
-        dashboard = NullDashboard()
-    elif lcd_frame is not None:
-        dashboard = LcdDashboard(
-            lcd_frame,
-            band=resolved_band,
-            channel=channel,
-            frequency_mhz=resolved_frequency_mhz,
-        )
-    else:
-        dashboard = TerminalDashboard(
-            include_local_cu=local_cu,
-            band=resolved_band,
-            channel=channel,
-            frequency_mhz=resolved_frequency_mhz,
-        )
     _set_dashboard_capture_width(
         dashboard,
         actual_definition.width.value,
     )
-    _set_dashboard_collecting(dashboard, True)
-    dashboard.refresh(analyzer.snapshot)
     logging_service: Optional[LoggingService] = None
     if stats_csv is not None or beacons_jsonl is not None:
         first_log_path = stats_csv if stats_csv is not None else beacons_jsonl
@@ -2235,6 +2240,7 @@ def _empty_second_stats(second: int) -> SecondStats:
         selected_qbss_bssid=None,
         selected_qbss_rssi_dbm=None,
         local_cu_percent=None,
+        sample_available=False,
     )
 
 
@@ -2245,7 +2251,8 @@ def _wall_clock_snapshot(
     """Place completed samples in a fixed wall-clock 120-second window.
 
     Missing or overloaded seconds are explicit empty slots rather than stale
-    history that scrolls long after it was captured.  Small synthetic epochs
+    history that scrolls long after it was captured. Headline and identity
+    state remains anchored to the newest actual slot. Small synthetic epochs
     remain capture-anchored for deterministic replay and unit tests.
     """
     if snapshot.generated_at is None:
@@ -2266,14 +2273,23 @@ def _wall_clock_snapshot(
         by_second.get(second, _empty_second_stats(second))
         for second in range(oldest_second, newest_second + 1)
     )
+    latest_actual = (
+        by_second[max(by_second)]
+        if by_second
+        else _empty_second_stats(newest_second)
+    )
     replacements: dict[str, object] = {
         "generated_at": wall_timestamp,
-        "current": history[-1],
+        # Headline values describe the newest completed sample that is
+        # actually plotted. A missing right-edge slot remains a graph gap and
+        # must not erase otherwise-current analyzer state.
+        "current": latest_actual,
         "history": history,
     }
-    if newest_second not in by_second:
+    if not by_second:
         empty = MetricsSnapshot.empty(window_seconds=snapshot.window_seconds)
         replacements.update(
+            bssids=(),
             selected_bssid=None,
             top_station_bssid=None,
             top_station_count=None,
@@ -2281,6 +2297,7 @@ def _wall_clock_snapshot(
             top_retry_bssid=None,
             retry_bssids=(),
             composition=empty.composition,
+            window_unique_client_mac_count=0,
             beacons=empty.beacons,
         )
     return replace(snapshot, **replacements)

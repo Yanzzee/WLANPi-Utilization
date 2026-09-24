@@ -12,6 +12,7 @@ from typing import Optional
 
 import pytest
 
+from beacon_live.analyzer import Analyzer
 from beacon_live.live import LiveCommandError
 from beacon_live.live import LiveStartupFilter
 from beacon_live.live import BoundedStderrCollector
@@ -39,6 +40,7 @@ from beacon_live.channel import ChannelWidth
 from beacon_live.channel import RadioCapabilities
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.models import MetricsSnapshot
+from beacon_live.models import FrameRecord
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.survey import SurveyCuResult
@@ -594,6 +596,54 @@ def test_live_collecting_state_and_input_polling_are_not_frame_rate_bound(
     assert input_polls == 1
 
 
+def test_live_paints_collecting_before_radio_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    events: list[str] = []
+    capabilities = RadioCapabilities(
+        frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ40, ChannelWidth.MHZ80}),
+        frozenset({5180, 5200, 5220, 5240}),
+        supports_monitor=True,
+        source_complete=True,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_radio_capabilities_safely",
+        lambda iface: (events.append("capabilities") or capabilities),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        lambda *args, **kwargs: events.append("tune"),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_actual_channel_safely",
+        lambda iface, requested: (
+            events.append("verify") or (requested, True)
+        ),
+    )
+
+    class Dashboard:
+        poll_interval_seconds = 100.0
+
+        def set_collecting(self, collecting: bool) -> None:
+            events.append(f"collecting:{collecting}")
+
+        def set_capture_width(self, width: str) -> None:
+            events.append(f"width:{width}")
+
+        def refresh(self, snapshot: object = None) -> None:
+            events.append("frame")
+
+        def poll_input(self) -> bool:
+            return False
+
+    assert run_live(interval_seconds=0.1, _dashboard=Dashboard()) == 0
+
+    assert events[:3] == ["collecting:True", "frame", "capabilities"]
+    assert events.index("frame") < events.index("tune")
+    assert events.index("frame") < events.index("verify")
+
+
 def test_inline_fallback_refreshes_only_on_the_display_interval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -929,7 +979,81 @@ def test_wall_clock_snapshot_uses_fixed_slots_and_does_not_scroll_stale_data() -
     ]
     assert aligned.history[0].retry_percent == 25.0
     assert aligned.history[-1].retry_percent is None
-    assert aligned.current is aligned.history[-1]
+    assert aligned.history[-1].sample_available is False
+    assert aligned.current is aligned.history[0]
+
+
+def test_wall_clock_snapshot_keeps_latest_actual_state_across_right_edge_gaps() -> None:
+    bssid = "02:00:00:00:00:01"
+    analyzer = Analyzer(window_seconds=3)
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1_700_000_000.1,
+            bssid=bssid,
+            ssid="Alpha",
+            rssi_dbm=-35,
+            frame_type=0,
+            frame_subtype=8,
+            retry_flag=False,
+            beacon_interval_tu=100,
+            qbss_cu_raw=64,
+            qbss_cu_percent=64 / 255 * 100,
+            qbss_station_count=7,
+            qbss_admission_capacity=10_000,
+        )
+    )
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1_700_000_000.2,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=True,
+            receiver_address=bssid,
+        )
+    )
+    analyzer.flush()
+    snapshot = analyzer.snapshot
+
+    aligned = _wall_clock_snapshot(snapshot, 1_700_000_003.2)
+
+    assert aligned.current.second == 1_700_000_000
+    assert aligned.current.sample_available is True
+    assert aligned.current.selected_qbss_bssid == bssid
+    assert aligned.selected_bssid == snapshot.selected_bssid
+    assert aligned.top_station_bssid == snapshot.top_station_bssid
+    assert aligned.top_retry_bssid == snapshot.top_retry_bssid
+    assert aligned.bssids == snapshot.bssids
+    assert aligned.retry_bssids == snapshot.retry_bssids
+    assert aligned.composition == snapshot.composition
+    assert aligned.beacons == snapshot.beacons
+    assert [row.sample_available for row in aligned.history] == [True, False, False]
+
+
+def test_wall_clock_snapshot_clears_state_only_after_all_samples_age_out() -> None:
+    empty = MetricsSnapshot.empty(window_seconds=3)
+    captured = replace(empty.current, second=1_700_000_000)
+    snapshot = replace(
+        empty,
+        generated_at=1_700_000_001.0,
+        current=captured,
+        history=(captured,),
+        selected_bssid="stale",
+        top_station_bssid="stale",
+        top_station_count=9,
+        top_retry_bssid="stale",
+        window_unique_client_mac_count=4,
+    )
+
+    aligned = _wall_clock_snapshot(snapshot, 1_700_000_005.2)
+
+    assert not any(row.sample_available for row in aligned.history)
+    assert aligned.current.sample_available is False
+    assert aligned.bssids == ()
+    assert aligned.selected_bssid is None
+    assert aligned.top_station_bssid is None
+    assert aligned.top_retry_bssid is None
+    assert aligned.window_unique_client_mac_count == 0
 
 
 def test_real_pipe_uses_separate_streaming_aggregation_process() -> None:
