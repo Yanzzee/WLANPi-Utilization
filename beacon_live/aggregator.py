@@ -18,7 +18,7 @@ def aggregate_records(
     local_cu_by_second: Optional[dict[int, Optional[float]]] = None,
 ) -> list[SecondStats]:
     """Analyze a finite iterable and return every observed per-second sample."""
-    analyzer = Analyzer()
+    analyzer = Analyzer(streaming=True)
     for second, percent in (local_cu_by_second or {}).items():
         analyzer.set_local_cu_percent(second, percent)
 

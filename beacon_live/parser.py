@@ -1,6 +1,7 @@
 """Parsing helpers for legacy and capability-negotiated TShark output."""
 
 from dataclasses import replace
+from functools import lru_cache
 from typing import Iterable, Iterator, Optional, Union
 
 from beacon_live.channel import definition_from_operation_fields
@@ -443,6 +444,83 @@ def parse_tshark_capture_record(
         if record is not None:
             records.append(record)
     return tuple(records)
+
+
+@lru_cache(maxsize=16)
+def _live_field_indexes(field_names: tuple[str, ...]) -> dict[str, int]:
+    return {name: index for index, name in enumerate(field_names)}
+
+
+def parse_tshark_live_record(
+    row: str,
+    *,
+    field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
+    band: Optional[str] = None,
+) -> tuple[FrameRecord, ...]:
+    """Parse the common non-beacon path without building field dictionaries.
+
+    Data traffic dominates a busy capture.  It needs only the MAC header fields
+    used by retry and client aggregation.  Beacons and unusual multi-MPDU rows
+    retain the complete parser so beacon-derived behavior remains unchanged.
+    """
+    line = row.rstrip("\r\n")
+    if not line:
+        return ()
+    fields = line.split("\t")
+    if len(fields) != len(field_names):
+        return parse_tshark_capture_record(
+            row,
+            field_names=field_names,
+            band=band,
+        )
+    if any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
+        return parse_tshark_capture_record(
+            row,
+            field_names=field_names,
+            band=band,
+        )
+
+    indexes = _live_field_indexes(field_names)
+
+    def value(name: str) -> str:
+        index = indexes.get(name)
+        return fields[index] if index is not None else ""
+
+    try:
+        timestamp = float(value("frame.time_epoch"))
+        frame_type = int(value("wlan.fc.type"), 0)
+        frame_subtype = int(value("wlan.fc.subtype"), 0)
+    except (TypeError, ValueError):
+        return ()
+
+    # Beacon rows need QBSS, operation, vendor, and truncation fields.
+    if frame_type == 0 and frame_subtype == 8:
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        return (record,) if record is not None else ()
+
+    retry = _parse_optional_bool(value("wlan.fc.retry"))
+    if retry is _MALFORMED:
+        return ()
+    if retry is None:
+        frame_control = _parse_optional_int(value("wlan.fc"), minimum=0)
+        if frame_control is _MALFORMED:
+            return ()
+        if frame_control is not None:
+            retry = bool(frame_control & 0x0008)
+
+    return (
+        FrameRecord(
+            timestamp=timestamp,
+            bssid=_parse_optional_mac(value("wlan.bssid")),
+            frame_type=frame_type,
+            frame_subtype=frame_subtype,
+            retry_flag=retry,
+            transmitter_address=_parse_optional_mac(value("wlan.ta")),
+            receiver_address=_parse_optional_mac(value("wlan.ra")),
+            source_address=_parse_optional_mac(value("wlan.sa")),
+            destination_address=_parse_optional_mac(value("wlan.da")),
+        ),
+    )
 
 
 def _parse_named_tshark_frame_fields(

@@ -246,12 +246,13 @@ class RetryScreen:
             if snapshot.top_retry_bssid is not None
             else None
         )
+        latest = snapshot.history[-1] if snapshot.history else None
         return ScreenView(
             screen_id=self.screen_id,
             title="Retry Percentage",
             metadata_tokens=("Retries",),
             summary=(
-                f"RET {_retry_percent(snapshot.current.retry_percent)}% "
+                f"RET {_retry_percent(latest.retry_percent if latest else None)}% "
                 f"AVG {_retry_percent(_mean(values))}% "
                 f"MAX {_retry_percent(max(values) if values else None)}%"
             ),
@@ -284,12 +285,13 @@ class BeaconsScreen:
             if point.display_value is not None
         )
         beacons = snapshot.beacons
+        latest = snapshot.history[-1] if snapshot.history else None
         return ScreenView(
             screen_id=self.screen_id,
             title="Beacon Loss",
             metadata_tokens=("Beacon Loss",),
             summary=(
-                f"BL {_whole_percent(beacons.loss_percent)}% "
+                f"BL {_whole_percent(latest.beacon_loss_percent if latest else None)}% "
                 f"AVG {_whole_percent(_mean(values))}% "
                 f"MAX {_whole_percent(max(values) if values else None)}%"
             ),

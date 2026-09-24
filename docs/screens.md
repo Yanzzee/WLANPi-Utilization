@@ -146,9 +146,18 @@ Exclude:
 Every retry transmission is counted. Multiple retries of one original frame
 are not deduplicated.
 
+Live frames are classified into these counters as they arrive and discarded
+immediately. The analyzer retains compact per-second counts and client sets,
+not individual MPDUs. This produces the same numerator and denominator without
+making memory consumption proportional to frames per second over 120 seconds.
+
 The live analyzer completes a second only after a later capture timestamp is
 ingested. This avoids finalizing a bucket while TShark still has older rows
 buffered on stdout.
+
+`RET` and `BL` show the newest completed values already present at the right
+edge of their graphs. They do not display provisional active-second values.
+Pixels are published only once per configured refresh interval.
 
 ### Retry footer
 

@@ -83,6 +83,20 @@ later information elements may be unavailable. Interactive terminal renderers
 show runtime capture warnings, including confirmed partial coverage, inside
 their managed footer instead of writing beneath the curses screen.
 
+On POSIX hardware, TShark stdout is owned by a dedicated aggregation process.
+The common non-beacon path parses only timestamp, frame-control, Retry, and MAC
+header fields. Each MPDU updates its active one-second accumulator exactly once
+and is then released; individual data frames are never retained for the
+two-minute window. The GUI process receives compact completed-second snapshots
+and beacon events, allowing TShark, aggregation, and rendering/logging to run
+on separate CPU cores without creating a second capture pipeline.
+
+Live renderers publish only on the configured monotonic display deadline.
+Capture completion and logging never trigger an extra paint. Display history is
+placed into 120 wall-clock slots ending with the preceding completed second;
+an unavailable second is an explicit gap instead of allowing stale capture
+history to scroll later while a producer backlog is drained.
+
 Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
 that same TShark process. It therefore saves the raw packets feeding live
 decoding without a second competing capture.

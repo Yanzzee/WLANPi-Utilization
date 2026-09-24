@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import socket
 import subprocess
 from dataclasses import replace
 from datetime import datetime
@@ -22,6 +23,8 @@ from beacon_live.live import build_monitor_setup_commands
 from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
 from beacon_live.live import _write_raw_capture_metadata
+from beacon_live.live import _start_live_aggregation_process
+from beacon_live.live import _wall_clock_snapshot
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 from beacon_live.live import default_channel_definition
@@ -35,6 +38,7 @@ from beacon_live.channel import ChannelDefinition
 from beacon_live.channel import ChannelWidth
 from beacon_live.channel import RadioCapabilities
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
+from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.survey import SurveyCuResult
@@ -590,7 +594,7 @@ def test_live_collecting_state_and_input_polling_are_not_frame_rate_bound(
     assert input_polls == 1
 
 
-def test_live_refreshes_provisional_statistics_on_the_refresh_interval(
+def test_inline_fallback_refreshes_only_on_the_display_interval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepare_one_interval_live_run(monkeypatch)
@@ -619,10 +623,11 @@ def test_live_refreshes_provisional_statistics_on_the_refresh_interval(
 
     assert run_live(interval_seconds=0.1, _dashboard=Dashboard()) == 0
 
-    # One call publishes the first partial frame; later calls come from the
-    # independent wall-clock display deadline while capture continues.
+    # StringIO test captures use the inline fallback. Its analyzer refreshes
+    # only from the independent display deadline while capture continues.
     assert refresh_calls >= 2
-    assert len(snapshots) >= refresh_calls
+    # Initial and terminal paints are the only non-interval publications.
+    assert len(snapshots) <= refresh_calls + 2
 
 
 def test_logging_only_never_starts_the_curses_dashboard(
@@ -903,6 +908,69 @@ def test_tshark_stderr_is_drained_into_a_bounded_tail() -> None:
     collector.start()
 
     assert collector.finish() == "important-tail"
+
+
+def test_wall_clock_snapshot_uses_fixed_slots_and_does_not_scroll_stale_data() -> None:
+    empty = MetricsSnapshot.empty(window_seconds=3)
+    captured = replace(empty.current, second=1_700_000_000, retry_percent=25.0)
+    snapshot = replace(
+        empty,
+        generated_at=1_700_000_001.0,
+        current=captured,
+        history=(captured,),
+    )
+
+    aligned = _wall_clock_snapshot(snapshot, 1_700_000_003.2)
+
+    assert [row.second for row in aligned.history] == [
+        1_700_000_000,
+        1_700_000_001,
+        1_700_000_002,
+    ]
+    assert aligned.history[0].retry_percent == 25.0
+    assert aligned.history[-1].retry_percent is None
+    assert aligned.current is aligned.history[-1]
+
+
+def test_real_pipe_uses_separate_streaming_aggregation_process() -> None:
+    reader_socket, writer_socket = socket.socketpair()
+    stream = reader_socket.makefile("rb", buffering=0)
+    writer_socket.sendall(_FakeTsharkProcess().stdout.getvalue().encode())
+    writer_socket.shutdown(socket.SHUT_WR)
+    started = _start_live_aggregation_process(
+        stream,
+        field_names=TSHARK_FRAME_FIELD_NAMES,
+        band="5",
+        target_primary_frequency_mhz=5180,
+        actual_definition=ChannelDefinition(5180, ChannelWidth.MHZ20, 5180),
+        capabilities=RadioCapabilities.ht20_only(),
+    )
+    assert started is not None
+    connection, worker = started
+    messages = []
+    try:
+        while True:
+            assert connection.poll(5.0)
+            message = connection.recv()
+            messages.append(message)
+            if message.eof:
+                break
+        worker.join(timeout=5.0)
+        assert worker.exitcode == 0
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=1.0)
+        connection.close()
+        stream.close()
+        reader_socket.close()
+        writer_socket.close()
+
+    published = [stats for message in messages for stats in message.stats]
+    assert [stats.second for stats in published] == [1001]
+    assert published[0].retry_eligible_frame_count == 2
+    assert published[0].retry_frame_count == 1
+    assert sum(len(message.beacons) for message in messages) == 2
 
 
 def test_coverage_pruning_forgets_bssids_outside_the_window() -> None:

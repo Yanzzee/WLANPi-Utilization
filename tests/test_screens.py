@@ -286,6 +286,10 @@ def test_composition_screen_uses_required_missing_name_placeholders() -> None:
 
 def test_retry_screen_uses_shared_history_and_highest_retry_bssid() -> None:
     snapshot = _retry_analyzer_with_history().snapshot
+    snapshot = replace(
+        snapshot,
+        current=replace(snapshot.current, retry_percent=99.0),
+    )
 
     view = RetryScreen().render(snapshot)
 
@@ -341,6 +345,10 @@ def test_beacons_screen_renders_shared_rssi_qualified_metric_and_identity() -> N
             displayed_bssid="00:11:22:33:44:50",
             displayed_rssi_dbm=-35,
         ),
+    )
+    snapshot = replace(
+        snapshot,
+        beacons=replace(snapshot.beacons, loss_percent=77.0),
     )
 
     view = BeaconsScreen().render(snapshot)

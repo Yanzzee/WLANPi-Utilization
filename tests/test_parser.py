@@ -4,6 +4,7 @@ from beacon_live.models import FrameRecord
 from beacon_live.parser import parse_tshark_row
 from beacon_live.parser import parse_tshark_frame_row
 from beacon_live.parser import parse_tshark_capture_record
+from beacon_live.parser import parse_tshark_live_record
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_OPTIONAL_FRAME_FIELD_NAMES
 
@@ -393,3 +394,65 @@ def test_parse_malformed_all_frame_rows_return_none(row: str) -> None:
 )
 def test_parse_malformed_rows_return_none(row: str) -> None:
     assert parse_tshark_row(row) is None
+
+
+def test_live_parser_fast_path_preserves_retry_header_fields() -> None:
+    values = {name: "" for name in TSHARK_FRAME_FIELD_NAMES}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.25",
+            "wlan.fc.type": "2",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "1",
+            "wlan.bssid": "AA:BB:CC:DD:EE:FF",
+            "wlan.ta": "00:11:22:33:44:55",
+            "wlan.ra": "aa:bb:cc:dd:ee:ff",
+            "wlan.sa": "00:11:22:33:44:55",
+            "wlan.da": "aa:bb:cc:dd:ee:ff",
+        }
+    )
+
+    records = parse_tshark_live_record(
+        "\t".join(values[name] for name in TSHARK_FRAME_FIELD_NAMES)
+    )
+
+    assert len(records) == 1
+    assert records[0] == FrameRecord(
+        timestamp=1700000000.25,
+        bssid="aa:bb:cc:dd:ee:ff",
+        frame_type=2,
+        frame_subtype=8,
+        retry_flag=True,
+        transmitter_address="00:11:22:33:44:55",
+        receiver_address="aa:bb:cc:dd:ee:ff",
+        source_address="00:11:22:33:44:55",
+        destination_address="aa:bb:cc:dd:ee:ff",
+    )
+
+
+def test_live_parser_keeps_complete_beacon_parsing() -> None:
+    values = {name: "" for name in TSHARK_FRAME_FIELD_NAMES}
+    values.update(
+        {
+            "frame.time_epoch": "1700000000.25",
+            "wlan.fc.type": "0",
+            "wlan.fc.subtype": "8",
+            "wlan.fc.retry": "0",
+            "wlan.bssid": "aa:bb:cc:dd:ee:ff",
+            "wlan.ssid": "Alpha",
+            "wlan.qbss.cu": "128",
+            "wlan.qbss.scount": "7",
+            "wlan.qbss.adc": "1000",
+            "radiotap.dbm_antsignal": "-45",
+            "wlan.fixed.beacon": "100",
+        }
+    )
+
+    records = parse_tshark_live_record(
+        "\t".join(values[name] for name in TSHARK_FRAME_FIELD_NAMES)
+    )
+
+    assert len(records) == 1
+    assert records[0].is_beacon
+    assert records[0].ssid == "Alpha"
+    assert records[0].qbss_station_count == 7

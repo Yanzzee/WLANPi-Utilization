@@ -166,6 +166,25 @@ elements may be unavailable. Interactive CLI mode renders this warning in its
 managed footer so it does not corrupt the screen. Re-run with `--raw-pcapng`
 when a full-length diagnostic capture is needed.
 
+## Display remains responsive but a graph has empty recent points
+
+Live graphs are fixed to the preceding 120 wall-clock seconds. If capture
+aggregation cannot deliver a completed second before its display slot, that
+slot is intentionally shown as unavailable; old data is not scrolled forward
+and presented as current. Check the TShark and `beacon-live-aggregate`
+processes separately:
+
+```bash
+pgrep -af 'wlanpi-beacon-live|beacon-live-aggregate|tshark'
+free -m
+vmstat 1
+```
+
+Normal live mode uses a dedicated aggregation process and does not retain
+individual data frames. Sustained swap activity or a saturated TShark process
+therefore points to system, driver, or dissection pressure rather than the GUI
+waiting to replay a 120-second frame-object queue.
+
 Use an explicit center frequency when testing 5 GHz or 6 GHz:
 
 ```bash

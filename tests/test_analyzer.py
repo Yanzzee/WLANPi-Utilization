@@ -1197,6 +1197,52 @@ def _frame(
     )
 
 
+def test_streaming_analyzer_matches_retained_frame_results_without_retaining_mpdus() -> None:
+    bssid = "02:00:00:00:00:01"
+    client = "02:00:00:00:10:01"
+    records = [
+        _beacon_frame(1000.0, bssid, "Alpha", -40, retry=False),
+        FrameRecord(
+            timestamp=1000.1,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=True,
+            transmitter_address=client,
+            receiver_address=bssid,
+            source_address=client,
+            destination_address=bssid,
+        ),
+        FrameRecord(
+            timestamp=1000.2,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=False,
+            transmitter_address=bssid,
+            receiver_address=client,
+            source_address=bssid,
+            destination_address=client,
+        ),
+        _beacon_frame(1001.2, bssid, "Alpha", -39, retry=False),
+    ]
+    retained = Analyzer()
+    streaming = Analyzer(streaming=True)
+    for record in records:
+        retained.ingest(record, publish_snapshot=False)
+        streaming.ingest(record, publish_snapshot=False)
+
+    retained_rows = retained.flush(include_history=False)
+    streaming_rows = streaming.flush(include_history=False)
+
+    assert streaming_rows == retained_rows
+    assert streaming._frames_by_second == {}
+    assert sum(
+        projection.frame_count
+        for projection in streaming._streaming_frames_by_second.values()
+    ) == len(records)
+
+
 def _address_frame(
     timestamp: float,
     *,
