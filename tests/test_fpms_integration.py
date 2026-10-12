@@ -1,5 +1,7 @@
 import json
+import importlib.util
 import signal
+import threading
 from datetime import datetime
 from pathlib import Path
 from types import FunctionType
@@ -47,7 +49,7 @@ def test_fpms_launch_command_enables_both_logs_together() -> None:
     assert display_only[:9] == [
         "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live",
         "--iface",
-        "wlan0",
+        "wlanpi0",
         "--band",
         "5",
         "--channel",
@@ -458,7 +460,7 @@ def test_launch_failure_is_reported_without_leaving_session(
     errors: list[str] = []
     monkeypatch.setattr(
         channel_utilization,
-        "_display_error",
+        "_display_status",
         lambda g_vars, message: errors.append(message),
     )
 
@@ -470,8 +472,109 @@ def test_launch_failure_is_reported_without_leaving_session(
 
     app.launch(band="5", channel=36, logging=False)
 
-    assert errors == ["Unable to start capture."]
+    assert errors == ["Unable to start capture. Check journal."]
     assert "channel_utilization_session" not in g_vars
+    assert g_vars["display_state"] == "menu"
+
+
+def test_capture_interface_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WLANPI_UTILIZATION_IFACE", "capture1")
+    spec = importlib.util.spec_from_file_location(
+        "utilization_interface_override", channel_utilization.__file__
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    command = module.build_launch_command(band="2.4", channel=1, logging=False)
+    assert command[command.index("--iface") + 1] == "capture1"
+
+
+@pytest.mark.parametrize("during_start", [False, True])
+def test_capture_exit_restores_menu_and_allows_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    during_start: bool,
+) -> None:
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    # Drive the worker synchronously to verify the fast-exit ordering too.
+    monkeypatch.setattr(channel_utilization._DisplaySession, "start_display", lambda session: None)
+    messages = []
+    menu_returns = []
+    processes = []
+    g_vars = {"display_state": "page"}
+
+    def return_to_menu():
+        assert g_vars["display_state"] == "page"
+        assert "page_exit_handler" not in g_vars
+        g_vars["display_state"] = "menu"
+        menu_returns.append(True)
+
+    def status(state, message):
+        messages.append(message)
+        # A refresh while an alert is visible must not launch a new child.
+        app.launch(band="2.4", channel=1, logging=False)
+
+    def popen(command):
+        process = _FakeProcess(command)
+        process.returncode = 1
+        if during_start and not processes:
+            process.running = False
+        processes.append(process)
+        return process
+
+    g_vars["channel_utilization_return_to_menu"] = return_to_menu
+    monkeypatch.setattr(channel_utilization, "_display_status", status)
+    app = channel_utilization.ChannelUtilizationApp(g_vars, popen=popen)
+    app.launch(band="2.4", channel=1, logging=False)
+    session = g_vars["channel_utilization_session"]
+    processes[0].running = False
+    if during_start:
+        # FPMS's periodic refresh can observe the exit before the worker.
+        app.launch(band="2.4", channel=1, logging=False)
+    else:
+        session._display_frames()
+    session.report_exit()
+
+    assert messages == ["Capture stopped (1). Check journal."]
+    assert menu_returns == [True]
+    assert len(processes) == 1
+    assert g_vars["display_state"] == "menu"
+    assert "channel_utilization_session" not in g_vars
+    assert "channel_utilization_recovering" not in g_vars
+    assert not any(key.startswith("page_") for key in g_vars)
+
+    g_vars["display_state"] = "page"
+    app.launch(band="2.4", channel=1, logging=False)
+    assert len(processes) == 2
+    assert g_vars["display_state"] == "page"
+    g_vars["channel_utilization_session"].stop()
+
+
+def test_immediate_exit_worker_starts_after_handlers_are_registered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    messages = []
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
+    returned = threading.Event()
+    g_vars = {"display_state": "page"}
+
+    def return_to_menu():
+        g_vars["display_state"] = "menu"
+        returned.set()
+
+    def popen(command):
+        process = _FakeProcess(command)
+        process.running = False
+        return process
+
+    g_vars["channel_utilization_return_to_menu"] = return_to_menu
+    app = channel_utilization.ChannelUtilizationApp(g_vars, popen=popen)
+    app.launch(band="2.4", channel=1, logging=False)
+    assert returned.wait(timeout=2)
+    assert g_vars["display_state"] == "menu"
+    assert "channel_utilization_session" not in g_vars
+    assert not any(key.startswith("page_") for key in g_vars)
+    assert messages == ["Capture stopped (0). Check journal."]
 
 
 @pytest.mark.parametrize(
@@ -757,11 +860,12 @@ class _FakeProcess:
     def __init__(self, command: list[str]) -> None:
         self.command = command
         self.running = True
+        self.returncode = 0
         self.signal_received: Optional[int] = None
         self.wait_timeout: Optional[float] = None
 
     def poll(self) -> Optional[int]:
-        return None if self.running else 0
+        return None if self.running else self.returncode
 
     def send_signal(self, value: int) -> None:
         self.signal_received = value

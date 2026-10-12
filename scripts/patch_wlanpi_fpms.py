@@ -197,6 +197,13 @@ def _patch_fpms(text: str, path: Path) -> str:
             raise FPMSInstallError(f"FPMS post-menu anchor not found in {path}")
         text = text.replace(anchor, append_code + anchor, 1)
 
+    return_handler = (
+        "    g_vars['channel_utilization_return_to_menu'] = menu_left\n"
+    )
+    if return_handler not in text:
+        # This also upgrades existing patches without registering a second app.
+        text = text.replace(append_code, return_handler + append_code, 1)
+
     # The three auxiliary-key dispatchers live in fpms.py, not Button.
     for button_number in (1, 2, 3):
         text = _insert_page_handler(

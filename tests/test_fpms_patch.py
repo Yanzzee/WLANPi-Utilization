@@ -70,6 +70,7 @@ def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
     )
     namespace: dict[str, object] = {
         "build_channel_utilization_menu": lambda g_vars: {},
+        "menu_left": lambda: None,
     }
     exec(executable, namespace)
     calls: list[int] = []

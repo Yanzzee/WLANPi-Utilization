@@ -24,7 +24,7 @@ The primary target is a WLAN Pi R4 running WLAN Pi OS with:
 
 - WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
 - Python 3.9 or newer;
-- a monitor-mode-capable Wi-Fi interface named `wlan0`;
+- a monitor-mode-capable Wi-Fi interface (the front panel defaults to `wlanpi0`);
 - `git`, `ip`, `iw`, and `tshark`; and
 - root access through `sudo`.
 
@@ -64,6 +64,11 @@ Python environment.
 Rerun the installer after updating this repository or upgrading FPMS. It
 safely refreshes its managed CLI launchers as well as the application and FPMS
 integration.
+
+The front panel uses `wlanpi0`, the monitor interface created by WLAN Pi Core
+on the first radio. Check `iw dev` and `iw phy` for interface names and monitor
+support. For another interface, set `WLANPI_UTILIZATION_IFACE` in the FPMS
+service environment as described in [Troubleshooting](docs/troubleshooting.md#the-wi-fi-interface-is-missing).
 
 ## Use the FPMS front panel
 

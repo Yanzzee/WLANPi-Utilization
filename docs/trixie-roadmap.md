@@ -16,9 +16,13 @@ Record the tested OS, package versions, adapter, and result with each item.
   **Acceptance:** regression tests cover the actual Trixie FPMS layout, repeat
   installation, and failure recovery; Apps → Utilization appears on the device,
   and up/down navigation and left-button exit work.
-  **Status:** implementation added; 326 tests pass on macOS with Python 3.13.3,
+  **Status:** implementation added; 331 tests pass on macOS with Python 3.13.3,
   including regression tests using the unmodified FPMS 1.4.24-1 source layout
-  and simulated write/service failures. On-device acceptance is pending.
+  and simulated write/service failures. On-device testing confirmed the menu
+  appears, but Display failed because `wlan0` on `phy1` lacks monitor support.
+  The device reports `wlanpi0` on `phy0` already in monitor mode on channel 1.
+  The front-panel default and failed-child menu recovery have been updated;
+  live display acceptance is pending a repeat test.
   Follow [the Trixie installation checks](pi_testing.md#trixie-menu-installation-acceptance)
   and record the device OS, package versions, adapter, and results here.
 
@@ -41,6 +45,9 @@ Record the tested OS, package versions, adapter, and result with each item.
   consistently for capture, capabilities, tuning, and survey reads.
   **Acceptance:** test renamed interfaces, multiple adapters, and a namespaced
   radio; missing or unavailable interfaces produce a useful message.
+  **Status:** the front-panel default now uses `wlanpi0`, with an explicit
+  `WLANPI_UTILIZATION_IFACE` override to unblock item 1 testing. Automatic
+  discovery and namespace support remain pending.
 
 - [ ] **5. Coordinate radio use and restore state.** Detect conflicting use by
   Core, Profiler, Kismet, or another capture. Reuse a suitable available monitor

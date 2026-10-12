@@ -120,14 +120,35 @@ List interfaces known to `iw`:
 iw dev
 ```
 
-The FPMS integration currently uses `wlan0`. CLI and test scripts can use
-another name through `--iface` or the script's first argument.
+The FPMS integration defaults to the Trixie monitor interface `wlanpi0`.
+CLI and test scripts can use another name through `--iface` or the script's
+first argument. An interface named `wlan0` may belong to a radio that does not
+support monitor mode; check its phy rather than relying on interface numbering.
+
+To configure another front-panel interface, run `sudo systemctl edit wlanpi-fpms`
+and add the following, replacing `capture1` with the chosen interface:
+
+```ini
+[Service]
+Environment="WLANPI_UTILIZATION_IFACE=capture1"
+```
+
+Then run `sudo systemctl restart wlanpi-fpms`. The adapter reads this setting
+when FPMS starts. Automatic discovery and network namespace support remain
+planned roadmap work.
 
 Confirm the adapter/driver supports monitor mode:
 
 ```bash
 iw phy
 ```
+
+If selecting Display leaves the menu visible and the journal reports
+`iw dev wlan0 set type monitor` followed by `Operation not supported`, capture
+has failed to start on the selected radio. Update and rerun the installer to
+use the `wlanpi0` default and the failed-launch menu recovery. The updated
+adapter briefly reports an exited capture child and returns to the channel
+menu. Inspect `journalctl -u wlanpi-fpms` for the underlying command error.
 
 ## The channel cannot be set
 

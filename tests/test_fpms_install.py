@@ -51,10 +51,12 @@ def test_trixie_install_adds_one_app_and_is_idempotent(package: Path) -> None:
         if isinstance(node, ast.AnnAssign)
         and isinstance(node.target, ast.Name) and node.target.id == "menu"
     )
-    registration = main.body[menu_index + 1]
+    return_handler = main.body[menu_index + 1]
+    assert isinstance(return_handler, ast.Assign)
+    registration = main.body[menu_index + 2]
     assert isinstance(registration, ast.For)
     menu_assignment = main.body[menu_index]
-    nodes = [ast.Assign(targets=[menu_assignment.target], value=menu_assignment.value), registration]
+    nodes = [ast.Assign(targets=[menu_assignment.target], value=menu_assignment.value), return_handler, registration]
     namespace = {
         node.id: (lambda: None)
         for statement in nodes for node in ast.walk(statement)
@@ -68,6 +70,7 @@ def test_trixie_install_adds_one_app_and_is_idempotent(package: Path) -> None:
     exec(compile(module, "trixie_menu", "exec"), namespace)
     apps = next(item["action"] for item in namespace["menu"] if item["name"] == "Apps")
     assert [item["name"] for item in apps] == ["Kismet", "Profiler", "Scanner", "Utilization"]
+    assert callable(namespace["g_vars"]["channel_utilization_return_to_menu"])
 
 
 def test_trixie_buttons_dispatch_and_exit_return_to_menu(package: Path) -> None:
@@ -197,6 +200,18 @@ def test_previous_partial_install_is_repaired(package: Path) -> None:
     patcher.install_fpms(package, ADAPTER)
     assert snapshot(package) == installed
     assert b"page_exit_handler" in installed["modules/nav/buttons.py"][0]
+
+
+def test_existing_menu_patch_gains_return_handler_without_duplicate_app(package: Path) -> None:
+    patcher.install_fpms(package, ADAPTER)
+    fpms = package / "fpms.py"
+    fpms.write_text(fpms.read_text().replace(
+        "    g_vars['channel_utilization_return_to_menu'] = menu_left\n", ""
+    ))
+    patcher.install_fpms(package, ADAPTER)
+    text = fpms.read_text()
+    assert text.count("build_channel_utilization_menu(g_vars)") == 1
+    assert text.count("channel_utilization_return_to_menu") == 1
 
 
 def test_trixie_auxiliary_handlers_preserve_native_key2_outside_app(package: Path) -> None:
