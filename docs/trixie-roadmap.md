@@ -10,21 +10,17 @@ Record the tested OS, package versions, adapter, and result with each item.
 
 ## Milestones
 
-- [ ] **1. Repair FPMS menu installation.** Fix the confirmed quote-sensitive
+- [x] **1. Repair FPMS menu installation.** Fix the confirmed quote-sensitive
   `buttons.py` patch failure. Validate all patches before writing, restore files
   if installation fails, and verify FPMS starts successfully after installation.
   **Acceptance:** regression tests cover the actual Trixie FPMS layout, repeat
   installation, and failure recovery; Apps → Utilization appears on the device,
   and up/down navigation and left-button exit work.
-  **Status:** implementation added; 331 tests pass on macOS with Python 3.13.3,
-  including regression tests using the unmodified FPMS 1.4.24-1 source layout
-  and simulated write/service failures. On-device testing confirmed the menu
-  appears, but Display failed because `wlan0` on `phy1` lacks monitor support.
-  The device reports `wlanpi0` on `phy0` already in monitor mode on channel 1.
-  The front-panel default and failed-child menu recovery have been updated;
-  live display acceptance is pending a repeat test.
-  Follow [the Trixie installation checks](pi_testing.md#trixie-menu-installation-acceptance)
-  and record the device OS, package versions, adapter, and results here.
+  **Status:** complete. Automated coverage uses the unmodified FPMS 1.4.24-1
+  layout and simulated write/service failures. On October 12, 2026, the user
+  confirmed the device works after changing the capture default to `wlanpi0`
+  on `phy0` and adding failed-child menu recovery. The device test used
+  2.4 GHz channel 1; `wlan0` on `phy1` does not support monitor mode.
 
 - [ ] **2. Locate the active FPMS installation reliably.** Resolve the package
   through the interpreter used by the FPMS launcher instead of globbing every
@@ -32,6 +28,12 @@ Record the tested OS, package versions, adapter, and result with each item.
   after FPMS package updates.
   **Acceptance:** stale Python directories do not affect discovery; an FPMS
   update followed by reinstallation restores the menu integration.
+  **Status:** implementation and automated checks added. Discovery queries the
+  launcher interpreter without importing FPMS. Tests cover stale directories,
+  Python path shadowing, broken environments, unsupported layouts, and
+  reinstallation after a simulated package update. The full suite passes
+  349 tests on macOS with Python 3.13.3. On-device verification is pending;
+  follow [the discovery checks](pi_testing.md#fpms-package-discovery-acceptance).
 
 - [ ] **3. Adapt front-panel controls to current FPMS behavior.** Decide how
   Utilization should handle Key 2, now used by FPMS for display rotation, while

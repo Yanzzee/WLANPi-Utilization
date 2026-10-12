@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -40,6 +42,7 @@ def main() -> int:
 
     try:
         package = args.fpms_package or _find_fpms_package()
+        print(f"Resolved FPMS Python package: {package}", flush=True)
         install_fpms(package, args.adapter, restart_service=args.restart_service)
     except (FPMSInstallError, OSError, SyntaxError, UnicodeError) as error:
         raise SystemExit(f"Utilization FPMS installation failed: {error}") from error
@@ -155,17 +158,76 @@ def _restart_and_verify(command_runner: Callable, sleep: Callable) -> None:
         )
 
 
-def _find_fpms_package() -> Path:
-    candidates = sorted(
-        Path("/opt/wlanpi-fpms/lib").glob("python*/site-packages/fpms")
-    )
-    if len(candidates) != 1:
-        found = ", ".join(str(path) for path in candidates) or "none"
-        raise SystemExit(
-            "Could not uniquely locate the FPMS Python package under "
-            f"/opt/wlanpi-fpms (found: {found})"
+def _find_fpms_package(
+    launcher: Path = Path("/usr/sbin/fpms"),
+    *,
+    command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> Path:
+    """Locate the package visible to the launcher's Python without importing it."""
+    try:
+        target = launcher.resolve(strict=True)
+        with target.open(encoding="utf-8") as stream:
+            shebang = stream.readline(4096).strip()
+        arguments = shlex.split(shebang[2:]) if shebang.startswith("#!") else []
+    except (OSError, RuntimeError, UnicodeError, ValueError) as error:
+        raise FPMSInstallError(f"Cannot read FPMS launcher {launcher}: {error}") from error
+
+    if (
+        len(arguments) != 1
+        or not Path(arguments[0]).is_absolute()
+        or not Path(arguments[0]).name.startswith("python")
+    ):
+        raise FPMSInstallError(
+            f"Unsupported FPMS launcher {launcher} ({target}): expected a direct "
+            "absolute Python shebang. Use --fpms-package for an explicit layout."
         )
-    return candidates[0]
+    interpreter = Path(arguments[0])
+    if not interpreter.is_file() or not os.access(interpreter, os.X_OK):
+        raise FPMSInstallError(f"FPMS interpreter is missing or not executable: {interpreter}")
+
+    # Keep the venv interpreter path from the shebang. Resolving its symlink to
+    # /usr/bin/python would select the system site-packages instead of FPMS's.
+    # Isolated mode also excludes the checkout, PYTHONPATH, and user packages.
+    probe = (
+        "import importlib.util, json; "
+        "spec = importlib.util.find_spec('fpms'); "
+        "print(json.dumps(list(spec.submodule_search_locations or []) "
+        "if spec is not None else []))"
+    )
+    try:
+        result = command_runner(
+            [str(interpreter), "-I", "-c", probe],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise FPMSInstallError(
+            f"Could not query FPMS interpreter {interpreter}: {error}"
+        ) from error
+    if result.returncode != 0:
+        raise FPMSInstallError(
+            f"FPMS interpreter {interpreter} exited with status {result.returncode}: "
+            f"{(result.stderr or '').strip()}"
+        )
+    try:
+        locations = json.loads(result.stdout)
+    except (ValueError, TypeError) as error:
+        raise FPMSInstallError(
+            f"Invalid package location from FPMS interpreter {interpreter}"
+        ) from error
+    if (
+        not isinstance(locations, list)
+        or len(locations) != 1
+        or not isinstance(locations[0], str)
+        or not Path(locations[0]).is_absolute()
+        or not Path(locations[0]).is_dir()
+    ):
+        raise FPMSInstallError(
+            f"Could not uniquely locate an installed fpms package through {interpreter}"
+        )
+    return Path(locations[0]).resolve()
 
 
 def _patch_fpms(text: str, path: Path) -> str:

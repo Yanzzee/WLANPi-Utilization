@@ -271,6 +271,31 @@ continues. Press left and confirm capture stops and the channel menu returns.
 Record the OS, FPMS version, adapter, installer results, and button results in
 [the roadmap](trixie-roadmap.md) before marking item 1 complete.
 
+### FPMS package discovery acceptance
+
+For roadmap item 2, inspect the launcher and rerun installation from the updated
+checkout:
+
+```bash
+readlink -f /usr/sbin/fpms
+head -n 1 /usr/sbin/fpms
+dpkg-query -W wlanpi-fpms
+sudo ./scripts/install_wlanpi_fpms.sh
+systemctl is-active wlanpi-fpms
+```
+
+Confirm the printed `Resolved FPMS Python package` path belongs to the launcher's
+Python environment. On DeadEye it normally ends in
+`/opt/wlanpi-fpms/lib/python3.13/site-packages/fpms`. Open Apps → Utilization and
+verify there is one menu entry and Display still works.
+
+Automated tests cover stale Python directories and a simulated package update.
+After a routine FPMS package update on the device, rerun the Utilization
+installer and check the menu/display again; package updates can replace the
+patched files. If discovery or layout validation fails, retain the exact error
+and launcher/package versions for diagnosis. Record the device results in
+[the roadmap](trixie-roadmap.md).
+
 The installed menu is:
 
 ```text

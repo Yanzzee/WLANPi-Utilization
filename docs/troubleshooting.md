@@ -8,19 +8,32 @@ This guide covers common WLAN Pi, capture, display, metric, and logging issues.
 The front-panel installer expects:
 
 - `/usr/sbin/fpms`;
-- one FPMS Python package under
-  `/opt/wlanpi-fpms/lib/python*/site-packages/fpms`; and
+- a direct absolute Python shebang in that launcher, pointing to an executable
+  FPMS interpreter with one installed `fpms` package; and
 - the FPMS 1.4.24 layout tested with WLAN Pi OS 26.10 DeadEye.
 
 Confirm FPMS is installed and running:
 
 ```bash
 ls -l /usr/sbin/fpms
+head -n 1 /usr/sbin/fpms
 systemctl status wlanpi-fpms --no-pager
 ```
 
+The installer follows the launcher symlink and asks its Python interpreter for
+the package location without importing FPMS or initializing hardware. It prints
+`Resolved FPMS Python package: ...` before patching. Stale Python directories
+under `/opt/wlanpi-fpms/lib` and packages supplied through `PYTHONPATH` do not
+affect discovery. The venv interpreter path is preserved even if its executable
+is a symlink to the system Python.
+
+Missing interpreters, invalid package locations, shell wrappers, and `/usr/bin/env`
+shebangs produce an explicit discovery error. Unsupported package layouts are
+rejected before FPMS files are modified. For a custom launcher, the patcher
+supports an explicit `--fpms-package` path; the normal installer uses discovery.
+
 An FPMS package upgrade can replace the app adapter or patched navigation
-files. Rerun the installer afterward:
+files, or change its Python environment. Rerun the installer afterward:
 
 ```bash
 sudo ./scripts/install_wlanpi_fpms.sh

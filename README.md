@@ -63,7 +63,8 @@ Python environment.
 
 Rerun the installer after updating this repository or upgrading FPMS. It
 safely refreshes its managed CLI launchers as well as the application and FPMS
-integration.
+integration. It locates FPMS through its launcher's Python environment and
+prints the resolved package path before patching.
 
 The front panel uses `wlanpi0`, the monitor interface created by WLAN Pi Core
 on the first radio. Check `iw dev` and `iw phy` for interface names and monitor
