@@ -84,6 +84,63 @@ suggestions for missing commands but does not run `apt install`.
    inherited system packages, install failures, production path boundaries,
    fresh production CLI/replay, and removal of stale app files on reinstallation.
 
+## TShark 4.4 and metric acceptance
+
+For roadmap item 7, first run this read-only check from the updated repository:
+
+```bash
+tshark --version
+dpkg-query -W tshark wireshark-common iw
+/opt/wlanpi-beacon-live/bin/python scripts/check_tshark.py
+```
+
+The check does not open an interface, change its state, or start a capture. It
+reports the installed version and negotiated fields, then decodes four original
+synthetic PCAPs with the production dissectors and shared analysis engine. Each
+case must report `OK`: RSSI -47 dBm, QBSS CU 128/255, station count 12, admission
+capacity 42, the expected HT/VHT/HE/EHT definition, and 3 retries / 4 eligible
+frames (75%). An EHT320 fixture passing does not mean your adapter supports
+320 MHz. Probe failures and missing required fields must now stop live startup
+before radio preparation; missing optional metadata can be omitted safely.
+
+Reinstall the application to test the updated live path:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+Exercise FPMS Display and normal exit on 2.4 GHz channel 1, 5 GHz channel 36,
+and an available 6 GHz channel such as 5. Test only bands your adapter supports.
+Verify RSSI, QBSS, retry history, rotation/navigation, and radio restoration.
+Some APs omit QBSS; that must remain unavailable rather than becoming zero.
+Hex SSID names remain a separate known issue.
+
+For metric comparison, exit Utilization in FPMS, then use the single-capture
+workflow below with `--iface auto`. Collect one 60-second run per supported
+band. For example, start with 2.4 GHz:
+
+```bash
+sudo /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live \
+  --iface auto --band 2.4 --channel 1 --channel-width 20 \
+  --local-cu --survey-debug --log --log-dir /tmp/utilization-item7-24 \
+  --raw-pcapng /tmp/utilization-item7-24/channel1.pcapng
+```
+
+Stop with Ctrl-C. Repeat with `--band 5 --channel 36` and `--band 6 --channel 5`,
+using distinct log directories and filenames. Omit `--channel-width 20` to
+exercise the default 80 MHz capture on 5/6 GHz, then test wider explicit
+settings only where supported. Compare saved packets against logged QBSS/RSSI
+and the independent retry counts described below. Check requested/actual
+width and coverage in the PCAPNG sidecar; unsupported or unverified definitions
+must remain explicit.
+
+`--survey-debug` prints the selected local survey frequency and active/busy
+counter deltas. Local CU must equal `100 * busy_delta / active_delta` for a
+valid same-channel pair. Missing/reset counters or a busy delta greater than
+active must produce unavailable CU. This is a separate measurement from AP
+QBSS CU and need not agree with it. Retain output and record which band/width
+combinations deliver frames and which expose usable survey counters.
+
 ## Run a smoke capture
 
 ```bash
@@ -154,7 +211,7 @@ comparison. This avoids a second capture process competing for the adapter:
 
 ```bash
 sudo .venv/bin/wlanpi-beacon-live \
-  --iface wlan0 --band 5 --channel 36 \
+  --iface auto --band 5 --channel 36 \
   --log --log-dir /tmp/beacon-live-validation \
   --raw-pcapng /tmp/beacon-live-validation/channel36.pcapng
 ```
@@ -232,7 +289,7 @@ Repeat the same-primary test with controlled AP/client traffic at 20, 40+, 40-,
 1. Keep primary/control channel 36 (5180 MHz); change only advertised width and
    center. Generate sustained unicast traffic in both directions and introduce
    controlled attenuation/interference so nonzero retries occur.
-2. Confirm the beacon JSONL definition and `iw dev wlan0 info` actual width and
+2. Confirm the beacon JSONL definition and `iw dev <selected-interface> info` actual width and
    centers. The sidecar must say `complete`; otherwise treat the run as partial.
 3. Confirm Radiotap shows frames using the wider bandwidth and that application
    retry counts include them.

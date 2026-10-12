@@ -48,6 +48,8 @@ from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.parser import parse_tshark_live_record
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
+from beacon_live.parser import TSHARK_REQUIRED_FRAME_FIELD_NAMES
+from beacon_live.parser import TSHARK_METADATA_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_MULTI_VALUE_SEPARATOR
 from beacon_live.parser import TSHARK_OPTIONAL_FRAME_FIELD_NAMES
@@ -527,17 +529,24 @@ def available_tshark_fields(
             capture_output=True,
             text=True,
             check=False,
+            timeout=15,
         )
-    except OSError:
-        return frozenset()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"Unable to inspect TShark capture fields: {exc}") from exc
     if result.returncode != 0:
-        return frozenset()
-    return frozenset(
+        raise ValueError(
+            f"TShark field inspection failed ({result.returncode}): "
+            f"{result.stderr.strip() or 'no diagnostic output'}"
+        )
+    fields = frozenset(
         columns[2]
         for line in result.stdout.splitlines()
         for columns in (line.split("\t"),)
         if len(columns) >= 3 and columns[0] == "F"
     )
+    if not fields:
+        raise ValueError("TShark field inspection returned no field definitions")
+    return fields
 
 
 def select_tshark_frame_fields(
@@ -545,14 +554,20 @@ def select_tshark_frame_fields(
     *,
     include_diagnostics: bool = True,
 ) -> tuple[str, ...]:
+    missing = set(TSHARK_REQUIRED_FRAME_FIELD_NAMES) - available_fields
+    if missing:
+        raise ValueError(
+            "Installed TShark is missing required capture fields: "
+            + ", ".join(sorted(missing))
+        )
     optional_fields = (
         TSHARK_OPTIONAL_FRAME_FIELD_NAMES
         if include_diagnostics
         else TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
     )
-    return TSHARK_FRAME_FIELD_NAMES + tuple(
+    return TSHARK_REQUIRED_FRAME_FIELD_NAMES + tuple(
         field
-        for field in optional_fields
+        for field in TSHARK_METADATA_FRAME_FIELD_NAMES + optional_fields
         if field in available_fields
     )
 
@@ -1247,6 +1262,13 @@ def run_live(
     _set_dashboard_collecting(dashboard, True)
     dashboard.refresh(analyzer.snapshot)
 
+    # Inspect the installed decoder before acquiring or modifying any radio.
+    tshark_available_fields = available_tshark_fields()
+    tshark_fields = select_tshark_frame_fields(
+        tshark_available_fields,
+        include_diagnostics=raw_capture_path is not None,
+    )
+
     if iface == "auto":
         target = discover_capture_target(resolved_frequency_mhz, namespace=netns)
         iface, netns = target.interface, target.namespace
@@ -1407,11 +1429,6 @@ def run_live(
                 rotation_interval_seconds=rotation_interval_seconds,
                 monotonic=time.monotonic,
             )
-        tshark_available_fields = available_tshark_fields()
-        tshark_fields = select_tshark_frame_fields(
-            tshark_available_fields,
-            include_diagnostics=raw_capture_path is not None,
-        )
         if (
             auto_channel_width
             and tshark_available_fields

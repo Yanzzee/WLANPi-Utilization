@@ -116,7 +116,7 @@ Record the tested OS, package versions, adapter, and result with each item.
   References: [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
   and [Core usage policy](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/services/network_namespace_service.py#L700).
 
-- [ ] **6. Align Python setup with Trixie.** Require an isolated environment in
+- [x] **6. Align Python setup with Trixie.** Require an isolated environment in
   the development setup script, retain the production `/opt` environment, and
   align support metadata and documentation with the Python 3.13 target.
   **Acceptance:** fresh development and production installs, CLI launchers,
@@ -129,8 +129,8 @@ Record the tested OS, package versions, adapter, and result with each item.
   before copying app files. Automated checks cover setup failures and a fresh
   production install/reinstall with actual launchers and replay. A fresh editable
   development install also passes both CLI/replay checks and all 446 tests;
-  the existing environment passes the same full suite. On-device
-  acceptance is pending; follow [the environment checks](pi_testing.md#python-313-environment-acceptance).
+  the existing environment passes the same full suite. The user confirmed
+  successful testing after deploying item 6 on October 12, 2026.
 
 - [ ] **7. Validate capture and metrics with TShark 4.4.** Check required fields
   and optional-field negotiation against the shipped version. Use representative
@@ -138,6 +138,19 @@ Record the tested OS, package versions, adapter, and result with each item.
   **Acceptance:** compare live results with the same saved capture across
   supported 2.4/5/6 GHz adapters; unsupported widths and unavailable survey data
   remain explicit. Add small sanitized regression fixtures where useful.
+  **Status:** implemented; all 472 tests pass on Python 3.13.3. Packet decoding
+  was verified with TShark 4.4.19 and 4.6.0. On-device acceptance is pending.
+  Field inspection
+  now has a bounded timeout, reports probe failures, validates core fields
+  before radio discovery/preparation, and negotiates optional AP metadata.
+  Original synthetic PCAPs and actual TShark 4.4.19 exports cover 2.4 GHz HT40,
+  5 GHz VHT160, 6 GHz HE80/EHT320, puncturing, RSSI, QBSS, and repeated retries
+  through the shared parser/analyzer. Negative iw width declarations no longer
+  imply support. Survey parsing recognizes inline `[in use]`, pairs counters
+  by channel identity, and rejects impossible busy/active deltas. A read-only
+  packet check needs no pytest or wireless hardware. Follow
+  [the TShark 4.4 checks](pi_testing.md#tshark-44-and-metric-acceptance) for device
+  validation; synthetic packet decoding does not establish driver coverage.
 
 - [ ] **8. Expand diagnostics and finish release documentation.** Collect OS
   and package versions, active FPMS paths, service status, relevant journal
@@ -161,7 +174,9 @@ Record the tested OS, package versions, adapter, and result with each item.
   item 2. Investigate TShark SSID output and parser normalization separately
   from front-panel controls, using a known SSID and a sanitized capture/output
   sample. Verify readable names in the LCD, CLI, and logs; retain correct hidden
-  SSID and non-text byte handling. No cause or fix has been confirmed.
+  SSID and non-text byte handling. Item 7 confirmed that TShark 4.4.19 reports
+  `wlan.ssid` as FT_BYTES and emits the synthetic `Trixie-Test` name as hex.
+  Normalization is still deferred; no SSID fix is included in item 7.
 
 ## Architecture constraints
 

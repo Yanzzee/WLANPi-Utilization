@@ -45,9 +45,12 @@ TSHARK_FRAME_FIELD_NAMES = (
     "wlan.bssid_resolved",
 )
 
-# These fields are appended only when ``tshark -G fields`` reports them. This
-# lets one source tree work with the older TShark commonly installed on WLAN Pi
-# images while using HE/EHT and packet-audit data on newer versions.
+# Core decoding fields must exist before the radio is prepared. AP names and
+# address resolution are useful metadata, but are not capture prerequisites.
+TSHARK_REQUIRED_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[:14]
+TSHARK_METADATA_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[14:]
+
+# Request optional fields only when the installed TShark reports them.
 TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
     "wlan.fc",
     "wlan_radio.frequency",

@@ -51,6 +51,7 @@ from beacon_live.channel import CoverageDecision
 
 @pytest.fixture(autouse=True)
 def hardware_free_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset(TSHARK_FRAME_FIELD_NAMES))
     monkeypatch.setattr(
         "beacon_live.live.discover_capture_target",
         lambda frequency, *, namespace=None: CaptureTarget("wlan0", namespace),
@@ -138,7 +139,7 @@ def test_namespaced_live_uses_one_target_and_one_capture_and_records_context(
     monkeypatch.setattr(live, "_read_survey_samples_safely", lambda iface: (
         operations.append(("survey", iface)) or []
     ))
-    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset())
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset(TSHARK_FRAME_FIELD_NAMES))
     def start(iface, **kwargs):
         operations.append(("capture", iface))
         return _FakeTsharkProcess()
@@ -186,7 +187,7 @@ def test_radio_session_restores_after_live_exit_and_startup_failures(
     monkeypatch.setattr(live.subprocess, "run", hardware.run)
     monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda *args: RadioCapabilities.ht20_only())
     monkeypatch.setattr(live, "_read_actual_channel_safely", lambda iface, requested: (requested, True))
-    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset())
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset(TSHARK_FRAME_FIELD_NAMES))
     def configure(iface, channel, **kwargs):
         configure_monitor_interface(iface, channel, **kwargs)
         if failure_stage == "configure":
@@ -386,7 +387,7 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
 
 def test_live_field_selection_keeps_retry_and_frequency_fallbacks() -> None:
     fields = select_tshark_frame_fields(
-        frozenset(
+        frozenset(TSHARK_FRAME_FIELD_NAMES) | frozenset(
             {
                 "wlan.fc",
                 "wlan_radio.frequency",

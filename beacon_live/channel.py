@@ -407,20 +407,29 @@ def definition_from_operation_fields(
 def parse_iw_phy_capabilities(text: str) -> RadioCapabilities:
     lower = text.lower()
     widths = {ChannelWidth.MHZ20}
-    if "ht capabilities" in lower or "ht20/ht40" in lower or "ht40" in lower:
+    # iw also prints "neither 160 nor 80+80" and negative capabilities.
+    # Only affirmative width declarations may enable a wider tune request.
+    width_lines = [
+        line for line in lower.splitlines()
+        if not any(word in line for word in ("neither", "not supported", "unsupported"))
+    ]
+    positive = "\n".join(width_lines)
+    if "ht20/ht40" in positive or "he40" in positive:
         widths.add(ChannelWidth.MHZ40)
-    if "vht capabilities" in lower or "he iftypes" in lower or "eht iftypes" in lower:
+    if "vht capabilities" in positive or "he80" in positive:
         widths.add(ChannelWidth.MHZ80)
-    if "160 mhz" in lower or "160mhz" in lower or "he160" in lower:
+    if re.search(r"\b(?:160\s*mhz|he160)\b", positive):
         widths.add(ChannelWidth.MHZ160)
-    if "80+80" in lower or "80p80" in lower:
+    if "80+80" in positive or "80p80" in positive:
         widths.add(ChannelWidth.MHZ80P80)
-    if "320 mhz" in lower or "320mhz" in lower:
+    if re.search(r"\b320\s*mhz\b", positive):
         widths.add(ChannelWidth.MHZ320)
     frequencies = frozenset(
-        int(value)
-        for value in re.findall(r"\*\s+(\d{4})(?:\.0+)?\s+mhz", lower)
-        if "disabled" not in _line_containing(lower, value)
+        int(match.group(1))
+        for line in lower.splitlines()
+        if "disabled" not in line
+        for match in [re.search(r"\*\s+(\d{4})(?:\.0+)?\s+mhz", line)]
+        if match is not None
     )
     supports_monitor = bool(re.search(r"^\s*\*\s+monitor\s*$", lower, re.MULTILINE))
     return RadioCapabilities(
@@ -667,7 +676,3 @@ def _continuous_centers(center: int, width_mhz: int) -> tuple[int, ...]:
     count = max(1, width_mhz // 20)
     first = center - (count - 1) * 10
     return tuple(first + index * 20 for index in range(count))
-
-
-def _line_containing(text: str, value: str) -> str:
-    return next((line for line in text.splitlines() if value in line), "")

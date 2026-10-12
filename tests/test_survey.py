@@ -171,3 +171,51 @@ def test_compute_local_cu_percent_returns_none_for_missing_or_reset_counters(
     current: SurveySample,
 ) -> None:
     assert compute_local_cu_percent(previous, current) is None
+
+
+def test_inline_in_use_marker_selects_actual_tuned_channel():
+    before = parse_survey_dump('''Survey data from wlanpi0
+ frequency: 5180.0 MHz [in use]
+ channel active time: 100 ms
+ channel busy time: 10 ms
+Survey data from wlanpi0
+ frequency: 5200 MHz
+ channel active time: 1000 ms
+ channel busy time: 100 ms
+''')
+    after = parse_survey_dump('''Survey data from wlanpi0
+ frequency: 5180.0 MHz [in use]
+ channel active time: 200 ms
+ channel busy time: 40 ms
+Survey data from wlanpi0
+ frequency: 5200 MHz
+ channel active time: 2000 ms
+ channel busy time: 200 ms
+''')
+    result = compute_local_cu_result_from_samples(before, after)
+    assert result.frequency_mhz == 5180
+    assert result.local_cu_percent == 30.0
+
+
+@pytest.mark.parametrize('target', [None, 5180, 5200])
+def test_channel_change_does_not_pair_unrelated_counters(target):
+    before = SurveySample(1, 100, 10, None, None, None, 5180)
+    after = SurveySample(2, 200, 50, None, None, None, 5200)
+    assert compute_local_cu_percent(before, after) is None
+    assert compute_local_cu_result_from_samples([before], [after], target_frequency_mhz=target).local_cu_percent is None
+
+
+def test_impossible_busy_delta_is_unavailable_not_over_100_percent():
+    before = SurveySample(1, 100, 10, None, None, None, 5955)
+    after = SurveySample(2, 200, 150, None, None, None, 5955)
+    assert compute_local_cu_percent(before, after) is None
+    result = compute_local_cu_result_from_samples([before], [after], target_frequency_mhz=5955)
+    assert result.local_cu_percent is None and result.reason != 'ok'
+
+
+@pytest.mark.parametrize('before_frequency,after_frequency', [(5180, None), (None, 5180)])
+def test_one_missing_channel_identity_cannot_establish_matching_counters(before_frequency, after_frequency):
+    before = SurveySample(1, 100, 10, None, None, None, before_frequency)
+    after = SurveySample(2, 200, 50, None, None, None, after_frequency)
+    assert compute_local_cu_percent(before, after) is None
+    assert compute_local_cu_result_from_samples([before], [after]).local_cu_percent is None

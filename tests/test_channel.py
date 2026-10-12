@@ -369,3 +369,27 @@ def _capabilities(*widths: ChannelWidth) -> RadioCapabilities:
         supports_monitor=True,
         source_complete=True,
     )
+
+
+@pytest.mark.parametrize('description', [
+    'Supported Channel Width: neither 160 nor 80+80',
+    '160 MHz not supported\n80+80 MHz not supported\n320MHz not supported',
+])
+def test_negative_iw_width_declarations_do_not_enable_tuning(description):
+    caps = parse_iw_phy_capabilities('VHT Capabilities:\n' + description)
+    assert caps.supported_widths == frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ80})
+
+
+def test_he_24ghz_only_does_not_imply_80mhz_support():
+    caps = parse_iw_phy_capabilities('HE Iftypes: managed\nHE PHY Capabilities:\nHE40/2.4GHz')
+    assert caps.supported_widths == frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ40})
+
+
+def test_he_width_flags_enable_advertised_widths():
+    caps = parse_iw_phy_capabilities('HE40/HE80/5GHz\nHE160/5GHz\nHE80P80/5GHz')
+    assert caps.supported_widths == frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ40, ChannelWidth.MHZ80, ChannelWidth.MHZ160, ChannelWidth.MHZ80P80})
+
+
+def test_ht20_only_flags_do_not_imply_ht40():
+    caps = parse_iw_phy_capabilities('HT Capabilities:\nHT20\nNo DSSS/CCK HT40')
+    assert caps.supported_widths == frozenset({ChannelWidth.MHZ20})
