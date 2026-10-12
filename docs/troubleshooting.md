@@ -321,6 +321,16 @@ Release those interfaces through the network controller before capture. Missing
 permissions or unreadable ownership/state information produce an error rather
 than bypassing the checks.
 
+If the journal reports `nmcli ... device show wlanpi0 failed: Error: Device
+'wlanpi0' not found`, update this checkout and rerun
+`sudo ./scripts/install_wlanpi_fpms.sh`. This was an item 5 startup regression:
+the guard queried every iw interface through NetworkManager even when NM had no
+device object for an existing monitor. The corrected guard first lists NM's
+devices, checks ownership only for listed radio interfaces, and uses a fixed
+locale for machine-readable values. It still rejects managed interfaces and
+failed inventory/ownership queries. Do not add the monitor to NetworkManager
+or stop NetworkManager as a workaround.
+
 The lock under `/run/wlanpi-beacon-live/radios/phyN.lock` prevents two
 Utilization instances from using the same radio. The file can remain after exit;
 the kernel-held lock, not file existence, indicates ownership. Do not remove a

@@ -85,6 +85,13 @@ Record the tested OS, package versions, adapter, and result with each item.
   the app's lock, so cross-tool coordination remains a preflight check rather
   than an enforced system-wide lease. The full suite passes 414 tests on macOS
   with Python 3.13.3. Follow [the radio checks](pi_testing.md#radio-ownership-and-restoration-acceptance).
+  **Startup regression:** the user's October 12 journal confirms exit 2 because
+  NetworkManager has no device object for the existing `wlanpi0` monitor. The
+  guard now reads NM's inventory before querying ownership, skipping interfaces
+  NM does not list while retaining managed-sibling and inspection-failure checks.
+  Regression coverage includes root/named namespaces and a non-English caller
+  locale. The full suite passes 421 tests on macOS with Python 3.13.3.
+  On-device retesting is pending.
   **Architecture review:** item 5 remains open. Core 2.4.8 already exposes
   authenticated `WS /api/v1/streaming/capture`, with owned sessions and read-only
   subscribers; the REST capture API is still a design. The current backend

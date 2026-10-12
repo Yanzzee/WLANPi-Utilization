@@ -390,6 +390,13 @@ this output as the baseline. The administrative `UP` flag matters; monitor
 `operstate UNKNOWN` does not mean the interface is down. For a namespaced radio,
 prefix each inspection command with `sudo ip netns exec NAME`.
 
+For the NetworkManager startup regression, compare `iw dev` with
+`LC_ALL=C nmcli -g DEVICE device status`. A monitor such as `wlanpi0` may be
+present only in iw. That difference must not prevent startup. The corrected
+guard queries NM ownership only for interfaces in NM's inventory; a listed
+managed sibling must still prevent capture. Confirm the prior `Device 'wlanpi0'
+not found` error no longer appears after reinstalling.
+
 1. Run Display on a different channel from the baseline, navigate/rotate, then
    exit left. Repeat the baseline commands. Confirm the capture interface's
    mode, UP flag, and original known channel/width are restored; siblings regain

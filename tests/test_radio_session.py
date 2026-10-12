@@ -81,7 +81,7 @@ class RadioHardware:
 
     def session(self, tmp_path, **kwargs):
         session = RadioSession(
-            CaptureTarget("capture0", self.namespace), tune_builder=build_definition_tune_command,
+            CaptureTarget(kwargs.pop("interface", "capture0"), self.namespace), tune_builder=build_definition_tune_command,
             command_runner=self.run, lock_directory=tmp_path / "locks",
             controllers=kwargs.pop("controllers", lambda *args: []),
             capture_users=kwargs.pop("capture_users", lambda inodes: ["dumpcap (pid 123)"]),
@@ -211,6 +211,8 @@ def test_dynamic_network_controllers_prevent_borrowing(tmp_path, manager):
     original_run = hardware.run
     def run(command, **kwargs):
         if command[0] == "nmcli":
+            if command == ["nmcli", "-g", "DEVICE", "device", "status"]:
+                return subprocess.CompletedProcess(command, 0, stdout="capture0\nwifi1\n", stderr="")
             return subprocess.CompletedProcess(command, 0, stdout="yes\n", stderr="")
         return original_run(command, **kwargs)
     hardware.run = run
@@ -219,6 +221,86 @@ def test_dynamic_network_controllers_prevent_borrowing(tmp_path, manager):
     with pytest.raises(RadioSessionError, match=f"busy.*{manager}"):
         with session:
             pytest.fail("must refuse controller")
+    assert not any("set" in command for command in hardware.calls)
+
+
+@pytest.mark.parametrize("namespace", [None, "capture-lab"])
+def test_nm_unlisted_monitor_is_allowed_and_listed_siblings_still_checked(
+    tmp_path, monkeypatch, namespace,
+):
+    hardware = RadioHardware(namespace)
+    hardware.interfaces["wlanpi0"] = hardware.interfaces.pop("capture0")
+    original_run = hardware.run
+    nm_commands = []
+    monkeypatch.setenv("LC_ALL", "fr_FR.UTF-8")
+
+    def run(command, **kwargs):
+        native = command[4:] if namespace else command
+        if native[0] == "nmcli":
+            assert kwargs["env"]["LC_ALL"] == "C"
+            if namespace:
+                assert command[:4] == ["ip", "netns", "exec", namespace]
+            nm_commands.append(native)
+            if native == ["nmcli", "-g", "DEVICE", "device", "status"]:
+                # NetworkManager sees the managed sibling and unrelated devices,
+                # but not the monitor interface discovered through iw.
+                return subprocess.CompletedProcess(command, 0, stdout="wifi1\neth0\nlo\n", stderr="")
+            if native[-1] == "wlanpi0":
+                return subprocess.CompletedProcess(command, 10, stdout="", stderr="Error: Device 'wlanpi0' not found.")
+            assert native == ["nmcli", "-g", "GENERAL.NM-MANAGED", "device", "show", "wifi1"]
+            return subprocess.CompletedProcess(command, 0, stdout="no\n", stderr="")
+        return original_run(command, **kwargs)
+
+    hardware.run = run
+    session = hardware.session(tmp_path, interface="wlanpi0")
+    session._has_process = lambda name: name == "NetworkManager"
+    with session:
+        session.prepare()
+    assert hardware.interfaces["wifi1"]["up"]
+    assert not any(command[-1] == "wlanpi0" for command in nm_commands)
+    assert ["nmcli", "-g", "GENERAL.NM-MANAGED", "device", "show", "wifi1"] in nm_commands
+
+
+@pytest.mark.parametrize("managed_interface", ["capture0", "wifi1"])
+def test_nm_listed_managed_radio_interface_is_still_refused(tmp_path, managed_interface):
+    hardware = RadioHardware()
+    original_run = hardware.run
+    def run(command, **kwargs):
+        if command == ["nmcli", "-g", "DEVICE", "device", "status"]:
+            return subprocess.CompletedProcess(command, 0, stdout=f"{managed_interface}\n", stderr="")
+        if command[0] == "nmcli":
+            assert command[-1] == managed_interface
+            return subprocess.CompletedProcess(command, 0, stdout="yes\n", stderr="")
+        return original_run(command, **kwargs)
+    hardware.run = run
+    session = hardware.session(tmp_path)
+    session._has_process = lambda name: name == "NetworkManager"
+    with pytest.raises(RadioSessionError, match=f"NetworkManager manages {managed_interface}"):
+        with session:
+            pytest.fail("must not borrow a managed radio")
+    assert not any("set" in command for command in hardware.calls)
+
+
+@pytest.mark.parametrize("failure_stage", ["inventory", "ownership", "unknown-value"])
+def test_nm_inspection_failures_are_not_treated_as_unmanaged(tmp_path, failure_stage):
+    hardware = RadioHardware()
+    original_run = hardware.run
+    def run(command, **kwargs):
+        if command[0] == "nmcli":
+            if command == ["nmcli", "-g", "DEVICE", "device", "status"]:
+                if failure_stage == "inventory":
+                    return subprocess.CompletedProcess(command, 8, stdout="", stderr="NetworkManager is not running")
+                return subprocess.CompletedProcess(command, 0, stdout="capture0\n", stderr="")
+            if failure_stage == "unknown-value":
+                return subprocess.CompletedProcess(command, 0, stdout="unexpected\n", stderr="")
+            return subprocess.CompletedProcess(command, 10, stdout="", stderr="Device disappeared")
+        return original_run(command, **kwargs)
+    hardware.run = run
+    session = hardware.session(tmp_path)
+    session._has_process = lambda name: name == "NetworkManager"
+    with pytest.raises(RadioSessionError):
+        with session:
+            pytest.fail("must not bypass failed ownership checks")
     assert not any("set" in command for command in hardware.calls)
 
 

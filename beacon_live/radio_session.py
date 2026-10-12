@@ -219,8 +219,12 @@ class RadioSession:
 
     def read(self, command: list[str]) -> str:
         argv = self.target.command(command)
+        options = {}
+        if command[0] == "nmcli":
+            # nmcli's yes/no values are localized unless the locale is fixed.
+            options["env"] = {**os.environ, "LC_ALL": "C"}
         try:
-            result = self.runner(argv, capture_output=True, text=True, check=False, timeout=3)
+            result = self.runner(argv, capture_output=True, text=True, check=False, timeout=3, **options)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise RadioSessionError(f"Cannot run {shlex.join(argv)}: {error}") from error
         if result.returncode:
@@ -294,9 +298,15 @@ class RadioSession:
         # Dynamic nl80211 managers may have no -i argument or packet socket.
         # Query ownership instead of stopping a system-wide network service.
         if self._has_process("NetworkManager"):
-            for name in sorted(names):
+            # Core's monitor VIF can exist in iw without a NetworkManager
+            # device object. Absence from NM's inventory is not an inspection
+            # failure; only listed siblings can have an NM ownership flag.
+            nm_devices = set(self.read(["nmcli", "-g", "DEVICE", "device", "status"]).splitlines())
+            for name in sorted(names & nm_devices):
                 managed = self.read(["nmcli", "-g", "GENERAL.NM-MANAGED", "device", "show", name]).strip()
-                if managed != "no":
+                if managed not in {"yes", "no"}:
+                    raise RadioSessionError(f"Unrecognized NetworkManager ownership for {name}: {managed!r}")
+                if managed == "yes":
                     users.append(f"NetworkManager manages {name}")
         if self._has_process("iwd"):
             # iwd uses nl80211 and can scan while disconnected. No safe borrow
