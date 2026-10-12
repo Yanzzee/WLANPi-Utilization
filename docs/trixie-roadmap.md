@@ -67,14 +67,14 @@ Record the tested OS, package versions, adapter, and result with each item.
   Item 4 is complete; the [discovery checks](pi_testing.md#capture-interface-and-namespace-acceptance)
   remain available for additional hardware configurations.
 
-- [ ] **5. Coordinate radio use and restore state.** Detect conflicting use by
+- [x] **5. Coordinate radio use and restore state.** Detect conflicting use by
   Core, Profiler, Kismet, or another capture. Reuse a suitable available monitor
   interface where possible, track resources owned by Utilization, and restore
   changed interface state on exit and startup failure.
   **Acceptance:** active tools are not disrupted; display and logging-only exits,
   interrupts, and failed startup clean up correctly without removing monitor
   interfaces owned by other tools.
-  **Status:** implemented, awaiting device acceptance. A per-phy lock excludes
+  **Status:** complete for the direct-capture backend. A per-phy lock excludes
   concurrent Utilization sessions. Preflight checks inspect every sibling
   interface for packet capture, a connection, AP/other modes, and network
   controllers. Existing monitor interfaces are reused; idle siblings are
@@ -99,16 +99,20 @@ Record the tested OS, package versions, adapter, and result with each item.
   connected siblings, and controllers. Tests cover root/named namespaces,
   successful preparation/restoration with LLDP present, and simultaneous real
   capture owners. The full suite passes 433 tests on macOS with Python 3.13.3.
-  Device confirmation of this correction is pending.
-  **Architecture review:** item 5 remains open. Core 2.4.8 already exposes
+  On October 12, 2026, the user confirmed the issue is resolved and testing
+  looks good after both startup corrections.
+  **Architecture assessment:** retain the tested direct backend for this
+  migration. Core 2.4.8 already exposes
   authenticated `WS /api/v1/streaming/capture`, with owned sessions and read-only
   subscribers; the REST capture API is still a design. The current backend
   launches capture directly and does not register with Core's session manager.
-  Assess a Core capture backend before final acceptance, including fixed-channel
-  unfiltered input, latency, namespace/name restrictions, survey reads, and state
-  restoration. Core's existing WebSocket does not supply a system-wide phy lease
-  or restore prior tuning. The managed-interface `lldpd` socket false positive
-  is corrected as described above; Core API integration remains under review.
+  The assessment considered fixed-channel unfiltered input, latency,
+  namespace/name restrictions, survey reads, and state restoration. Core's
+  existing WebSocket does not supply a system-wide phy lease or restore prior
+  tuning, and accepts only `wlanpiN` names and 20/40/80/160 MHz widths. A Core
+  backend would therefore require additional integration and feature decisions;
+  it is tracked separately below. The current backend remains explicitly
+  independent of Core's capture registry.
   References: [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
   and [Core usage policy](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/services/network_namespace_service.py#L700).
 
@@ -117,6 +121,16 @@ Record the tested OS, package versions, adapter, and result with each item.
   align support metadata and documentation with the Python 3.13 target.
   **Acceptance:** fresh development and production installs, CLI launchers,
   hardware-free replay, and the full pytest suite work on Python 3.13.
+  **Status:** implemented and validated on macOS with Python 3.13.3. Metadata
+  requires Python 3.13+. Development setup rejects missing/fake venvs, older
+  interpreters, and inherited system site-packages before pip runs; package
+  failures stop without a system/non-editable fallback. It exercises CLI help,
+  replay, and pytest. The production `/opt` environment is retained and verified
+  before copying app files. Automated checks cover setup failures and a fresh
+  production install/reinstall with actual launchers and replay. A fresh editable
+  development install also passes both CLI/replay checks and all 446 tests;
+  the existing environment passes the same full suite. On-device
+  acceptance is pending; follow [the environment checks](pi_testing.md#python-313-environment-acceptance).
 
 - [ ] **7. Validate capture and metrics with TShark 4.4.** Check required fields
   and optional-field negotiation against the shipped version. Use representative
@@ -134,6 +148,14 @@ Record the tested OS, package versions, adapter, and result with each item.
   DeadEye before publishing the Trixie release.
 
 ## Separate issues
+
+- [ ] **Optional Core capture backend.** Evaluate using Core's shipped capture
+  WebSocket as an owner or subscriber, feeding one unfiltered fixed-channel
+  stream into the existing analyzer. Resolve authentication, buffering/latency,
+  source-name and width restrictions, local survey context, radio preparation,
+  and restoration. Do not claim a system-wide lease from its per-interface
+  capture registry. This is separate from completing the direct-backend Trixie
+  migration.
 
 - [ ] **SSID names display as hex.** Reported during on-device testing after
   item 2. Investigate TShark SSID output and parser normalization separately

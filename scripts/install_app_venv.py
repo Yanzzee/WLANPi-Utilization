@@ -38,9 +38,24 @@ def main() -> int:
 
 
 def _venv_site_packages() -> Path:
+    if sys.version_info < (3, 13):
+        raise SystemExit(f"Python 3.13+ is required; found {sys.version.split()[0]}")
+    if sys.prefix == sys.base_prefix:
+        raise SystemExit("Installation requires a virtual environment; system Python will not be modified.")
+    venv_root = Path(sys.prefix).resolve()
+    try:
+        config = (venv_root / "pyvenv.cfg").read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"Cannot verify virtual environment {venv_root}: {error}") from error
+    settings = {
+        key.strip().lower(): value.strip().lower()
+        for key, value in (line.split("=", 1) for line in config.splitlines() if "=" in line)
+    }
+    if settings.get("include-system-site-packages") == "true":
+        raise SystemExit("Installation requires a venv without system site-packages.")
     candidates = [Path(path) for path in site.getsitepackages()]
     for candidate in candidates:
-        if str(candidate).startswith(sys.prefix):
+        if candidate.resolve().is_relative_to(venv_root):
             candidate.mkdir(parents=True, exist_ok=True)
             return candidate
     raise SystemExit(f"Could not find site-packages under {sys.prefix}")

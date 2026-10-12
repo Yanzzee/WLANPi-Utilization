@@ -88,6 +88,8 @@ it avoids repeated `sudo` delays and noise.
 Run the setup check:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 ./scripts/pi_setup.sh
 ```
 
@@ -95,11 +97,27 @@ On Raspberry Pi OS/Debian, the usual packages are:
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip python3-venv git iproute2 iw tshark wireshark-common
+sudo apt install python3 python3-venv git iproute2 iw tshark wireshark-common
 ```
 
 `wireshark-common` supplies `dumpcap`. The project has no third-party Python
 runtime dependency; the `dev` extra adds pytest.
+
+## Development setup requires a Python 3.13 venv
+
+`scripts/pi_setup.sh` installs development tools only into a genuine activated
+venv. If it reports no venv or Python below 3.13, create and activate a fresh
+environment with the Trixie interpreter. Setting `VIRTUAL_ENV` manually is not
+sufficient: its interpreter must actually belong to that environment. Venvs
+created with `--system-site-packages` are rejected.
+
+Use `python3 --version` to check the system interpreter and
+`python -c 'import sys; print(sys.version, sys.prefix, sys.base_prefix)'` after
+activation. If ensurepip cannot repair missing pip, install `python3-venv` and
+create a fresh environment. Packaging/editable-install failures stop with pip's
+error output; check that output and connectivity before retrying. The script
+does not install packages into system Python or bypass Debian's packaging
+protections. Production installation uses the separate `/opt` venv.
 
 ## `sudo: beacon-live: command not found`
 

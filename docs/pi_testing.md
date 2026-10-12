@@ -30,11 +30,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-The project requires Python 3.9 or newer. Typical Debian packages are:
+The project requires Python 3.13 or newer. Verify `python3 --version` reports
+the Trixie interpreter before creating the venv. Typical Debian packages are:
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip python3-venv git iproute2 iw tshark wireshark-common
+sudo apt install python3 python3-venv git iproute2 iw tshark wireshark-common
 ```
 
 ## Run setup checks
@@ -43,10 +44,45 @@ sudo apt install python3 python3-pip python3-venv git iproute2 iw tshark wiresha
 ./scripts/pi_setup.sh
 ```
 
-The script checks `python3`, `pip`, `iw`, `tshark`, `dumpcap`, and `git`. When
-they are available, it installs this repository into the active environment and
-runs pytest. It prints package suggestions for missing commands but does not run
-`apt install`.
+Run this without `sudo`, after activating the development venv. The script
+rejects missing/fake venvs, Python below 3.13, and inherited system site-packages
+before pip runs. It checks `ip`, `iw`, `tshark`, `dumpcap`, and `git`, upgrades
+venv packaging tools, installs this repository in editable mode, checks both
+CLI entrypoints and hardware-free replay, and runs pytest. It prints package
+suggestions for missing commands but does not run `apt install`.
+
+### Python 3.13 environment acceptance
+
+1. In a terminal with no active venv, run `./scripts/pi_setup.sh`. It must stop
+   with activation instructions before attempting package installation.
+2. Create a fresh development environment using the Trixie interpreter:
+
+   ```bash
+   python3 --version
+   python3 -m venv .venv-trixie-test
+   source .venv-trixie-test/bin/activate
+   ./scripts/pi_setup.sh
+   python -c 'import sys; print(sys.version); print(sys.prefix); print(sys.base_prefix)'
+   ```
+
+   Confirm Python 3.13+, different prefix/base_prefix values, successful editable
+   installation, CLI/replay checks, and pytest. Keep this test venv or deactivate
+   it and return to your usual development venv afterward.
+3. Reinstall production and verify it uses its separate environment:
+
+   ```bash
+   sudo ./scripts/install_wlanpi_fpms.sh
+   /opt/wlanpi-beacon-live/bin/python -c 'import sys; print(sys.version); print(sys.prefix); print(sys.base_prefix)'
+   wlanpi-beacon-live --help
+   beacon-live replay --input samples/tshark_qbss_sample.tsv
+   ```
+
+   Confirm the production prefix is `/opt/wlanpi-beacon-live`, not the development
+   venv or system Python. Exercise FPMS Display and left-button exit, then rerun
+   the installer to check repeat installation. The installer restarts FPMS.
+4. Automated checks also cover forged VIRTUAL_ENV, older interpreters,
+   inherited system packages, install failures, production path boundaries,
+   fresh production CLI/replay, and removal of stale app files on reinstallation.
 
 ## Run a smoke capture
 

@@ -16,6 +16,13 @@ if [[ ! -x /usr/sbin/fpms ]]; then
   exit 1
 fi
 
+python3 - <<'PY'
+import sys
+
+if sys.version_info < (3, 13):
+    raise SystemExit(f"Python 3.13+ is required for Trixie; found {sys.version.split()[0]}")
+PY
+
 python3 -m venv "${APP_VENV}"
 "${APP_VENV}/bin/python" "${SCRIPT_DIR}/install_app_venv.py" \
   --source-root "${REPO_ROOT}"

@@ -23,7 +23,7 @@ the band and channel, not an SSID or BSSID.
 The primary target is a WLAN Pi R4 running WLAN Pi OS with:
 
 - WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
-- Python 3.9 or newer;
+- Python 3.13 or newer (the Trixie target is Python 3.13);
 - a monitor-mode-capable Wi-Fi interface supporting the selected frequency;
 - `git`, `ip`, `iw`, and `tshark`; and
 - root access through `sudo`.
@@ -345,10 +345,18 @@ FPMS and the system-wide commands.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
 python -m pip install -e '.[dev]'
 .venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
 .venv/bin/python -m pytest -q
 ```
+
+On the Pi, run `./scripts/pi_setup.sh` after activating this environment. It
+requires a genuine venv without system site-packages, validates Python 3.13+,
+and runs CLI/replay checks and pytest. Run development setup without `sudo`.
+An older development environment should be replaced with a fresh Python 3.13
+venv. The production installer verifies the same Python/venv requirements
+before copying the application into `/opt/wlanpi-beacon-live`.
 
 ## Documentation
 

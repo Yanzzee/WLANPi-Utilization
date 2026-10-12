@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=75.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "wlanpi-beacon-live"
 version = "0.1.0"
 description = "CLI tools for replaying WLAN beacon QBSS channel utilization samples."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 authors = [
   { name = "WLANPi Beacon Live contributors" }
 ]
@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=7.4,<9"
+  "pytest>=8.3.5,<9"
 ]
 
 [project.scripts]

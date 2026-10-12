@@ -6,22 +6,34 @@ application behavior.
 
 ## Local setup
 
-WLANPi Beacon Live supports Python 3.9 or newer and has no third-party runtime
-Python dependencies.
+WLANPi Beacon Live requires Python 3.13 or newer; the tested Trixie target is
+Python 3.13. It has no third-party runtime Python dependencies.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
 python -m pip install -e '.[dev]'
 python -m pytest
 ```
 
-The development extra installs `pytest>=7.4,<9`. Build requirements are
-`setuptools>=64` and `wheel`.
+The development extra installs `pytest>=8.3.5,<9`. Build requirements are
+`setuptools>=75.3` and `wheel`.
 
-On a Pi, `scripts/pi_setup.sh` checks system commands, installs the local
-package into the active environment, and runs the test suite. It prints package
-suggestions but does not run `apt install` itself.
+On a Pi, `scripts/pi_setup.sh` requires an activated, genuine venv without
+system site-packages. It verifies the interpreter/version before running pip,
+checks system commands, installs the package in editable mode, exercises both
+CLI entrypoints and hardware-free replay, and runs the test suite. Missing pip
+can be repaired with ensurepip inside that venv. Failed installs stop without
+falling back to system Python or a non-editable installation. It prints package
+suggestions but does not run `apt install` itself. Run it without `sudo`.
+
+Create a fresh Python 3.13 venv when replacing an older development environment.
+The production FPMS installer retains `/opt/wlanpi-beacon-live`, uses its
+interpreter for application installation, and verifies genuine venv isolation
+and Python 3.13+ before package writes. FPMS keeps its separate package-managed
+Python environment; development setup does not install into either production
+environment.
 
 ## Repository map
 
