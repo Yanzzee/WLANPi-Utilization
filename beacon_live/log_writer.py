@@ -23,6 +23,7 @@ from beacon_live.models import SecondStats
 STATS_CSV_FIELDS = [
     "local_time",
     "interface",
+    "network_namespace",
     "channel",
     "frequency_mhz",
     "band",
@@ -86,6 +87,7 @@ class LogMetadata:
     actual_center_frequency2_mhz: Optional[int] = None
     actual_capture_verified: Optional[bool] = None
     capture_coverage_status: Optional[str] = None
+    network_namespace: Optional[str] = None
 
     def with_channel_definition(
         self,
@@ -271,6 +273,7 @@ class CaptureLogWriter:
                 {
                     "local_time": marker_time.isoformat(),
                     "interface": self._metadata.interface,
+                    "network_namespace": self._metadata.network_namespace or "",
                     "channel": self._metadata.channel,
                     "frequency_mhz": _optional_value(
                         self._metadata.frequency_mhz
@@ -630,6 +633,7 @@ def _stats_csv_row(stats: SecondStats, metadata: LogMetadata) -> dict[str, objec
     return {
         "local_time": _local_time_from_epoch(stats.second),
         "interface": metadata.interface,
+        "network_namespace": metadata.network_namespace or "",
         "channel": metadata.channel,
         "frequency_mhz": _optional_value(metadata.frequency_mhz),
         "band": metadata.band or "",

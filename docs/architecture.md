@@ -54,6 +54,15 @@ creates another analyzer or capture worker.
 
 ## Acquisition layer
 
+Live capture selects one interface before configuring the radio. Automatic
+discovery inspects root and named network namespaces, filters by monitor-mode
+and selected-frequency support, prefers existing monitor interfaces, and
+requires an explicit choice if several candidates remain. A `CaptureTarget`
+retains the interface and namespace for capability queries, tuning, channel
+verification, TShark, and survey reads. Named targets prefix hardware commands
+with `ip netns exec`; analysis and renderers still share the same pipeline.
+Radio ownership checks and restoration are tracked separately in roadmap item 5.
+
 Live capture configures one interface in monitor mode and launches one
 line-buffered TShark process. Automatic width selection uses a fixed 20 MHz
 definition on 2.4 GHz and the standard 80 MHz block containing the selected

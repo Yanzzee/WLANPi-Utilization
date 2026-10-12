@@ -22,7 +22,8 @@ from typing import Callable, Optional
 EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live"
 FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
-INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "wlanpi0")
+INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "auto")
+NETWORK_NAMESPACE = os.environ.get("WLANPI_UTILIZATION_NETNS")
 LOGGER = logging.getLogger(__name__)
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
 LOGGING_STATUS_SECONDS = 1.0
@@ -104,6 +105,8 @@ def build_launch_command(
             "enabled" if logging else "disabled",
         ]
     )
+    if NETWORK_NAMESPACE is not None:
+        command.extend(["--netns", NETWORK_NAMESPACE])
     return command
 
 

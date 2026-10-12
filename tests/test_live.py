@@ -13,6 +13,8 @@ from typing import Optional
 import pytest
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.capture_target import CaptureTarget
+from beacon_live import live
 from beacon_live.live import LiveCommandError
 from beacon_live.live import LiveStartupFilter
 from beacon_live.live import BoundedStderrCollector
@@ -45,6 +47,116 @@ from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.survey import SurveyCuResult
 from beacon_live.channel import CoverageDecision
+
+
+@pytest.fixture(autouse=True)
+def hardware_free_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "beacon_live.live.discover_capture_target",
+        lambda frequency, *, namespace=None: CaptureTarget("wlan0", namespace),
+    )
+
+
+def test_namespace_routes_every_monitor_setup_command() -> None:
+    target = CaptureTarget("renamed", "lab")
+    definition = ChannelDefinition(5180, ChannelWidth.MHZ80, 5210)
+    commands = build_monitor_setup_commands(target, "36", channel_definition=definition)
+    assert commands == [
+        ["ip", "netns", "exec", "lab", "ip", "link", "set", "renamed", "down"],
+        ["ip", "netns", "exec", "lab", "iw", "dev", "renamed", "set", "type", "monitor"],
+        ["ip", "netns", "exec", "lab", "ip", "link", "set", "renamed", "up"],
+        ["ip", "netns", "exec", "lab", "iw", "dev", "renamed", "set", "freq", "5180", "80", "5210"],
+    ]
+
+
+def test_namespace_routes_tshark_and_preserves_capture_options(tmp_path: Path) -> None:
+    target = CaptureTarget("capture0", "lab")
+    raw = tmp_path / "all.pcapng"
+    root_command = build_tshark_command("capture0", raw_capture_path=raw)
+    assert build_tshark_command(target, raw_capture_path=raw) == [
+        "ip", "netns", "exec", "lab", *root_command,
+    ]
+    assert build_survey_command(target) == [
+        "ip", "netns", "exec", "lab", "iw", "dev", "capture0", "survey", "dump",
+    ]
+
+
+def test_namespace_routes_capabilities_actual_channel_and_survey(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = CaptureTarget("capture0", "lab")
+    outputs = iter([
+        "Interface capture0\n wiphy 7\n",
+        "Supported interface modes:\n * monitor\n * 2412.0 MHz [1] (20 dBm)\n",
+        "Interface capture0\n wiphy 7\n type monitor\n channel 1 (2412 MHz), width: 20 MHz, center1: 2412 MHz\n",
+        "",
+    ])
+    commands = []
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=next(outputs), stderr="")
+    monkeypatch.setattr(live.subprocess, "run", run)
+    caps = live.read_radio_capabilities(target)
+    assert caps.supported_frequencies_mhz == frozenset({2412})
+    assert live.read_actual_channel_definition(target).primary_frequency_mhz == 2412
+    assert live.read_survey_samples(target) == []
+    assert commands == [
+        target.command(["iw", "dev", "capture0", "info"]),
+        target.command(["iw", "phy", "phy7", "info"]),
+        target.command(["iw", "dev", "capture0", "info"]),
+        target.command(["iw", "dev", "capture0", "survey", "dump"]),
+    ]
+
+
+def test_namespaced_live_uses_one_target_and_one_capture_and_records_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    target = CaptureTarget("sniffer", "lab")
+    monkeypatch.setattr(live, "discover_capture_target", lambda frequency, **kwargs: target)
+    operations = []
+    monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda iface: (
+        operations.append(("capabilities", iface)) or RadioCapabilities.ht20_only()
+    ))
+    monkeypatch.setattr(live, "configure_monitor_interface", lambda iface, *args, **kwargs: operations.append(("configure", iface)))
+    monkeypatch.setattr(live, "_read_actual_channel_safely", lambda iface, requested: (
+        operations.append(("verify", iface)) or (requested, True)
+    ))
+    monkeypatch.setattr(live, "_read_survey_samples_safely", lambda iface: (
+        operations.append(("survey", iface)) or []
+    ))
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset())
+    def start(iface, **kwargs):
+        operations.append(("capture", iface))
+        return _FakeTsharkProcess()
+    monkeypatch.setattr(live, "start_tshark_process", start)
+    stats = tmp_path / "stats.csv"
+    beacons = tmp_path / "beacons.jsonl"
+    raw = tmp_path / "raw.pcapng"
+    assert run_live(
+        local_cu=True, interval_seconds=0.1, stats_csv=stats, beacons_jsonl=beacons,
+        raw_capture_path=raw, min_free_bytes=0,
+    ) == 0
+    assert all(iface == target for _, iface in operations)
+    assert [stage for stage, _ in operations].count("capture") == 1
+    assert {stage for stage, _ in operations} == {"capabilities", "configure", "verify", "survey", "capture"}
+    rows = list(csv.DictReader(stats.open()))
+    assert rows and all(row["interface"] == "sniffer" and row["network_namespace"] == "lab" for row in rows)
+    beacon_rows = [json.loads(line) for line in beacons.read_text().splitlines()]
+    assert beacon_rows and all(row["network_namespace"] == "lab" for row in beacon_rows)
+    metadata = json.loads(raw.with_suffix(".pcapng.json").read_text())
+    assert metadata["interface"] == "sniffer"
+    assert metadata["network_namespace"] == "lab"
+
+
+def test_non_monitor_radio_is_rejected_before_interface_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda iface: RadioCapabilities(
+        frozenset({ChannelWidth.MHZ20}), frozenset({2412}), supports_monitor=False,
+        source_complete=True,
+    ))
+    monkeypatch.setattr(live, "configure_monitor_interface", lambda *args, **kwargs: pytest.fail("must not change radio"))
+    with pytest.raises(ValueError, match="root:wlan0 does not support monitor mode"):
+        run_live(iface="wlan0", band="2.4", channel="1")
 
 
 def test_build_monitor_setup_commands_uses_ht20_channel() -> None:

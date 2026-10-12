@@ -36,7 +36,7 @@ Record the tested OS, package versions, adapter, and result with each item.
   on-device testing after item 2 was good. A separate hex SSID display issue
   is recorded below.
 
-- [ ] **3. Adapt front-panel controls to current FPMS behavior.** Decide how
+- [x] **3. Adapt front-panel controls to current FPMS behavior.** Decide how
   Utilization should handle Key 2, now used by FPMS for display rotation, while
   preserving Key 3 screenshots. Keep GPIO and display hardware access in FPMS.
   **Acceptance:** verify the agreed controls, rotation behavior, screenshots,
@@ -47,18 +47,24 @@ Record the tested OS, package versions, adapter, and result with each item.
   tests exercise the upstream rotation function, saved orientation, repeat
   installation, and retained capture/navigation state. The full suite passes
   357 tests on macOS with Python 3.13.3, including physical button remapping in
-  both orientations and after rotation during an event batch. On-device acceptance is pending;
-  follow [the control checks](pi_testing.md#front-panel-control-acceptance).
+  both orientations and after rotation during an event batch. On October 12,
+  2026, the user confirmed item 3 testing looks good. Item 3 is complete.
 
 - [ ] **4. Discover capture interfaces and network namespaces.** Replace the
-  front-panel adapter's hardcoded `wlan0` with configurable or discovered radio
+  front-panel adapter's fixed interface default with configurable or discovered radio
   selection. Detect namespaced interfaces and support their command context
   consistently for capture, capabilities, tuning, and survey reads.
   **Acceptance:** test renamed interfaces, multiple adapters, and a namespaced
   radio; missing or unavailable interfaces produce a useful message.
-  **Status:** the front-panel default now uses `wlanpi0`, with an explicit
-  `WLANPI_UTILIZATION_IFACE` override to unblock item 1 testing. Automatic
-  discovery and namespace support remain pending.
+  **Status:** automatic discovery and namespace routing are implemented.
+  Discovery prefers an existing monitor interface supporting the selected
+  frequency and reports ambiguity when multiple candidates are equally suitable.
+  Explicit interface/namespace overrides remain available. Hardware commands and
+  log metadata retain the selected namespace. Automated checks cover renamed
+  interfaces, multiple radios, decimal iw frequencies, unavailable namespaces,
+  and one shared capture pipeline. The full suite passes 381 tests on macOS
+  with Python 3.13.3. On-device acceptance is pending;
+  follow [the discovery checks](pi_testing.md#capture-interface-and-namespace-acceptance).
 
 - [ ] **5. Coordinate radio use and restore state.** Detect conflicting use by
   Core, Profiler, Kismet, or another capture. Reuse a suitable available monitor

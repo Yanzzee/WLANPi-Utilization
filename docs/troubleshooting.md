@@ -119,7 +119,7 @@ If a custom `sudo` configuration omits `/usr/local/bin` from its secure PATH,
 use the absolute system launcher:
 
 ```bash
-sudo /usr/local/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+sudo /usr/local/bin/wlanpi-beacon-live --band 5 --channel 36
 ```
 
 The `.venv/bin` commands are separate and are intended only for repository
@@ -133,10 +133,25 @@ List interfaces known to `iw`:
 iw dev
 ```
 
-The FPMS integration defaults to the Trixie monitor interface `wlanpi0`.
-CLI and test scripts can use another name through `--iface` or the script's
-first argument. An interface named `wlan0` may belong to a radio that does not
-support monitor mode; check its phy rather than relying on interface numbering.
+The app and live CLI default to `--iface auto`. They inspect the root namespace
+and named namespaces from `ip netns list`, then consider managed or monitor
+interfaces whose phy supports monitor mode and the selected frequency. Existing
+monitor interfaces are preferred. If several candidates remain, capture stops
+with their names and asks for an explicit choice. An interface named `wlan0`
+may belong to a radio without monitor support; interface numbering is not a
+capability check.
+
+Use `--iface capture1` to select an interface in the root namespace. For a named
+namespace, also pass `--netns capture-lab`. Using `--netns capture-lab` with
+automatic discovery restricts the search to that namespace. Capabilities,
+tuning, channel verification, TShark, and survey reads all use that context.
+For example:
+
+```bash
+ip netns list
+sudo ip netns exec capture-lab iw dev
+sudo wlanpi-beacon-live --iface capture1 --netns capture-lab --band 2.4 --channel 1
+```
 
 To configure another front-panel interface, run `sudo systemctl edit wlanpi-fpms`
 and add the following, replacing `capture1` with the chosen interface:
@@ -144,11 +159,16 @@ and add the following, replacing `capture1` with the chosen interface:
 ```ini
 [Service]
 Environment="WLANPI_UTILIZATION_IFACE=capture1"
+# Include this only when capture1 is in a named namespace:
+Environment="WLANPI_UTILIZATION_NETNS=capture-lab"
 ```
 
 Then run `sudo systemctl restart wlanpi-fpms`. The adapter reads this setting
-when FPMS starts. Automatic discovery and network namespace support remain
-planned roadmap work.
+when FPMS starts. Leave both overrides unset for automatic discovery across
+namespaces, or set only `WLANPI_UTILIZATION_NETNS` to search one namespace.
+Remove an obsolete override when a radio is renamed or moved. The capture
+journal reports the discovered target as `root:wlanpi0` or, for example,
+`capture-lab:capture1`.
 
 Confirm the adapter/driver supports monitor mode:
 
@@ -159,7 +179,7 @@ iw phy
 If selecting Display leaves the menu visible and the journal reports
 `iw dev wlan0 set type monitor` followed by `Operation not supported`, capture
 has failed to start on the selected radio. Update and rerun the installer to
-use the `wlanpi0` default and the failed-launch menu recovery. The updated
+use automatic discovery and the failed-launch menu recovery. The updated
 adapter briefly reports an exited capture child and returns to the channel
 menu. Inspect `journalctl -u wlanpi-fpms` for the underlying command error.
 

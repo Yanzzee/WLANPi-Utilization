@@ -52,7 +52,7 @@ def test_fpms_launch_command_enables_both_logs_together() -> None:
     assert display_only[:9] == [
         "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live",
         "--iface",
-        "wlanpi0",
+        "auto",
         "--band",
         "5",
         "--channel",
@@ -581,8 +581,15 @@ def test_launch_failure_is_reported_without_leaving_session(
     assert g_vars["display_state"] == "menu"
 
 
-def test_capture_interface_can_be_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("namespace", [None, "capture-lab"])
+def test_capture_interface_can_be_overridden(
+    monkeypatch: pytest.MonkeyPatch, namespace: Optional[str],
+) -> None:
     monkeypatch.setenv("WLANPI_UTILIZATION_IFACE", "capture1")
+    if namespace is not None:
+        monkeypatch.setenv("WLANPI_UTILIZATION_NETNS", namespace)
+    else:
+        monkeypatch.delenv("WLANPI_UTILIZATION_NETNS", raising=False)
     spec = importlib.util.spec_from_file_location(
         "utilization_interface_override", channel_utilization.__file__
     )
@@ -590,6 +597,14 @@ def test_capture_interface_can_be_overridden(monkeypatch: pytest.MonkeyPatch) ->
     spec.loader.exec_module(module)
     command = module.build_launch_command(band="2.4", channel=1, logging=False)
     assert command[command.index("--iface") + 1] == "capture1"
+    if namespace is not None:
+        assert command[command.index("--netns") + 1] == namespace
+        logging_command = module.build_launch_command(
+            band="2.4", channel=1, logging=True, logging_only=True,
+        )
+        assert logging_command[logging_command.index("--netns") + 1] == namespace
+    else:
+        assert "--netns" not in command
 
 
 @pytest.mark.parametrize("during_start", [False, True])

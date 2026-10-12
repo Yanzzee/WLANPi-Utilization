@@ -14,6 +14,17 @@ from beacon_live.live import build_definition_tune_command
 from beacon_live.live import explicit_channel_definition
 
 
+def test_iw_decimal_frequencies_preserve_disabled_channel_filtering() -> None:
+    caps = parse_iw_phy_capabilities(
+        "Supported interface modes:\n * monitor\n"
+        "* 2412.0 MHz [1] (20 dBm)\n* 5180 MHz [36] (23 dBm)\n"
+        "* 5975.000 MHz [5] (12 dBm) (no IR)\n"
+        "* 5955.0 MHz [1] (disabled)\n"
+    )
+    assert caps.supported_frequencies_mhz == frozenset({2412, 5180, 5975})
+    assert caps.supports_monitor
+
+
 def test_ht_operation_resolves_20_and_both_40mhz_offsets() -> None:
     ht20 = definition_from_operation_fields(
         band="5", ht_primary_channel=36, ht_secondary_offset=0

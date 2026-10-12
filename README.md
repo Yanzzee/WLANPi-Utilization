@@ -24,7 +24,7 @@ The primary target is a WLAN Pi R4 running WLAN Pi OS with:
 
 - WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
 - Python 3.9 or newer;
-- a monitor-mode-capable Wi-Fi interface (the front panel defaults to `wlanpi0`);
+- a monitor-mode-capable Wi-Fi interface supporting the selected frequency;
 - `git`, `ip`, `iw`, and `tshark`; and
 - root access through `sudo`.
 
@@ -66,10 +66,12 @@ safely refreshes its managed CLI launchers as well as the application and FPMS
 integration. It locates FPMS through its launcher's Python environment and
 prints the resolved package path before patching.
 
-The front panel uses `wlanpi0`, the monitor interface created by WLAN Pi Core
-on the first radio. Check `iw dev` and `iw phy` for interface names and monitor
-support. For another interface, set `WLANPI_UTILIZATION_IFACE` in the FPMS
-service environment as described in [Troubleshooting](docs/troubleshooting.md#the-wi-fi-interface-is-missing).
+The front panel and live CLI discover interfaces in the root and named network
+namespaces. They prefer an existing monitor interface supporting the selected
+frequency, such as WLAN Pi Core's `wlanpi0`. Multiple equally suitable candidates
+require an explicit choice. Configure `WLANPI_UTILIZATION_IFACE` and, when needed,
+`WLANPI_UTILIZATION_NETNS` in the FPMS service environment as described in
+[Troubleshooting](docs/troubleshooting.md#the-wi-fi-interface-is-missing).
 
 ## Use the FPMS front panel
 
@@ -119,29 +121,32 @@ the examples below obtain with `sudo`.
 
 ```bash
 # Live terminal display on channel 36
-sudo wlanpi-beacon-live --iface wlan0 --channel 36
+sudo wlanpi-beacon-live --band 5 --channel 36
 
 # Logging-only capture (both CSV and JSONL, with no display rendering)
-sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
+sudo wlanpi-beacon-live --band 5 --channel 36 \
   --logging-only --log-dir /var/log/wlanpi-beacon-live
 
 # Interactive display plus both log formats
-sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
+sudo wlanpi-beacon-live --band 5 --channel 36 \
   --log --log-dir /var/log/wlanpi-beacon-live
 
 # Hardware-free replay of the included sample (run from the repository)
 beacon-live replay --input samples/tshark_qbss_sample.tsv
 
 # Explicit 6 GHz center frequency instead of band/channel mapping
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --frequency-mhz 5975
 
 # Explicit 160 MHz override: primary 5180 MHz, center 5250 MHz
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+sudo wlanpi-beacon-live --frequency-mhz 5180 \
   --channel-width 160 --center-frequency1-mhz 5250
 
 # Save full packets from the exact live-analysis process and a JSON sidecar
-sudo wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 \
+sudo wlanpi-beacon-live --band 5 --channel 36 \
   --raw-pcapng /tmp/beacon-live-channel36.pcapng
+
+# Explicit interface in an existing named network namespace
+sudo wlanpi-beacon-live --iface capture1 --netns capture-lab --band 2.4 --channel 1
 
 # General and workflow-specific help
 wlanpi-beacon-live --help

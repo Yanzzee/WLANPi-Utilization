@@ -329,6 +329,51 @@ Apps
         Display | Display + Log | Start Logging | Stop Logging
 ```
 
+### Capture interface and namespace acceptance
+
+After updating, reinstall the adapter and confirm discovery on the current Pi:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+iw dev
+iw phy
+ip netns list
+```
+
+1. With interface/namespace service overrides unset, select Apps → Utilization
+   → 2.4 GHz → channel 1 → Display. On the previously tested device, discovery
+   should select `root:wlanpi0`, leaving the unsupported `wlan0` unselected.
+   Check `sudo journalctl -u wlanpi-fpms -n 80 --no-pager` for
+   `Capture interface: root:wlanpi0`. Confirm live data, navigation, rotation,
+   and left-button exit still work.
+2. Select Display + Log and confirm the stats CSV and beacon JSONL metadata
+   identify the resolved interface. `network_namespace` is blank in CSV and
+   null in JSON for root capture. Repeat with logging-only mode, then stop it.
+3. After stopping the front-panel capture, test an explicit root interface:
+   `sudo wlanpi-beacon-live --iface wlanpi0 --band 2.4 --channel 1 --local-cu`.
+   Confirm capture and survey updates; stop with Ctrl+C.
+4. If an available test radio already resides in a named namespace, inspect it
+   with `sudo ip netns exec NAME iw dev` and
+   `sudo ip netns exec NAME iw phy`. Run
+   `sudo wlanpi-beacon-live --iface IFACE --netns NAME --band 2.4 --channel 1 --local-cu --log`.
+   Replace NAME and IFACE with its actual identifiers. Verify capture, channel
+   read-back, survey updates when supported, and namespace metadata. Repeat
+   with `--netns NAME` alone to check discovery restricted to that namespace.
+   The front-panel equivalent uses `WLANPI_UTILIZATION_NETNS=NAME` and optionally
+   `WLANPI_UTILIZATION_IFACE=IFACE` in its service override.
+5. When multiple equally suitable monitors exist, automatic discovery should
+   report ambiguity and name the choices. Choose one explicitly and confirm it
+   works. Renamed interfaces should work through discovery without a `wlan0`
+   naming assumption. Automated tests cover these cases when hardware is absent.
+6. Test a nonexistent namespace or interface with explicit CLI overrides and
+   confirm a useful command/target error. A failed front-panel child should
+   return to a responsive channel menu. Remove test overrides afterward.
+
+Use an available test radio for namespace checks; do not move a radio used by
+another tool to manufacture this test. Radio conflict detection and state
+restoration are the next roadmap item. Record any namespace/multiple-radio
+checks that could not be exercised on the device.
+
 ## On-device acceptance checklist
 
 1. Select a channel with known AP beacon activity and open `Display`.

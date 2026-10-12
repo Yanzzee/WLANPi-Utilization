@@ -419,7 +419,7 @@ def parse_iw_phy_capabilities(text: str) -> RadioCapabilities:
         widths.add(ChannelWidth.MHZ320)
     frequencies = frozenset(
         int(value)
-        for value in re.findall(r"\*\s+(\d{4})\s+mhz", lower)
+        for value in re.findall(r"\*\s+(\d{4})(?:\.0+)?\s+mhz", lower)
         if "disabled" not in _line_containing(lower, value)
     )
     supports_monitor = bool(re.search(r"^\s*\*\s+monitor\s*$", lower, re.MULTILINE))

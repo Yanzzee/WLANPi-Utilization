@@ -105,7 +105,7 @@ recursively. Live format flags do not accept custom filenames.
 
 The stats file contains one row for each emitted capture second. Columns cover:
 
-- local timestamp, interface, channel, resolved frequency, and band;
+- local timestamp, interface, network namespace, channel, resolved frequency, and band;
 - retained BSSID count, summed latest QBSS station counts, and the unique
   eligible client-MAC count detected during that one-second period;
 - the rolling highest per-BSSID station count, its QBSS or MAC source, and its
@@ -129,6 +129,7 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | --- | --- |
 | `local_time` | Local ISO-8601 timestamp, including UTC offset, for the emitted capture second. |
 | `interface` | Monitor-mode interface configured for the run. |
+| `network_namespace` | Named network namespace used for capture; blank for the root namespace. |
 | `channel` | Channel value configured for the run. |
 | `frequency_mhz` | Resolved tuned center frequency in MHz, when it can be determined. |
 | `band` | Resolved `2.4`, `5`, or `6` GHz band, when it can be determined. |

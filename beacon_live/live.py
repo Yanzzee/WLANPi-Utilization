@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.capture_target import CaptureTarget, as_capture_target, discover_capture_target
 from beacon_live.channel import ChannelDefinition
 from beacon_live.channel import ChannelWidth
 from beacon_live.channel import CoverageDecision
@@ -433,41 +434,44 @@ def frequency_to_band(frequency_mhz: Optional[int]) -> Optional[str]:
 
 
 def build_monitor_setup_commands(
-    iface: str,
+    iface: str | CaptureTarget,
     channel: str,
     *,
     frequency_mhz: Optional[int] = None,
     band: Optional[str] = None,
     channel_definition: Optional[ChannelDefinition] = None,
 ) -> list[list[str]]:
-    return [
-        ["ip", "link", "set", iface, "down"],
-        ["iw", "dev", iface, "set", "type", "monitor"],
-        ["ip", "link", "set", iface, "up"],
+    target = as_capture_target(iface)
+    commands = [
+        ["ip", "link", "set", target.interface, "down"],
+        ["iw", "dev", target.interface, "set", "type", "monitor"],
+        ["ip", "link", "set", target.interface, "up"],
         (
-            build_definition_tune_command(iface, channel_definition)
+            build_definition_tune_command(target.interface, channel_definition)
             if channel_definition is not None
             else build_tune_command(
-                iface,
+                target.interface,
                 channel,
                 frequency_mhz=frequency_mhz,
                 band=band,
             )
         ),
     ]
+    return [target.command(command) for command in commands]
 
 
 def build_tshark_command(
-    iface: str,
+    iface: str | CaptureTarget,
     *,
     field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
     raw_capture_path: Optional[Path] = None,
 ) -> list[str]:
+    target = as_capture_target(iface)
     command = [
         "tshark",
         "-l",
         "-i",
-        iface,
+        target.interface,
         "-B",
         str(TSHARK_CAPTURE_BUFFER_MIB),
         "-s",
@@ -503,7 +507,7 @@ def build_tshark_command(
         command.extend(["-P", "-F", "pcapng", "-w", str(raw_capture_path)])
     for field in field_names:
         command.extend(["-e", field])
-    return command
+    return target.command(command)
 
 
 def available_tshark_fields(
@@ -547,8 +551,9 @@ def select_tshark_frame_fields(
     )
 
 
-def build_survey_command(iface: str) -> list[str]:
-    return ["iw", "dev", iface, "survey", "dump"]
+def build_survey_command(iface: str | CaptureTarget) -> list[str]:
+    target = as_capture_target(iface)
+    return target.command(["iw", "dev", target.interface, "survey", "dump"])
 
 
 def run_checked_command(command: list[str]) -> None:
@@ -570,7 +575,7 @@ def run_checked_command(command: list[str]) -> None:
 
 
 def configure_monitor_interface(
-    iface: str,
+    iface: str | CaptureTarget,
     channel: str,
     *,
     frequency_mhz: Optional[int] = None,
@@ -589,7 +594,7 @@ def configure_monitor_interface(
 
 
 def start_tshark_process(
-    iface: str,
+    iface: str | CaptureTarget,
     *,
     field_names: Optional[tuple[str, ...]] = None,
     raw_capture_path: Optional[Path] = None,
@@ -804,7 +809,7 @@ def _start_live_aggregation_process(
     return receive, worker
 
 
-def read_survey_samples(iface: str) -> list[SurveySample]:
+def read_survey_samples(iface: str | CaptureTarget) -> list[SurveySample]:
     command = build_survey_command(iface)
     result = subprocess.run(
         command,
@@ -822,8 +827,9 @@ def read_survey_samples(iface: str) -> list[SurveySample]:
     return parse_survey_dump(result.stdout)
 
 
-def read_radio_capabilities(iface: str) -> RadioCapabilities:
-    interface_command = ["iw", "dev", iface, "info"]
+def read_radio_capabilities(iface: str | CaptureTarget) -> RadioCapabilities:
+    target = as_capture_target(iface)
+    interface_command = target.command(["iw", "dev", target.interface, "info"])
     result = subprocess.run(
         interface_command,
         capture_output=True,
@@ -839,7 +845,7 @@ def read_radio_capabilities(iface: str) -> RadioCapabilities:
     match = re.search(r"^\s*wiphy\s+(\d+)\s*$", result.stdout, re.MULTILINE)
     if match is None:
         raise LiveCommandError(interface_command, stderr="iw did not report a wiphy")
-    phy_command = ["iw", "phy", f"phy{match.group(1)}", "info"]
+    phy_command = target.command(["iw", "phy", f"phy{match.group(1)}", "info"])
     phy_result = subprocess.run(
         phy_command,
         capture_output=True,
@@ -855,8 +861,9 @@ def read_radio_capabilities(iface: str) -> RadioCapabilities:
     return parse_iw_phy_capabilities(phy_result.stdout)
 
 
-def read_actual_channel_definition(iface: str) -> ChannelDefinition:
-    command = ["iw", "dev", iface, "info"]
+def read_actual_channel_definition(iface: str | CaptureTarget) -> ChannelDefinition:
+    target = as_capture_target(iface)
+    command = target.command(["iw", "dev", target.interface, "info"])
     result = subprocess.run(
         command,
         capture_output=True,
@@ -1055,7 +1062,7 @@ def prune_fixed_capture_coverage(
     )
 
 
-def _read_radio_capabilities_safely(iface: str) -> RadioCapabilities:
+def _read_radio_capabilities_safely(iface: str | CaptureTarget) -> RadioCapabilities:
     try:
         return read_radio_capabilities(iface)
     except (LiveCommandError, OSError, ValueError):
@@ -1063,7 +1070,7 @@ def _read_radio_capabilities_safely(iface: str) -> RadioCapabilities:
 
 
 def _read_actual_channel_safely(
-    iface: str,
+    iface: str | CaptureTarget,
     requested: ChannelDefinition,
 ) -> tuple[ChannelDefinition, bool]:
     try:
@@ -1090,7 +1097,8 @@ def terminate_tshark_process(
 
 def run_live(
     *,
-    iface: str = "wlan0",
+    iface: str = "auto",
+    netns: Optional[str] = None,
     channel: str = "36",
     frequency_mhz: Optional[int] = None,
     band: Optional[str] = None,
@@ -1139,6 +1147,7 @@ def run_live(
         return curses_dashboard.run(
             lambda: run_live(
                 iface=iface,
+                netns=netns,
                 channel=channel,
                 frequency_mhz=frequency_mhz,
                 band=band,
@@ -1218,7 +1227,18 @@ def run_live(
     _set_dashboard_collecting(dashboard, True)
     dashboard.refresh(analyzer.snapshot)
 
-    capabilities = _read_radio_capabilities_safely(iface)
+    if iface == "auto":
+        target = discover_capture_target(resolved_frequency_mhz, namespace=netns)
+        iface, netns = target.interface, target.namespace
+        print(f"Capture interface: {target.label}", file=sys.stderr, flush=True)
+    else:
+        target = CaptureTarget(iface, netns)
+        if netns is not None:
+            print(f"Capture interface: {target.label}", file=sys.stderr, flush=True)
+    hardware_iface = target if netns is not None else iface
+    capabilities = _read_radio_capabilities_safely(hardware_iface)
+    if capabilities.source_complete and not capabilities.supports_monitor:
+        raise ValueError(f"Capture interface {target.label} does not support monitor mode")
     supported, unsupported_reason = capabilities.supports(requested_definition)
     initial_definition = requested_definition
     fallback_reason: Optional[str] = None
@@ -1256,7 +1276,7 @@ def run_live(
         )
     try:
         configure_monitor_interface(
-            iface,
+            hardware_iface,
             channel,
             frequency_mhz=frequency_mhz,
             band=band,
@@ -1280,14 +1300,14 @@ def run_live(
             flush=True,
         )
         configure_monitor_interface(
-            iface,
+            hardware_iface,
             channel,
             frequency_mhz=frequency_mhz,
             band=band,
             channel_definition=initial_definition,
         )
     actual_definition, actual_verified = _read_actual_channel_safely(
-        iface,
+        hardware_iface,
         initial_definition,
     )
     if not actual_verified and capabilities.source_complete:
@@ -1333,6 +1353,7 @@ def run_live(
         logging_service = LoggingService(
             metadata=LogMetadata(
                 interface=iface,
+                network_namespace=netns,
                 channel=channel,
                 frequency_mhz=resolved_frequency_mhz,
                 band=resolved_band,
@@ -1382,7 +1403,7 @@ def run_live(
     if raw_capture_path is not None:
         raw_capture_path.parent.mkdir(parents=True, exist_ok=True)
     process = start_tshark_process(
-        iface,
+        hardware_iface,
         field_names=tshark_fields,
         raw_capture_path=raw_capture_path,
     )
@@ -1434,7 +1455,7 @@ def run_live(
         else None
     )
     survey_future: Optional[Future[Optional[list[SurveySample]]]] = (
-        survey_executor.submit(_read_survey_samples_safely, iface)
+        survey_executor.submit(_read_survey_samples_safely, hardware_iface)
         if survey_executor is not None
         else None
     )
@@ -1464,7 +1485,7 @@ def run_live(
                 if not status_rendered:
                     _print_logging_started(logging_service)
         if process.stdout is None:
-            raise LiveCommandError(build_tshark_command(iface), stderr="missing stdout")
+            raise LiveCommandError(build_tshark_command(hardware_iface), stderr="missing stdout")
         line_reader = (
             None
             if aggregation_connection is not None
@@ -2046,7 +2067,7 @@ def run_live(
                 assert survey_executor is not None
                 survey_future = survey_executor.submit(
                     _read_survey_samples_safely,
-                    iface,
+                    hardware_iface,
                 )
                 next_survey_poll = _advance_interval_deadline(
                     next_survey_poll,
@@ -2091,6 +2112,7 @@ def run_live(
             _write_raw_capture_metadata(
                 raw_capture_path,
                 interface=iface,
+                network_namespace=netns,
                 selected_channel=channel,
                 requested=coverage_decision.requested,
                 actual=actual_definition,
@@ -2104,7 +2126,7 @@ def run_live(
             )
 
 
-def _read_survey_samples_safely(iface: str) -> Optional[list[SurveySample]]:
+def _read_survey_samples_safely(iface: str | CaptureTarget) -> Optional[list[SurveySample]]:
     try:
         return read_survey_samples(iface)
     except (
@@ -2138,6 +2160,7 @@ def _write_raw_capture_metadata(
     raw_capture_path: Path,
     *,
     interface: str,
+    network_namespace: Optional[str] = None,
     selected_channel: str,
     requested: ChannelDefinition,
     actual: ChannelDefinition,
@@ -2154,6 +2177,7 @@ def _write_raw_capture_metadata(
     payload = {
         "raw_capture": str(raw_capture_path),
         "interface": interface,
+        "network_namespace": network_namespace,
         "selected_primary_channel": selected_channel,
         "requested_channel_definition": asdict(requested),
         "actual_channel_definition": asdict(actual),

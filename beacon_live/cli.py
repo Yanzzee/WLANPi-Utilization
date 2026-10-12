@@ -129,6 +129,8 @@ def _run_live_command(
         )
         if args.lcd_frame is not None:
             live_options["lcd_frame"] = args.lcd_frame
+        if args.netns is not None:
+            live_options["netns"] = args.netns
         if args.channel_width != "auto":
             live_options["channel_width"] = parse_channel_width(args.channel_width)
         if args.center_frequency1_mhz is not None:
@@ -269,8 +271,12 @@ def _build_parser() -> argparse.ArgumentParser:
 def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--iface",
-        default="wlan0",
-        help="Wireless interface to use. Default: wlan0.",
+        default="auto",
+        help="Wireless interface or auto discovery. Default: auto.",
+    )
+    parser.add_argument(
+        "--netns",
+        help="Named network namespace; with --iface auto, restrict discovery to it.",
     )
     parser.add_argument(
         "--channel",
