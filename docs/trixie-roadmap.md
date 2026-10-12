@@ -91,7 +91,15 @@ Record the tested OS, package versions, adapter, and result with each item.
   NM does not list while retaining managed-sibling and inspection-failure checks.
   Regression coverage includes root/named namespaces and a non-English caller
   locale. The full suite passes 421 tests on macOS with Python 3.13.3.
-  On-device retesting is pending.
+  The subsequent device journal confirms this check now passes.
+  **LLDP regression:** the next device journal confirms the NetworkManager
+  check now passes and the remaining refusal names `lldpd`. The socket check
+  now exempts identified `lldpd` ownership only on managed interfaces. It still
+  rejects other/shared owners, unidentified sockets, monitor/global sockets,
+  connected siblings, and controllers. Tests cover root/named namespaces,
+  successful preparation/restoration with LLDP present, and simultaneous real
+  capture owners. The full suite passes 433 tests on macOS with Python 3.13.3.
+  Device confirmation of this correction is pending.
   **Architecture review:** item 5 remains open. Core 2.4.8 already exposes
   authenticated `WS /api/v1/streaming/capture`, with owned sessions and read-only
   subscribers; the REST capture API is still a design. The current backend
@@ -99,8 +107,8 @@ Record the tested OS, package versions, adapter, and result with each item.
   Assess a Core capture backend before final acceptance, including fixed-channel
   unfiltered input, latency, namespace/name restrictions, survey reads, and state
   restoration. Core's existing WebSocket does not supply a system-wide phy lease
-  or restore prior tuning. Also correct the current blanket packet-socket check:
-  `lldpd` sockets on managed sibling interfaces can falsely report a busy radio.
+  or restore prior tuning. The managed-interface `lldpd` socket false positive
+  is corrected as described above; Core API integration remains under review.
   References: [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
   and [Core usage policy](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/services/network_namespace_service.py#L700).
 

@@ -303,11 +303,13 @@ modes, connected managed interfaces, and network controllers also prevent
 borrowing the radio. Core's background service and an idle `wlanpi0` alone do
 not count as active use.
 
-Known pending item 5 correction: the current packet-socket check also includes
-managed siblings. `lldpd` can bind there and be reported as a capture conflict;
-Core deliberately excludes that case. Do not stop `lldpd` just to bypass this
-false positive. The roadmap tracks the correction and assessment of Core's
-existing capture-session API.
+The packet-socket check distinguishes `lldpd` link discovery on managed
+interfaces from capture ownership. Those `lldpd` sockets are allowed; other
+processes and unidentified sockets remain blockers. The exception does not
+apply to monitor-interface or namespace-wide sockets. If an older installation
+reports `Radio ... is busy: lldpd (pid ...)`, update this checkout and rerun
+`sudo ./scripts/install_wlanpi_fpms.sh`. Leave `lldpd` running. This corrects the
+item 5 false positive caused by treating every bound packet socket as a capture.
 
 Stop or release the radio through the owning tool, then retry. Another adapter
 can be selected explicitly using `--iface` and optionally `--netns`. The app

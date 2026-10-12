@@ -1,6 +1,7 @@
 import json
 import signal
 import subprocess
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,22 @@ from beacon_live.capture_target import CaptureTarget
 from beacon_live.live import build_definition_tune_command
 from beacon_live.radio_session import (
     RadioSession, RadioSessionError, controller_users,
-    parse_interface_state, parse_packet_sockets, namespace_has_process,
+    parse_interface_state, parse_packet_sockets, namespace_has_process, socket_users,
 )
 
 PACKET_HEADER = "sk RefCnt Type Proto Iface R Rmem User Inode\n"
+
+
+def socket_proc(tmp_path, *owners):
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    for pid, name, inodes in owners:
+        entry = proc / str(pid)
+        (entry / "fd").mkdir(parents=True)
+        (entry / "comm").write_text(name)
+        for index, inode in enumerate(inodes):
+            (entry / "fd" / str(index)).symlink_to(f"socket:[{inode}]")
+    return proc
 
 
 class RadioHardware:
@@ -84,7 +97,7 @@ class RadioHardware:
             CaptureTarget(kwargs.pop("interface", "capture0"), self.namespace), tune_builder=build_definition_tune_command,
             command_runner=self.run, lock_directory=tmp_path / "locks",
             controllers=kwargs.pop("controllers", lambda *args: []),
-            capture_users=kwargs.pop("capture_users", lambda inodes: ["dumpcap (pid 123)"]),
+            capture_users=kwargs.pop("capture_users", lambda inodes, **kwargs: ["dumpcap (pid 123)"]),
             **kwargs,
         )
         session._has_process = lambda name: False
@@ -112,6 +125,78 @@ def test_packet_sockets_scope_to_radio_and_namespace_wide_capture():
         parse_packet_sockets("", {6})
     with pytest.raises(RadioSessionError, match="entry"):
         parse_packet_sockets(PACKET_HEADER + "unexpected layout", {6})
+
+
+@pytest.mark.parametrize("namespace", [None, "capture-lab"])
+def test_lldpd_on_idle_managed_sibling_allows_capture_and_restoration(tmp_path, namespace):
+    hardware = RadioHardware(namespace)
+    hardware.packet += "0 3 3 0003 4 1 0 0 100\n"
+    proc = socket_proc(tmp_path, (882, "lldpd", ["100"]))
+    with hardware.session(tmp_path, capture_users=partial(socket_users, proc=proc)) as session:
+        session.prepare()
+        assert not hardware.interfaces["wifi1"]["up"]
+        session.read(["iw", "dev", "capture0", "set", "freq", "2437", "HT20"])
+    assert hardware.interfaces["wifi1"]["up"]
+    assert hardware.interfaces["capture0"]["channel"] == 2412
+
+
+def test_lldpd_on_only_idle_managed_interface_allows_borrowing(tmp_path):
+    hardware = RadioHardware(mode="managed", up=False, sibling=False)
+    hardware.packet += "0 3 3 0003 6 1 0 0 100\n"
+    proc = socket_proc(tmp_path, (882, "lldpd", ["100"]))
+    with hardware.session(tmp_path, capture_users=partial(socket_users, proc=proc)) as session:
+        session.prepare()
+        session.read(["iw", "dev", "capture0", "set", "type", "monitor"])
+        session.read(["ip", "link", "set", "capture0", "up"])
+    assert hardware.interfaces["capture0"]["mode"] == "managed"
+    assert not hardware.interfaces["capture0"]["up"]
+
+
+@pytest.mark.parametrize("ifindex", [0, 6])
+def test_lldpd_exemption_does_not_apply_to_global_or_monitor_sockets(tmp_path, ifindex):
+    hardware = RadioHardware()
+    hardware.packet += f"0 3 3 0003 {ifindex} 1 0 0 100\n"
+    proc = socket_proc(tmp_path, (882, "lldpd", ["100"]))
+    with pytest.raises(RadioSessionError, match="busy.*lldpd"):
+        with hardware.session(tmp_path, capture_users=partial(socket_users, proc=proc)):
+            pytest.fail("monitor and global sockets must remain protected")
+    assert not any("set" in command for command in hardware.calls)
+
+
+@pytest.mark.parametrize("other_owner", ["tcpdump", "dumpcap", "kismet", None])
+def test_lldpd_on_managed_sibling_does_not_hide_another_capture(tmp_path, other_owner):
+    hardware = RadioHardware()
+    hardware.packet += "0 3 3 0003 4 1 0 0 100\n0 3 3 0003 4 1 0 0 101\n"
+    owners = [(882, "lldpd", ["100"])]
+    if other_owner:
+        owners.append((123, other_owner, ["101"]))
+    proc = socket_proc(tmp_path, *owners)
+    reason = other_owner or "packet socket inode 101"
+    with pytest.raises(RadioSessionError, match=f"busy.*{reason}"):
+        with hardware.session(tmp_path, capture_users=partial(socket_users, proc=proc)):
+            pytest.fail("other and unidentified captures must remain protected")
+    assert not any("set" in command for command in hardware.calls)
+
+
+def test_socket_shared_with_lldpd_still_reports_other_owner(tmp_path):
+    proc = socket_proc(tmp_path, (882, "lldpd", ["100"]), (123, "tcpdump", ["100"]))
+    assert socket_users({"100"}, proc, ignore_process_names=frozenset({"lldpd"})) == ["tcpdump (pid 123)"]
+
+
+def test_unidentified_socket_remains_reported_alongside_identified_socket(tmp_path):
+    proc = socket_proc(tmp_path, (123, "dumpcap", ["100"]))
+    assert socket_users({"100", "101"}, proc) == ["dumpcap (pid 123)", "packet socket inode 101"]
+
+
+def test_lldpd_exemption_does_not_allow_connected_managed_sibling(tmp_path):
+    hardware = RadioHardware()
+    hardware.packet += "0 3 3 0003 4 1 0 0 100\n"
+    hardware.connected.add("wifi1")
+    proc = socket_proc(tmp_path, (882, "lldpd", ["100"]))
+    with pytest.raises(RadioSessionError, match="busy.*Wi-Fi connection"):
+        with hardware.session(tmp_path, capture_users=partial(socket_users, proc=proc)):
+            pytest.fail("connection ownership must remain protected")
+    assert not any("set" in command for command in hardware.calls)
 
 
 @pytest.mark.parametrize("width,center,no_ht,expected", [

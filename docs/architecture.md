@@ -72,6 +72,11 @@ retain their type and monitor flags; they are reused without creating or
 deleting interfaces. Saved identity (phy, wdev, ifindex, MAC) must still match
 before restoration modifies an interface.
 
+`lldpd` holds filtered Ethernet discovery sockets on managed interfaces and is
+not a radio capture owner. Only identified `lldpd` sockets bound to a managed
+interface are exempted; other/shared owners and unidentified sockets remain
+blockers. Monitor-interface and namespace-wide sockets receive no exemption.
+
 Capture and analysis children stop before radio restoration. Resource contexts
 also cover failed startup before the capture loop begins. Ctrl+C and SIGTERM
 use the same cleanup path; FPMS allows time for graceful cleanup. Restoration

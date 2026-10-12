@@ -81,12 +81,17 @@ def parse_interface_state(target: CaptureTarget, info: str, link_json: str) -> I
 
 def parse_packet_sockets(text: str, ifindices: set[int]) -> set[str]:
     """Socket inodes capturing on this radio (including namespace-wide ALL)."""
+    return set(parse_packet_socket_interfaces(text, ifindices))
+
+
+def parse_packet_socket_interfaces(text: str, ifindices: set[int]) -> dict[str, int]:
+    """Retain the binding so managed link discovery is separate from monitors."""
     lines = text.splitlines()
     if not lines or lines[0].split() != [
         "sk", "RefCnt", "Type", "Proto", "Iface", "R", "Rmem", "User", "Inode",
     ]:
         raise RadioSessionError("Unrecognized /proc/net/packet header")
-    inodes = set()
+    bindings = {}
     for line in lines[1:]:
         fields = line.split()
         try:
@@ -94,10 +99,10 @@ def parse_packet_sockets(text: str, ifindices: set[int]) -> set[str]:
                 raise ValueError("expected nine columns")
             ifindex, protocol = int(fields[4]), int(fields[3], 16)
             if ifindex in ifindices or (ifindex == 0 and protocol == 3):
-                inodes.add(str(int(fields[8])))
+                bindings[str(int(fields[8]))] = ifindex
         except ValueError as error:
             raise RadioSessionError(f"Unrecognized packet socket entry: {line!r}") from error
-    return inodes
+    return bindings
 
 
 def _option_interfaces(argv: list[str]) -> set[str]:
@@ -175,20 +180,32 @@ def namespace_has_process(target: CaptureTarget, name: str, proc: Path = Path("/
     return False
 
 
-def socket_users(inodes: set[str], proc: Path = Path("/proc")) -> list[str]:
+def socket_users(
+    inodes: set[str], proc: Path = Path("/proc"), *,
+    ignore_process_names: frozenset[str] = frozenset(),
+) -> list[str]:
     """Best-effort labels; unidentified sockets still block radio use."""
     users = set()
-    wanted = {f"socket:[{inode}]" for inode in inodes}
+    identified = set()
+    wanted = {f"socket:[{inode}]": inode for inode in inodes}
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
         try:
-            if any(os.readlink(fd) in wanted for fd in entry.joinpath("fd").iterdir()):
-                name = entry.joinpath("comm").read_text().strip()
-                users.add(f"{name} (pid {entry.name})")
+            name = entry.joinpath("comm").read_text().strip()
+            for fd in entry.joinpath("fd").iterdir():
+                try:
+                    inode = wanted.get(os.readlink(fd))
+                except OSError:
+                    continue
+                if inode is not None:
+                    identified.add(inode)
+                    if name not in ignore_process_names:
+                        users.add(f"{name} (pid {entry.name})")
         except OSError:
             continue
-    return sorted(users) or [f"packet socket inode {inode}" for inode in sorted(inodes)]
+    users.update(f"packet socket inode {inode}" for inode in inodes - identified)
+    return sorted(users)
 
 
 class RadioSession:
@@ -204,7 +221,7 @@ class RadioSession:
         command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
         lock_directory: Path = LOCK_DIRECTORY,
         controllers: Callable[[CaptureTarget, set[str]], list[str]] = controller_users,
-        capture_users: Callable[[set[str]], list[str]] = socket_users,
+        capture_users: Callable[..., list[str]] = socket_users,
     ) -> None:
         self.target = target
         self.tune_builder = tune_builder
@@ -289,11 +306,21 @@ class RadioSession:
                 link = self.read(["iw", "dev", state.target.interface, "link"]).strip()
                 if link != "Not connected.":
                     users.append(f"{state.target.label} has a Wi-Fi connection")
-        inodes = parse_packet_sockets(
+        bindings = parse_packet_socket_interfaces(
             self.read(["cat", "/proc/net/packet"]), {state.ifindex for state in self.states},
         )
-        if inodes:
-            users.extend(self.capture_users(inodes))
+        managed_ifindices = {state.ifindex for state in self.states if state.mode == "managed"}
+        managed_sockets = {inode for inode, ifindex in bindings.items() if ifindex in managed_ifindices}
+        protected_sockets = set(bindings) - managed_sockets
+        if protected_sockets:
+            users.extend(self.capture_users(protected_sockets))
+        if managed_sockets:
+            # lldpd's bound Ethernet discovery socket is not radio ownership.
+            # Exempt it only on managed interfaces; monitor/global sockets,
+            # other owners, and unidentified sockets still block capture.
+            users.extend(self.capture_users(
+                managed_sockets, ignore_process_names=frozenset({"lldpd"}),
+            ))
         users.extend(self.controllers(self.target, names))
         # Dynamic nl80211 managers may have no -i argument or packet socket.
         # Query ownership instead of stopping a system-wide network service.

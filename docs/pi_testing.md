@@ -397,6 +397,10 @@ guard queries NM ownership only for interfaces in NM's inventory; a listed
 managed sibling must still prevent capture. Confirm the prior `Device 'wlanpi0'
 not found` error no longer appears after reinstalling.
 
+Keep `lldpd` running for these tests. Its link-discovery socket on an idle
+managed interface must not produce a busy-radio error. A simultaneous tcpdump
+or other capture still must, including one on that same managed interface.
+
 1. Run Display on a different channel from the baseline, navigate/rotate, then
    exit left. Repeat the baseline commands. Confirm the capture interface's
    mode, UP flag, and original known channel/width are restored; siblings regain
