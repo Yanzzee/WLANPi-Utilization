@@ -138,13 +138,14 @@ The most common helpers are:
 
 ```bash
 ./scripts/pi_setup.sh
-./scripts/pi_smoke.sh wlan0 5180
-./scripts/pi_collect_debug.sh
+./scripts/pi_smoke.sh wlanpi0 5180
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
 sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-The smoke script attempts to restore the interface's original type. The normal
-live runtime uses a radio session that restores saved modes, up/down flags,
+The legacy smoke script is only for an idle test adapter: it does not use the
+radio ownership guard and attempts to restore only the interface's original
+type. Prefer an application-owned PCAPNG for Trixie testing. The normal live runtime uses a radio session that restores saved modes, up/down flags,
 and known monitor tuning after capture stops, including startup failures.
 See [the radio acceptance checks](pi_testing.md#radio-ownership-and-restoration-acceptance).
 

@@ -132,16 +132,19 @@ Record the tested OS, package versions, adapter, and result with each item.
   the existing environment passes the same full suite. The user confirmed
   successful testing after deploying item 6 on October 12, 2026.
 
-- [ ] **7. Validate capture and metrics with TShark 4.4.** Check required fields
+- [x] **7. Validate capture and metrics with TShark 4.4.** Check required fields
   and optional-field negotiation against the shipped version. Use representative
   captures to verify retries, RSSI, HE/EHT widths, puncturing, and survey counters.
   **Acceptance:** compare live results with the same saved capture across
   supported 2.4/5/6 GHz adapters; unsupported widths and unavailable survey data
   remain explicit. Add small sanitized regression fixtures where useful.
   **Status:** implemented; all 472 tests pass on Python 3.13.3. Packet decoding
-  was verified with TShark 4.4.19 and 4.6.0. On-device acceptance is pending.
-  Field inspection
-  now has a bounded timeout, reports probe failures, validates core fields
+  was verified with TShark 4.4.19 and 4.6.0. The user confirmed successful
+  production installation, all 52 fields, and all four packet checks with
+  TShark 4.4.19 on the Pi, and reported good testing so far. This accepts the
+  compatibility step; exhaustive live band/width and survey coverage remains
+  device-specific. Field inspection now has a bounded timeout, reports probe
+  failures, validates core fields
   before radio discovery/preparation, and negotiates optional AP metadata.
   Original synthetic PCAPs and actual TShark 4.4.19 exports cover 2.4 GHz HT40,
   5 GHz VHT160, 6 GHz HE80/EHT320, puncturing, RSSI, QBSS, and repeated retries
@@ -154,11 +157,20 @@ Record the tested OS, package versions, adapter, and result with each item.
 
 - [ ] **8. Expand diagnostics and finish release documentation.** Collect OS
   and package versions, active FPMS paths, service status, relevant journal
-  output, interfaces, and namespaces. Correct the existing FPMS 2.x references
+  output, interfaces, and namespaces. Keep references aligned with FPMS 1.4.24
   and document the tested Trixie installation and troubleshooting steps.
   **Acceptance:** diagnose an installation or capture failure from the collected
   output, then verify fresh installation, reboot, and repeat installation on
   DeadEye before publishing the Trixie release.
+  **Status:** diagnostics and release documentation are implemented; all 485
+  tests pass on Python 3.13.3. Final device acceptance is pending. The collector uses bounded read-only commands,
+  records failures in a manifest/summary, resolves FPMS without importing its
+  hardware code, compares installed app/adapter hashes with the checkout, and
+  collects root/named-namespace radio evidence. Hardware-free tests reproduce
+  failed startup, stale deployment, missing commands, permission errors, and
+  timeouts. No obsolete FPMS 2.x references remain in the user guides. Follow
+  [the final release checks](trixie-release.md#final-device-acceptance) before
+  marking this item complete or publishing the release.
 
 ## Separate issues
 

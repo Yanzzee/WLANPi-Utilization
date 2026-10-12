@@ -34,7 +34,7 @@ Choose one or both live formats:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --stats-csv \
   --beacons-jsonl \
@@ -46,7 +46,7 @@ write both formats together:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --log \
   --log-dir logs
@@ -62,7 +62,7 @@ formats:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --logging-only \
   --log-dir logs

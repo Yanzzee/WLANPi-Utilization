@@ -20,12 +20,13 @@ the band and channel, not an SSID or BSSID.
 
 ## Requirements
 
-The primary target is a WLAN Pi R4 running WLAN Pi OS with:
+The primary target is a WLAN Pi R4 running WLAN Pi OS 26.10 DeadEye
+(Debian 13 Trixie) with:
 
 - WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
 - Python 3.13 or newer (the Trixie target is Python 3.13);
 - a monitor-mode-capable Wi-Fi interface supporting the selected frequency;
-- `git`, `ip`, `iw`, and `tshark`; and
+- `git`, `ip`, `iw`, and TShark 4.4 (verified with 4.4.19); and
 - root access through `sudo`.
 
 The adapter, driver, and regulatory domain must permit the selected channel
@@ -79,6 +80,17 @@ saved interface modes, up/down states, and known monitor tuning when closed.
 Existing WLAN Pi monitor interfaces are preserved. With one shared radio, stop
 the other tool's radio use before starting Utilization and keep it stopped until
 Utilization exits. See [radio ownership and restoration](docs/troubleshooting.md#the-radio-is-busy).
+
+After installation, check TShark decoding without opening a radio:
+
+```bash
+/opt/wlanpi-beacon-live/bin/python scripts/check_tshark.py
+```
+
+For installation or capture failures, collect a diagnostic bundle from this
+checkout with `sudo ./scripts/pi_collect_debug.sh`. See the
+[Trixie release checks](docs/trixie-release.md) for tested behavior, remaining
+hardware validation, and known follow-ups, including hex SSID display.
 
 ## Use the FPMS front panel
 

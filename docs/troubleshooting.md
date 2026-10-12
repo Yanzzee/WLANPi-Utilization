@@ -216,7 +216,7 @@ iw reg get
 For bonded capture, also inspect the actual definition:
 
 ```bash
-iw dev wlan0 info
+iw dev wlanpi0 info  # replace with the selected capture interface
 ```
 
 The default is fixed at 20 MHz on 2.4 GHz and 80 MHz on 5 GHz and 6 GHz. The
@@ -226,7 +226,7 @@ at 20 MHz. An explicit override undergoes the same capability check and is not
 silently changed:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+sudo wlanpi-beacon-live --iface auto --frequency-mhz 5180 \
   --channel-width 80 --center-frequency1-mhz 5210
 ```
 
@@ -274,16 +274,16 @@ individual data frames. Sustained swap activity or a saturated TShark process
 therefore points to system, driver, or dissection pressure rather than the GUI
 waiting to replay a 120-second frame-object queue.
 
-Use an explicit center frequency when testing 5 GHz or 6 GHz:
+Use an explicit primary frequency when testing 5 GHz or 6 GHz:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --iface auto --frequency-mhz 5975
 ```
 
 For band-qualified channel notation, 6 GHz channel 5 maps to 5975 MHz:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
+sudo wlanpi-beacon-live --iface auto --band 6 --channel 5
 ```
 
 Do not pass a frequency to `--channel`; `--channel 5975` means channel number
@@ -386,11 +386,18 @@ restore it when that script exits.
 Not every AP advertises a QBSS Load element. Beacon capture can be working even
 when Utilization shows `<No QBSS Beacons>` or graph gaps.
 
-Use the smoke capture and inspect its beacon TSV:
+Exit Utilization in FPMS, then save one application-owned capture:
 
 ```bash
-./scripts/pi_smoke.sh wlan0 5180
-sed -n '1,20p' samples/pi_tshark_qbss_sample.tsv
+sudo wlanpi-beacon-live --iface auto --band 5 --channel 36 \
+  --raw-pcapng /tmp/utilization-qbss.pcapng
+```
+
+After stopping with Ctrl-C, inspect the saved beacons without reopening a radio:
+
+```bash
+tshark -r /tmp/utilization-qbss.pcapng -Y 'wlan.fc.type_subtype == 0x08' \
+  -T fields -e wlan.bssid -e wlan.qbss.cu -e wlan.qbss.scount
 ```
 
 Empty QBSS columns indicate the observed beacons did not provide those fields.
@@ -405,7 +412,7 @@ Enable diagnostics:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 --channel 36 --survey-debug
+  --iface auto --band 5 --channel 36 --local-cu --survey-debug
 ```
 
 Diagnostic lines show target frequency, active/busy deltas, computed value,
@@ -455,7 +462,7 @@ beacon-live retry-debug \
 ```
 
 See [screens.md](screens.md#4-retries) and the detailed capture procedure in
-[pi_testing.md](pi_testing.md#capture-and-audit-retry-metrics).
+[pi_testing.md](pi_testing.md#validate-bonded-capture-and-retry-metrics).
 
 ## Beacon received count briefly shows zero
 
@@ -503,15 +510,64 @@ Rerun the installer after FPMS or repository updates. If terminal live capture
 works but the LCD does not, the issue is likely in FPMS integration, display
 hardware, or the installed adapter rather than parsing/analysis.
 
-## Collect a debug bundle
+## TShark fields or hex SSID names
+
+Run the read-only packet check from the updated checkout:
 
 ```bash
-./scripts/pi_collect_debug.sh
+/opt/wlanpi-beacon-live/bin/python scripts/check_tshark.py
 ```
 
-The script creates `debug/pi_debug_<timestamp>/` and a matching `.tar.gz`
-archive. It collects system, Wi-Fi, TShark, interface, rfkill, and recent kernel
-information when available.
+Field inspection now stops before radio discovery/preparation if TShark cannot
+be queried, times out, or lacks a required field. The journal or CLI error
+names the problem. Missing optional AP metadata is omitted safely.
 
-Review before sharing: bundles and captures can contain real SSIDs, BSSIDs,
-MAC addresses, interface addresses, kernel messages, and other local details.
+TShark 4.4.19 reports `wlan.ssid` as FT_BYTES and emits names as hex. This is a
+confirmed separate issue awaiting parser normalization; changing adapters or
+reinstalling FPMS does not fix it. Keep a known SSID/capture for that follow-up.
+
+## Collect a debug bundle
+
+Run from the checkout after reproducing a failure:
+
+```bash
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
+```
+
+Use `--output-dir /tmp/utilization-debug` to choose another destination or
+`--timeout-seconds 20` if a slow device needs more time per command. The script
+creates a unique `debug/pi_debug_<timestamp>_<suffix>/` directory and matching
+`.tar.gz`. Root allows collection of journals, runtime files, and named network
+namespaces. Without it, permission failures are recorded; the script does not
+prompt for sudo during collection.
+
+Start with these files:
+
+| Evidence | Purpose |
+| --- | --- |
+| `SUMMARY.txt`, `manifest.json` | Show each failed, unavailable, timed-out, or mismatched check; the command files retain exit status and stderr. |
+| `os_release.txt`, `wlanpi_release.txt`, `packages.txt` | Identify the actual image, Debian, FPMS, Core, Python, and wireless-tool versions. |
+| `fpms_service.txt`, `fpms_journal.txt` | Identify service state/exit status, unit paths, and recent capture/installation errors. |
+| `fpms_paths.json`, `fpms_python_probe.txt`, `fpms_environment.txt`, `fpms_process_environment.json` | Resolve the launcher's interpreter/package, configured unit overrides, and actual running-process interface/namespace overrides without importing FPMS hardware code. |
+| `app_python.txt`, `deployment.json`, `cli_launcher_*.txt` | Identify the production venv and stale app/adapter files compared with the current checkout. |
+| `tshark_version.txt`, `tshark_fields.json` | Identify TShark version, requested field types, and unavailable fields. |
+| `namespaces.json`, `iw_dev.txt`, `netns_N_*` | Map root/named contexts to their interface, phy, regulatory, controller, and packet-socket evidence. |
+| `processes.txt`, `radio_locks.txt`, `runtime_*`, `disk.txt`, `memory.txt` | Identify active tools, app artifacts, disk pressure, and memory pressure. |
+
+For `Capture Stopped (2)`, read `fpms_journal.txt` first. Use the named target
+in that error to select the matching namespace files. A busy-radio error can
+be compared with `packet_sockets.txt`, `packet_owners.txt`, and process IDs
+in the matching namespace; a stale-code suspicion
+can be checked through `matches_checkout` in `deployment.json`. Command failures
+do not discard the rest of the bundle. A successful collection means the
+archive was written, not that every diagnostic check succeeded.
+
+The collector opens no live capture, tunes no radio, acquires no radio lock,
+and restarts/stops no service. It does not copy log CSVs, raw packet captures,
+or screenshots. Retain those separately when comparing metrics. CLI errors
+must also be saved separately; they do not appear in the FPMS journal.
+
+Review before sharing: bundles and captures can contain SSIDs, BSSIDs, MAC/IP
+addresses, process arguments, kernel messages, and other local details. Only
+Utilization's interface/namespace overrides are retained from service environment
+output; unrelated environment values are excluded.

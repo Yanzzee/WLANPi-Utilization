@@ -141,16 +141,22 @@ active must produce unavailable CU. This is a separate measurement from AP
 QBSS CU and need not agree with it. Retain output and record which band/width
 combinations deliver frames and which expose usable survey counters.
 
-## Run a smoke capture
+## Legacy smoke capture
+
+Prefer the application-owned capture workflow in [item 7](#tshark-44-and-metric-acceptance)
+for Trixie validation. This older helper performs its own manual HT20 setup
+and restores only the interface type; it does not use the application's radio
+ownership guard or full state restoration. Use it only on an idle test adapter
+after exiting Utilization and releasing the radio in other tools.
 
 ```bash
 ./scripts/pi_smoke.sh [iface] [channel-or-frequency-mhz]
 ```
 
-Default:
+Pass a known monitor-capable interface explicitly (replace `wlanpi0` as needed):
 
 ```bash
-./scripts/pi_smoke.sh wlan0 36
+./scripts/pi_smoke.sh wlanpi0 36
 ```
 
 The script sets the interface to monitor mode for a 15-second HT20 capture,
@@ -160,9 +166,9 @@ the original interface type when it exits.
 Use explicit MHz for unambiguous 5/6 GHz testing:
 
 ```bash
-./scripts/pi_smoke.sh wlan0 2412  # 2.4 GHz channel 1
-./scripts/pi_smoke.sh wlan0 5180  # 5 GHz channel 36
-./scripts/pi_smoke.sh wlan0 5975  # 6 GHz channel 5 PSC
+./scripts/pi_smoke.sh wlanpi0 2412  # 2.4 GHz channel 1
+./scripts/pi_smoke.sh wlanpi0 5180  # 5 GHz channel 36
+./scripts/pi_smoke.sh wlanpi0 5975  # 6 GHz channel 5 PSC
 ```
 
 Channel numbers can overlap bands. For example, channel 149 is 5745 MHz in
@@ -577,7 +583,7 @@ to force the safety path without filling a disk:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --logging-only \
   --log-dir /tmp/beacon-live-low-disk-test \
@@ -592,26 +598,26 @@ low-disk marker described in [logging.md](logging.md#low-disk-markers).
 Basic channel capture:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --channel 36
+sudo wlanpi-beacon-live --iface auto --channel 36
 ```
 
 Explicit 6 GHz frequency:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --iface auto --frequency-mhz 5975
 ```
 
 Band-qualified 6 GHz channel:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
+sudo wlanpi-beacon-live --iface auto --band 6 --channel 5
 ```
 
 Optional local survey diagnostics:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 --channel 36 --survey-debug
+  --iface auto --band 5 --channel 36 --local-cu --survey-debug
 ```
 
 The terminal process stays in the foreground and exits on Ctrl-C. Normal live
@@ -622,12 +628,15 @@ capture restores saved radio state; see
 ## Collect a debug bundle
 
 ```bash
-./scripts/pi_collect_debug.sh
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
 ```
 
-The script writes `debug/pi_debug_<timestamp>/` and a matching `.tar.gz`
-archive. See [troubleshooting.md](troubleshooting.md#collect-a-debug-bundle) for
-privacy guidance.
+The script writes a unique `debug/pi_debug_<timestamp>_<suffix>/` directory and
+matching `.tar.gz`. It collects bounded read-only checks and preserves failures
+in `SUMMARY.txt` and `manifest.json`. See
+[troubleshooting.md](troubleshooting.md#collect-a-debug-bundle) for the evidence
+map and sharing guidance, and [the final Trixie release checks](trixie-release.md#final-device-acceptance)
+for fresh installation, reboot, and repeat-install acceptance.
 
 ## Generated data
 
