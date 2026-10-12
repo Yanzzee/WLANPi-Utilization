@@ -22,24 +22,33 @@ Record the tested OS, package versions, adapter, and result with each item.
   on `phy0` and adding failed-child menu recovery. The device test used
   2.4 GHz channel 1; `wlan0` on `phy1` does not support monitor mode.
 
-- [ ] **2. Locate the active FPMS installation reliably.** Resolve the package
+- [x] **2. Locate the active FPMS installation reliably.** Resolve the package
   through the interpreter used by the FPMS launcher instead of globbing every
   Python directory. Detect unsupported layouts and document reinstallation
   after FPMS package updates.
   **Acceptance:** stale Python directories do not affect discovery; an FPMS
   update followed by reinstallation restores the menu integration.
-  **Status:** implementation and automated checks added. Discovery queries the
-  launcher interpreter without importing FPMS. Tests cover stale directories,
+  **Status:** complete. Discovery queries the launcher interpreter without
+  importing FPMS. Tests cover stale directories,
   Python path shadowing, broken environments, unsupported layouts, and
   reinstallation after a simulated package update. The full suite passes
-  349 tests on macOS with Python 3.13.3. On-device verification is pending;
-  follow [the discovery checks](pi_testing.md#fpms-package-discovery-acceptance).
+  349 tests on macOS with Python 3.13.3. On October 12, 2026, the user confirmed
+  on-device testing after item 2 was good. A separate hex SSID display issue
+  is recorded below.
 
 - [ ] **3. Adapt front-panel controls to current FPMS behavior.** Decide how
   Utilization should handle Key 2, now used by FPMS for display rotation, while
   preserving Key 3 screenshots. Keep GPIO and display hardware access in FPMS.
   **Acceptance:** verify the agreed controls, rotation behavior, screenshots,
   and return to the built-in menu; screen changes retain capture and history.
+  **Status:** the user chose Key 2 rotation while capture continues. The adapter
+  now calls FPMS's native orientation function and immediately redraws the
+  current frame. Key 1 stays disabled; Key 3 still saves screenshots. Regression
+  tests exercise the upstream rotation function, saved orientation, repeat
+  installation, and retained capture/navigation state. The full suite passes
+  357 tests on macOS with Python 3.13.3, including physical button remapping in
+  both orientations and after rotation during an event batch. On-device acceptance is pending;
+  follow [the control checks](pi_testing.md#front-panel-control-acceptance).
 
 - [ ] **4. Discover capture interfaces and network namespaces.** Replace the
   front-panel adapter's hardcoded `wlan0` with configurable or discovered radio
@@ -79,6 +88,14 @@ Record the tested OS, package versions, adapter, and result with each item.
   **Acceptance:** diagnose an installation or capture failure from the collected
   output, then verify fresh installation, reboot, and repeat installation on
   DeadEye before publishing the Trixie release.
+
+## Separate issues
+
+- [ ] **SSID names display as hex.** Reported during on-device testing after
+  item 2. Investigate TShark SSID output and parser normalization separately
+  from front-panel controls, using a known SSID and a sanitized capture/output
+  sample. Verify readable names in the LCD, CLI, and logs; retain correct hidden
+  SSID and non-text byte handling. No cause or fix has been confirmed.
 
 ## Architecture constraints
 

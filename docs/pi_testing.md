@@ -296,6 +296,29 @@ patched files. If discovery or layout validation fails, retain the exact error
 and launcher/package versions for diagnosis. Record the device results in
 [the roadmap](trixie-roadmap.md).
 
+### Front-panel control acceptance
+
+For roadmap item 3, rerun the installer from the updated checkout, open Display,
+and allow history to accumulate. Record the capture/TShark PIDs with
+`pgrep -af 'wlanpi-beacon-live|tshark'` before and after testing Key 2.
+
+1. Confirm Key 1 does nothing during the display session.
+2. Press Key 2. Confirm the display rotates 180 degrees immediately, stays on
+   the same screen, and continues updating. Press it again to return to the
+   previous orientation. Capture/TShark PIDs should stay the same.
+3. Rotate again and use up/down to change screens. Confirm navigation remains
+   usable and earlier graph history is retained. Check FPMS's flipped physical
+   mapping: up/down, left/right, and Key 1/Key 3 swap; Key 2 and center stay the
+   same. The physical Key 1 button saves screenshots when flipped, and physical
+   Key 3 is disabled. The control in the screen-relative left direction exits.
+4. Press Key 3. Confirm a timestamped PNG for the current screen is saved in
+   `/var/log/wlanpi-beacon-live`, and its confirmation returns to the same screen.
+5. Press left. Confirm capture stops and the built-in menu returns in the saved
+   orientation. Verify Key 2 still rotates the built-in menu.
+6. After exiting capture, run `sudo systemctl restart wlanpi-fpms` and confirm
+   the orientation remains as set. Record the results in
+   [the roadmap](trixie-roadmap.md).
+
 The installed menu is:
 
 ```text
@@ -318,8 +341,9 @@ Apps
 5. Return to earlier screens and confirm their two-minute histories continued
    while inactive.
 6. Press left and confirm capture exits and the selected channel menu returns.
-7. While a display is active, confirm the first two auxiliary buttons do
-   nothing. Press the third auxiliary button and confirm a timestamped PNG for
+7. While a display is active, confirm the first auxiliary button does nothing
+   and the second rotates the display without restarting capture or resetting
+   history. Press the third auxiliary button and confirm a timestamped PNG for
    the active screen appears in `/var/log/wlanpi-beacon-live`. Confirm the
    brief saved-folder message clears back to the same screen.
 8. Open `Display + Log`; confirm its brief start message includes the log

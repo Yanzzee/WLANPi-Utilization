@@ -34,9 +34,16 @@ All screens render from the same immutable analyzer snapshot and the same
 - The display is republished once per configured refresh interval. Capture
   events update analyzer state but do not cause extra paints between timer
   deadlines.
-- The first two auxiliary buttons are disabled while a display is active. The
-  third saves a PNG of the current screen and briefly confirms the destination
-  folder without changing the active screen or navigation offset.
+- The first auxiliary button is disabled while a display is active. The second
+  toggles the display orientation by 180 degrees using FPMS's saved setting and
+  redraws the current frame immediately. Rotation preserves the capture process,
+  active screen, logging state, and graph history. The third saves a PNG of the
+  current screen and briefly confirms the destination folder without changing
+  the active screen or navigation offset.
+  FPMS remaps physical buttons before calling the app: in flipped orientation,
+  up/down, left/right, and Key 1/Key 3 swap. Key 2 and center remain unchanged.
+  Physical Key 1 therefore saves screenshots when flipped, and physical Key 3
+  is disabled.
 
 The first two rows show the tuned frequency/screen name and a metric summary.
 Graph screens use the middle 120×64 region. The bottom rows show the selected

@@ -42,6 +42,12 @@ def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
         "from .modules.apps.scanner import *\n"
         "\n"
         "def main(g_vars, menu):\n"
+        "    def menu_left():\n"
+        "        return 'left'\n"
+        "\n"
+        "    def toggle_display_orientation():\n"
+        "        return 'rotate'\n"
+        "\n"
         "    def menu_key1():\n"
         "        return 'key1'\n"
         "\n"
@@ -70,7 +76,6 @@ def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
     )
     namespace: dict[str, object] = {
         "build_channel_utilization_menu": lambda g_vars: {},
-        "menu_left": lambda: None,
     }
     exec(executable, namespace)
     calls: list[int] = []
@@ -81,6 +86,7 @@ def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
         "page_key3_handler": lambda: calls.append(3),
     }
     dispatchers = namespace["main"](g_vars, [])
+    assert g_vars["channel_utilization_toggle_orientation"]() == "rotate"
 
     assert dispatchers[0]() is None
     assert dispatchers[1]() is None

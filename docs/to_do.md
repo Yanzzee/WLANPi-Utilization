@@ -112,3 +112,6 @@ Features & changes
         why does it take several seconds to start showing the graphs?
         why is the display bursty at times instead of regular update cadence?
         how else can the code be more efficient?
+37. SSID names appear as hex on the Trixie device after roadmap item 2.
+        investigate TShark output and parser normalization with a known SSID.
+        see trixie-roadmap.md for acceptance criteria; handle separately from controls.

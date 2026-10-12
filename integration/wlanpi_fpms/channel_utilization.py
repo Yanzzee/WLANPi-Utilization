@@ -284,7 +284,7 @@ class ChannelUtilizationApp:
         self.g_vars["page_up_handler"] = session.navigate_up
         self.g_vars["page_down_handler"] = session.navigate_down
         self.g_vars["page_key1_handler"] = session.ignore_auxiliary_button
-        self.g_vars["page_key2_handler"] = session.ignore_auxiliary_button
+        self.g_vars["page_key2_handler"] = session.rotate_display
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
@@ -495,6 +495,22 @@ class _DisplaySession:
 
     def ignore_auxiliary_button(self) -> None:
         """Override an FPMS shortcut button while this page owns the display."""
+
+    def rotate_display(self) -> None:
+        """Use FPMS's persisted orientation and repaint without changing capture."""
+        callback = self.g_vars.get("channel_utilization_toggle_orientation")
+        if not callable(callback):
+            LOGGER.error("FPMS rotation callback is missing; rerun the installer")
+            return
+        with self.frame_lock:
+            self.g_vars["drawing_in_progress"] = True
+            try:
+                callback()
+                _redraw_current_frame(self.g_vars)
+            except OSError:
+                LOGGER.exception("Unable to rotate the Utilization display")
+            finally:
+                self.g_vars["drawing_in_progress"] = False
 
     def show_logging_status(self, message: str) -> None:
         self.show_status(
@@ -1115,6 +1131,14 @@ def _return_to_menu(g_vars: dict[str, object]) -> None:
         callback()
     else:
         g_vars["display_state"] = "menu"
+
+
+def _redraw_current_frame(g_vars: dict[str, object]) -> None:
+    image = g_vars.get("image")
+    if image is not None:
+        import fpms.modules.wlanpi_oled as oled
+
+        oled.drawImage(image)
 
 
 def _display_logging_status(

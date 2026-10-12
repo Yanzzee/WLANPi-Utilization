@@ -3,6 +3,7 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,12 +52,12 @@ def test_trixie_install_adds_one_app_and_is_idempotent(package: Path) -> None:
         if isinstance(node, ast.AnnAssign)
         and isinstance(node.target, ast.Name) and node.target.id == "menu"
     )
-    return_handler = main.body[menu_index + 1]
-    assert isinstance(return_handler, ast.Assign)
-    registration = main.body[menu_index + 2]
+    bindings = main.body[menu_index + 1:menu_index + 3]
+    assert all(isinstance(binding, ast.Assign) for binding in bindings)
+    registration = main.body[menu_index + 3]
     assert isinstance(registration, ast.For)
     menu_assignment = main.body[menu_index]
-    nodes = [ast.Assign(targets=[menu_assignment.target], value=menu_assignment.value), return_handler, registration]
+    nodes = [ast.Assign(targets=[menu_assignment.target], value=menu_assignment.value), *bindings, registration]
     namespace = {
         node.id: (lambda: None)
         for statement in nodes for node in ast.walk(statement)
@@ -71,6 +72,7 @@ def test_trixie_install_adds_one_app_and_is_idempotent(package: Path) -> None:
     apps = next(item["action"] for item in namespace["menu"] if item["name"] == "Apps")
     assert [item["name"] for item in apps] == ["Kismet", "Profiler", "Scanner", "Utilization"]
     assert callable(namespace["g_vars"]["channel_utilization_return_to_menu"])
+    assert callable(namespace["g_vars"]["channel_utilization_toggle_orientation"])
 
 
 def test_trixie_buttons_dispatch_and_exit_return_to_menu(package: Path) -> None:
@@ -101,7 +103,7 @@ def test_trixie_buttons_dispatch_and_exit_return_to_menu(package: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "failure", ["branch", "dispatcher", "import", "menu", "adapter_syntax"]
+    "failure", ["branch", "dispatcher", "import", "menu", "rotation", "adapter_syntax"]
 )
 def test_validation_failure_leaves_every_file_unchanged(package: Path, tmp_path: Path, failure: str) -> None:
     adapter = ADAPTER
@@ -110,7 +112,7 @@ def test_validation_failure_leaves_every_file_unchanged(package: Path, tmp_path:
         adapter.write_text("def broken(\n")
     else:
         path = (
-            package / "fpms.py" if failure in {"import", "menu"}
+            package / "fpms.py" if failure in {"import", "menu", "rotation"}
             else package / "modules" / "nav" / "buttons.py"
         )
         text = path.read_text()
@@ -120,6 +122,8 @@ def test_validation_failure_leaves_every_file_unchanged(package: Path, tmp_path:
             text = text.replace("def menu_down(", "def renamed_menu_down(")
         elif failure == "import":
             text = text.replace("from .modules.apps.scanner import *", "# scanner removed")
+        elif failure == "rotation":
+            text = text.replace("def toggle_display_orientation(", "def renamed_orientation(")
         else:
             text = text.replace("# update menu options data structure if we're in non-classic mode", "# menu restructured")
         path.write_text(text)
@@ -214,6 +218,18 @@ def test_existing_menu_patch_gains_return_handler_without_duplicate_app(package:
     assert text.count("channel_utilization_return_to_menu") == 1
 
 
+def test_existing_patch_gains_native_rotation_callback(package: Path) -> None:
+    patcher.install_fpms(package, ADAPTER)
+    fpms = package / "fpms.py"
+    fpms.write_text(fpms.read_text().replace(
+        "    g_vars['channel_utilization_toggle_orientation'] = toggle_display_orientation\n", ""
+    ))
+    patcher.install_fpms(package, ADAPTER)
+    text = fpms.read_text()
+    assert text.count("build_channel_utilization_menu(g_vars)") == 1
+    assert text.count("channel_utilization_toggle_orientation") == 1
+
+
 def test_trixie_auxiliary_handlers_preserve_native_key2_outside_app(package: Path) -> None:
     patcher.install_fpms(package, ADAPTER)
     tree = ast.parse((package / "fpms.py").read_text())
@@ -264,3 +280,88 @@ def test_rollback_failure_is_reported_and_other_files_are_restored(package: Path
     after = snapshot(package)
     assert after.pop("modules/apps/channel_utilization.py")[0] == ADAPTER.read_bytes()
     assert after == before
+
+
+@pytest.mark.parametrize(
+    ("orientation", "events", "expected", "toggle_on_key2"),
+    [
+        (
+            "normal", ["up", "down", "left", "right", "center", "key1", "key2", "key3"],
+            ["up", "down", "exit", "right", "center", "disabled", "rotate", "screenshot"], False,
+        ),
+        (
+            "flipped", ["up", "down", "left", "right", "center", "key1", "key2", "key3"],
+            ["down", "up", "right", "exit", "center", "screenshot", "rotate", "disabled"], False,
+        ),
+        (
+            "normal", ["key2", "key1", "up", "key2", "key1", "up"],
+            ["rotate", "screenshot", "down", "rotate", "disabled", "up"], True,
+        ),
+    ],
+)
+def test_fpms_remaps_physical_buttons_before_app_handlers(
+    package: Path, orientation: str, events: list[str], expected: list[str],
+    toggle_on_key2: bool,
+) -> None:
+    patcher.install_fpms(package, ADAPTER)
+    tree = ast.parse((package / "fpms.py").read_text())
+    names = {
+        "button_press", "monitor_buttons", "up_key", "down_key", "left_key",
+        "right_key", "center_key", "key_1", "key_2", "key_3",
+        "menu_key1", "menu_key2", "menu_key3",
+    }
+    functions = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    pins = {name: pin for pin, name in enumerate(
+        ("up", "down", "left", "right", "center", "key1", "key2", "key3"), 1
+    )}
+    calls = []
+    state = {
+        "display_orientation": orientation, "display_state": "page",
+        "disable_keys": False, "sig_fired": False, "drawing_in_progress": False,
+        "shutdown_in_progress": False, "screen_cleared": False,
+        "button_press_count": 0,
+        "page_key1_handler": lambda: calls.append("disabled"),
+        "page_key3_handler": lambda: calls.append("screenshot"),
+    }
+    def rotate():
+        calls.append("rotate")
+        if toggle_on_key2:
+            state["display_orientation"] = (
+                "flipped" if state["display_orientation"] == "normal" else "normal"
+            )
+    state["page_key2_handler"] = rotate
+
+    class ButtonEvents:
+        def __enter__(self):
+            self.delivered = False
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def wait_edge_events(self, seconds):
+            return True
+
+        def read_edge_events(self):
+            if self.delivered:
+                raise StopIteration("all test presses delivered")
+            self.delivered = True
+            return [SimpleNamespace(line_offset=pins[name]) for name in events]
+
+    namespace = {
+        "g_vars": state, "BUTTONS_PINS": pins, "PAGE_SLEEP": 300,
+        "DISPLAY_ORIENTATION_FLIPPED": "flipped", "button_request": ButtonEvents(),
+        "menu_up": lambda: calls.append("up"),
+        "menu_down": lambda: calls.append("down"),
+        "menu_left": lambda: calls.append("exit"),
+        "menu_right": lambda: calls.append("right"),
+        "menu_center": lambda: calls.append("center"),
+    }
+    exec(compile(ast.Module(body=functions, type_ignores=[]), "fpms_button_mapping", "exec"), namespace)
+    with pytest.raises(StopIteration, match="all test presses"):
+        namespace["monitor_buttons"]()
+    assert calls == expected
+    assert state["sig_fired"] is False

@@ -1,10 +1,13 @@
+import ast
 import json
 import importlib.util
 import signal
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
 from types import FunctionType
+from types import ModuleType
 from typing import Optional
 
 import pytest
@@ -331,6 +334,7 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
     monkeypatch.setattr(channel_utilization, "LOG_DIR", log_dir)
     processes: list[_FakeProcess] = []
     messages: list[str] = []
+    rotations: list[str] = []
     original_page_status = channel_utilization._display_page_status
 
     def fake_popen(command: list[str]) -> _FakeProcess:
@@ -347,10 +351,15 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
         "_display_page_status",
         capture_page_status,
     )
+    monkeypatch.setattr(
+        channel_utilization, "_redraw_current_frame",
+        lambda state: rotations.append("redraw"),
+    )
 
     g_vars: dict[str, object] = {
         "display_state": "menu",
         "image": _FakeScreenshotImage(b"current-screen"),
+        "channel_utilization_toggle_orientation": lambda: rotations.append("rotate"),
     }
     app = channel_utilization.ChannelUtilizationApp(
         g_vars,
@@ -370,6 +379,7 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
     assert callable(key3)
     assert key1() is None
     assert key2() is None
+    assert rotations == ["rotate", "redraw"]
     assert key3() == log_dir / (
         "20260720-143005-123456_retry-percentage_5180MHz.png"
     )
@@ -402,6 +412,100 @@ def test_display_auxiliary_buttons_are_overridden_and_key3_saves_screenshot(
         f"Log folder: {log_dir}"
     )
     assert g_vars["display_state"] == "page"
+
+
+@pytest.mark.parametrize("with_image", [False, True])
+def test_key2_uses_native_rotation_and_keeps_capture_and_navigation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_image: bool,
+) -> None:
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "display.ppm")
+    monkeypatch.setattr(channel_utilization._DisplaySession, "start_display", lambda session: None)
+    image = _FakeScreenshotImage(b"same graph and history") if with_image else None
+    persisted = []
+    painted = []
+    oled = ModuleType("fpms.modules.wlanpi_oled")
+    oled.orientation = "normal"
+    oled.drawImage = lambda frame: painted.append((oled.orientation, frame))
+    fpms = ModuleType("fpms")
+    modules = ModuleType("fpms.modules")
+    fpms.modules = modules
+    modules.wlanpi_oled = oled
+    for name, module in (("fpms", fpms), ("fpms.modules", modules), ("fpms.modules.wlanpi_oled", oled)):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    state = {"display_orientation": "normal", "image": image}
+    fixture = Path(__file__).parent / "fixtures" / "fpms_1_4_24" / "fpms.py"
+    tree = ast.parse(fixture.read_text())
+    toggle = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "toggle_display_orientation"
+    )
+    namespace = {
+        "g_vars": state,
+        "DISPLAY_ORIENTATION_NORMAL": "normal",
+        "DISPLAY_ORIENTATION_FLIPPED": "flipped",
+        "oled": oled,
+        "save_value": lambda *args: persisted.append(args),
+    }
+    exec(compile(ast.Module(body=[toggle], type_ignores=[]), str(fixture), "exec"), namespace)
+    state["channel_utilization_toggle_orientation"] = namespace["toggle_display_orientation"]
+    processes = []
+    def popen(command):
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    app = channel_utilization.ChannelUtilizationApp(state, popen=popen)
+    app.launch(band="2.4", channel=1, logging=False)
+    session = state["channel_utilization_session"]
+    session.navigate_down()
+    session.current_screen_name = "Admission"
+    controls_before = channel_utilization._screen_control_path(channel_utilization.FRAME_PATH).read_bytes()
+    logging_before = channel_utilization._logging_control_path().read_bytes()
+    key2 = state["page_key2_handler"]
+    try:
+        key2()
+        assert oled.orientation == "flipped"
+        key2()
+        assert oled.orientation == "normal"
+        assert persisted == [
+            ("display", "orientation", "flipped"),
+            ("display", "orientation", "normal"),
+        ]
+        assert painted == ([("flipped", image), ("normal", image)] if with_image else [])
+        assert state["image"] is image
+        assert state["display_state"] == "page"
+        assert state["drawing_in_progress"] is False
+        assert state["channel_utilization_session"] is session
+        assert session.current_screen_name == "Admission"
+        assert session.screen_offset == 1
+        assert len(processes) == 1 and processes[0].poll() is None
+        assert processes[0].signal_received is None
+        assert channel_utilization._screen_control_path(channel_utilization.FRAME_PATH).read_bytes() == controls_before
+        assert channel_utilization._logging_control_path().read_bytes() == logging_before
+    finally:
+        session.stop()
+
+
+def test_rotation_failure_releases_drawing_flag_and_keeps_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "display.ppm")
+    monkeypatch.setattr(channel_utilization._DisplaySession, "start_display", lambda session: None)
+    def failed_rotation():
+        raise OSError("orientation could not be saved")
+    state = {"channel_utilization_toggle_orientation": failed_rotation}
+    app = channel_utilization.ChannelUtilizationApp(state, popen=lambda command: _FakeProcess(command))
+    app.launch(band="2.4", channel=1, logging=False)
+    session = state["channel_utilization_session"]
+    try:
+        state["page_key2_handler"]()
+        assert state["drawing_in_progress"] is False
+        assert state["display_state"] == "page"
+        assert session.process.poll() is None
+        assert "orientation could not be saved" in caplog.text
+    finally:
+        session.stop()
 
 
 def test_up_down_navigation_keeps_one_capture_process_and_debounces(

@@ -96,7 +96,9 @@ While a display is open:
 
 - move up or down to cycle through the six screens;
 - press left to stop capture and return to the menu;
-- the first two auxiliary buttons are disabled; and
+- the first auxiliary button is disabled;
+- the second auxiliary button rotates the display 180 degrees while capture
+  continues; and
 - the third auxiliary button saves the current screen as a timestamped PNG in
   `/var/log/wlanpi-beacon-live`, then briefly confirms the folder without
   changing the active screen.
