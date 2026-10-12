@@ -1,11 +1,15 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.patch_wlanpi_fpms import _patch_buttons
 from scripts.patch_wlanpi_fpms import _patch_fpms
 
 
+@pytest.mark.parametrize("quote", ["'", '"'])
 def test_button_patch_adds_idempotent_page_navigation_handlers(
     tmp_path: Path,
+    quote: str,
 ) -> None:
     buttons = tmp_path / "buttons.py"
     buttons.write_text(
@@ -17,19 +21,17 @@ def test_button_patch_adds_idempotent_page_navigation_handlers(
         "        return 'down'\n"
         "\n"
         "    def menu_left(self, g_vars, menu):\n"
-        "        if g_vars['display_state'] == 'page':\n"
+        f"        if g_vars[{quote}display_state{quote}] == {quote}page{quote}:\n"
         "            return 'left'\n",
         encoding="utf-8",
     )
 
-    _patch_buttons(buttons)
-    first_patch = buttons.read_text(encoding="utf-8")
-    _patch_buttons(buttons)
+    first_patch = _patch_buttons(buttons.read_text(encoding="utf-8"), buttons)
 
     assert "g_vars.get('page_up_handler')" in first_patch
     assert "g_vars.get('page_down_handler')" in first_patch
     assert "g_vars.pop('page_exit_handler', None)" in first_patch
-    assert buttons.read_text(encoding="utf-8") == first_patch
+    assert _patch_buttons(first_patch, buttons) == first_patch
 
 
 def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
@@ -54,14 +56,12 @@ def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
         encoding="utf-8",
     )
 
-    _patch_fpms(fpms)
-    first_patch = fpms.read_text(encoding="utf-8")
-    _patch_fpms(fpms)
+    first_patch = _patch_fpms(fpms.read_text(encoding="utf-8"), fpms)
 
     assert "g_vars.get('page_key1_handler')" in first_patch
     assert "g_vars.get('page_key2_handler')" in first_patch
     assert "g_vars.get('page_key3_handler')" in first_patch
-    assert fpms.read_text(encoding="utf-8") == first_patch
+    assert _patch_fpms(first_patch, fpms) == first_patch
 
     executable = "\n".join(
         line

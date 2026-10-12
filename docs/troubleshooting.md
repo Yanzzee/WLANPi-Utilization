@@ -10,7 +10,7 @@ The front-panel installer expects:
 - `/usr/sbin/fpms`;
 - one FPMS Python package under
   `/opt/wlanpi-fpms/lib/python*/site-packages/fpms`; and
-- the FPMS 2.x files/patch anchors used by the bundled adapter installer.
+- the FPMS 1.4.24 layout tested with WLAN Pi OS 26.10 DeadEye.
 
 Confirm FPMS is installed and running:
 
@@ -27,6 +27,23 @@ sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
 The patcher keeps one-time `.beacon-live.bak` copies of modified FPMS files.
+It validates all proposed files before writing. If writing or the FPMS restart
+fails, it restores the files as they were immediately before that installation
+attempt, including any existing adapter and backups. A failed restart also
+triggers a restart and check of the restored FPMS installation. The application
+environment and CLI launchers remain installed.
+
+If the installer reports `FPMS page-exit branch not found` on Trixie, update to
+the installer that matches Python syntax rather than single-quoted text, then
+rerun the full installer. It can repair the partial `fpms.py` patch left by the
+earlier installer. An installation error produces a nonzero exit status; a
+recovery error is reported separately. Inspect the service and journal before
+retrying:
+
+```bash
+systemctl status wlanpi-fpms --no-pager
+sudo journalctl -u wlanpi-fpms -n 100 --no-pager
+```
 
 ## `sudo: unable to resolve host`
 

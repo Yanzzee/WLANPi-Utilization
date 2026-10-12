@@ -1,32 +1,158 @@
 #!/usr/bin/env python3
-"""Install the Utilization adapter into WLAN Pi FPMS 2.x."""
+"""Install the Utilization adapter into WLAN Pi FPMS on Trixie."""
 
 from __future__ import annotations
 
 import argparse
-import shutil
+import ast
+import os
+import stat
+import subprocess
+import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
+
+
+class FPMSInstallError(RuntimeError):
+    """The FPMS integration could not be installed safely."""
+
+
+@dataclass(frozen=True)
+class FileState:
+    content: bytes | None
+    mode: int = 0o644
+
+    @classmethod
+    def read(cls, path: Path) -> FileState:
+        if not path.exists():
+            return cls(None)
+        return cls(path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fpms-package", type=Path)
     parser.add_argument("--adapter", required=True, type=Path)
+    parser.add_argument("--restart-service", action="store_true")
     args = parser.parse_args()
 
-    package = args.fpms_package or _find_fpms_package()
+    try:
+        package = args.fpms_package or _find_fpms_package()
+        install_fpms(package, args.adapter, restart_service=args.restart_service)
+    except (FPMSInstallError, OSError, SyntaxError, UnicodeError) as error:
+        raise SystemExit(f"Utilization FPMS installation failed: {error}") from error
+    print(f"Installed Utilization FPMS adapter in {package}")
+    return 0
+
+
+def install_fpms(
+    package: Path,
+    adapter: Path,
+    *,
+    restart_service: bool = False,
+    command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Validate first, then install and recover the pre-install files on failure."""
     fpms_file = package / "fpms.py"
     buttons_file = package / "modules" / "nav" / "buttons.py"
     apps_dir = package / "modules" / "apps"
-    if not fpms_file.is_file() or not buttons_file.is_file():
-        raise SystemExit(f"Unsupported FPMS package layout: {package}")
+    if (
+        not fpms_file.is_file()
+        or not buttons_file.is_file()
+        or not apps_dir.is_dir()
+    ):
+        raise FPMSInstallError(f"Unsupported FPMS package layout: {package}")
 
-    apps_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(args.adapter, apps_dir / "channel_utilization.py")
-    _patch_fpms(fpms_file)
-    _patch_buttons(buttons_file)
-    print(f"Installed Utilization FPMS adapter in {package}")
-    return 0
+    adapter_file = apps_dir / "channel_utilization.py"
+    originals = {
+        path: FileState.read(path)
+        for path in (fpms_file, buttons_file, adapter_file)
+    }
+    replacements = {
+        fpms_file: _patch_fpms(
+            fpms_file.read_text(encoding="utf-8"), fpms_file
+        ).encode("utf-8"),
+        buttons_file: _patch_buttons(
+            buttons_file.read_text(encoding="utf-8"), buttons_file
+        ).encode("utf-8"),
+        adapter_file: adapter.read_bytes(),
+    }
+    # Compile every proposed file before backups, writes, or service operations.
+    for path, content in replacements.items():
+        compile(content, str(path), "exec")
+
+    writes: dict[Path, FileState] = {}
+    for path, content in replacements.items():
+        original = originals[path]
+        if content == original.content:
+            continue
+        backup = path.with_suffix(path.suffix + ".beacon-live.bak")
+        if original.content is not None and not backup.exists():
+            originals[backup] = FileState(None)
+            writes[backup] = original
+        writes[path] = FileState(content, original.mode)
+
+    attempted: list[Path] = []
+    service_attempted = False
+    try:
+        for path, replacement in writes.items():
+            attempted.append(path)
+            _atomic_write(path, replacement)
+        if restart_service:
+            service_attempted = True
+            _restart_and_verify(command_runner, sleep)
+    except BaseException as error:
+        recovery_errors: list[str] = []
+        for path in reversed(attempted):
+            try:
+                _atomic_write(path, originals[path])
+            except OSError as recovery_error:
+                recovery_errors.append(f"{path}: {recovery_error}")
+        if service_attempted and not recovery_errors:
+            try:
+                _restart_and_verify(command_runner, sleep)
+            except (OSError, subprocess.CalledProcessError) as recovery_error:
+                recovery_errors.append(f"restored FPMS service: {recovery_error}")
+        if recovery_errors:
+            raise FPMSInstallError(
+                f"{error}; recovery failed: {'; '.join(recovery_errors)}. "
+                "Inspect systemctl status and journalctl -u wlanpi-fpms."
+            ) from error
+        if isinstance(error, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise FPMSInstallError(
+            f"{error}; restored the pre-install FPMS files."
+        ) from error
+
+
+def _atomic_write(path: Path, state: FileState) -> None:
+    if state.content is None:
+        path.unlink(missing_ok=True)
+        return
+    # Replace within the same directory so FPMS never reads a truncated file.
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(state.content)
+            stream.flush()
+            os.chmod(temporary, state.mode)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def _restart_and_verify(command_runner: Callable, sleep: Callable) -> None:
+    command_runner(["systemctl", "restart", "wlanpi-fpms"], check=True)
+    # Type=simple can report success before Python imports finish. Check that
+    # the service remains active rather than trusting the restart exit code.
+    for _ in range(5):
+        sleep(1)
+        command_runner(
+            ["systemctl", "is-active", "--quiet", "wlanpi-fpms"], check=True
+        )
 
 
 def _find_fpms_package() -> Path:
@@ -42,8 +168,7 @@ def _find_fpms_package() -> Path:
     return candidates[0]
 
 
-def _patch_fpms(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
+def _patch_fpms(text: str, path: Path) -> str:
     import_line = (
         "from .modules.apps.channel_utilization import "
         "build_channel_utilization_menu\n"
@@ -51,7 +176,7 @@ def _patch_fpms(path: Path) -> None:
     if import_line not in text:
         anchor = "from .modules.apps.scanner import *\n"
         if anchor not in text:
-            raise SystemExit(f"FPMS import anchor not found in {path}")
+            raise FPMSInstallError(f"FPMS import anchor not found in {path}")
         text = text.replace(anchor, anchor + import_line, 1)
 
     menu_line = "            build_channel_utilization_menu(g_vars),\n"
@@ -69,7 +194,7 @@ def _patch_fpms(path: Path) -> None:
     if append_code not in text:
         anchor = "    # update menu options data structure if we're in non-classic mode\n"
         if anchor not in text:
-            raise SystemExit(f"FPMS post-menu anchor not found in {path}")
+            raise FPMSInstallError(f"FPMS post-menu anchor not found in {path}")
         text = text.replace(anchor, append_code + anchor, 1)
 
     # The three auxiliary-key dispatchers live in fpms.py, not Button.
@@ -81,30 +206,27 @@ def _patch_fpms(path: Path) -> None:
             path=path,
         )
 
-    _write_with_backup(path, text)
+    return text
 
 
-def _patch_buttons(path: Path) -> None:
-    text = path.read_text(encoding="utf-8")
-    original = text
+def _patch_buttons(text: str, path: Path) -> str:
     handler_code = (
         "            exit_handler = g_vars.pop('page_exit_handler', None)\n"
         "            if callable(exit_handler):\n"
         "                exit_handler()\n"
     )
     if handler_code not in text:
-        start = text.find("    def menu_left(self, g_vars, menu):")
-        if start < 0:
-            raise SystemExit(f"FPMS menu_left method not found in {path}")
-        page_branch = text.find(
-            "        if g_vars['display_state'] == 'page':\n",
-            start,
-        )
-        if page_branch < 0:
-            raise SystemExit(f"FPMS page-exit branch not found in {path}")
-        insertion = page_branch + len(
-            "        if g_vars['display_state'] == 'page':\n"
-        )
+        method = _find_function(text, "menu_left", path)
+        # Match Python syntax, not quote style, whitespace, or nearby methods.
+        condition = ast.parse("g_vars['display_state'] == 'page'", mode="eval").body
+        branches = [
+            node for node in method.body
+            if isinstance(node, ast.If)
+            and ast.dump(node.test) == ast.dump(condition)
+        ]
+        if len(branches) != 1:
+            raise FPMSInstallError(f"FPMS page-exit branch not found in {path}")
+        insertion = _line_offset(text, branches[0].body[0].lineno)
         text = text[:insertion] + handler_code + text[insertion:]
 
     text = _insert_page_handler(
@@ -119,8 +241,7 @@ def _patch_buttons(path: Path) -> None:
         handler_name="page_down_handler",
         path=path,
     )
-    if text != original:
-        _write_with_backup(path, text)
+    return text
 
 
 def _insert_page_handler(
@@ -140,27 +261,33 @@ def _insert_page_handler(
     if handler_code in text:
         return text
 
-    method_start = text.find(f"    def {method_name}(")
-    if method_start < 0:
-        raise SystemExit(f"FPMS {method_name} method not found in {path}")
-    signature_line_end = method_start
-    while True:
-        signature_line_end = text.find("\n", signature_line_end + 1)
-        if signature_line_end < 0:
-            raise SystemExit(
-                f"FPMS {method_name} signature is incomplete in {path}"
-            )
-        if text[method_start:signature_line_end].rstrip().endswith(":"):
-            break
-    insertion = signature_line_end + 1
+    method = _find_function(text, method_name, path)
+    first_statement = method.body[0]
+    if (
+        isinstance(first_statement, ast.Expr)
+        and isinstance(first_statement.value, ast.Constant)
+        and isinstance(first_statement.value.value, str)
+    ):
+        insertion = _line_offset(text, first_statement.end_lineno + 1)
+    else:
+        insertion = _line_offset(text, first_statement.lineno)
     return text[:insertion] + handler_code + text[insertion:]
 
 
-def _write_with_backup(path: Path, text: str) -> None:
-    backup = path.with_suffix(path.suffix + ".beacon-live.bak")
-    if not backup.exists():
-        shutil.copy2(path, backup)
-    path.write_text(text, encoding="utf-8")
+def _find_function(text: str, name: str, path: Path) -> ast.FunctionDef:
+    functions = [
+        node for node in ast.walk(ast.parse(text, filename=str(path)))
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+    if len(functions) != 1:
+        raise FPMSInstallError(f"Could not uniquely locate FPMS {name} in {path}")
+    return functions[0]
+
+
+def _line_offset(text: str, line_number: int) -> int:
+    return sum(
+        len(line) for line in text.splitlines(keepends=True)[:line_number - 1]
+    )
 
 
 if __name__ == "__main__":

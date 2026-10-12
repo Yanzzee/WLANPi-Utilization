@@ -22,11 +22,10 @@ python3 -m venv "${APP_VENV}"
 "${APP_VENV}/bin/python" "${SCRIPT_DIR}/install_cli_launchers.py" \
   --app-bin "${APP_VENV}/bin" \
   --launcher-dir /usr/local/bin
-"${APP_VENV}/bin/python" "${SCRIPT_DIR}/patch_wlanpi_fpms.py" \
-  --adapter "${ADAPTER}"
-
 mkdir -p /run/wlanpi-beacon-live /var/log/wlanpi-beacon-live
-systemctl restart wlanpi-fpms
+"${APP_VENV}/bin/python" "${SCRIPT_DIR}/patch_wlanpi_fpms.py" \
+  --adapter "${ADAPTER}" \
+  --restart-service
 
 echo "Utilization is installed under FPMS Apps."
 echo "CLI commands installed: wlanpi-beacon-live and beacon-live"

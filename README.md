@@ -22,7 +22,7 @@ the band and channel, not an SSID or BSSID.
 
 The primary target is a WLAN Pi R4 running WLAN Pi OS with:
 
-- WLAN Pi FPMS 2.x and its supported 128×128 display/control stick;
+- WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
 - Python 3.9 or newer;
 - a monitor-mode-capable Wi-Fi interface named `wlan0`;
 - `git`, `ip`, `iw`, and `tshark`; and
@@ -332,6 +332,8 @@ python -m pip install -e '.[dev]'
 
 ## Documentation
 
+- [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones
+  and acceptance checks for WLAN Pi OS 26.10 DeadEye.
 - [Architecture](docs/architecture.md) — design rules, pipeline, data flow, and
   Phase 1–5 history.
 - [Screen reference](docs/screens.md) — screen metrics, navigation, BSSID

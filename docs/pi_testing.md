@@ -250,6 +250,27 @@ thin FPMS adapter, patches the Apps menu/navigation callbacks, creates
 commands in `/usr/local/bin`, and restarts FPMS. Rerun it after an FPMS package
 upgrade.
 
+### Trixie menu installation acceptance
+
+For roadmap item 1, use FPMS 1.4.24 on WLAN Pi OS 26.10 DeadEye. The installer
+validates the proposed FPMS files before writing and checks that the restarted
+service stays active for five seconds. Run it twice to check repeat installation:
+
+```bash
+dpkg-query -W wlanpi-fpms
+python3 --version
+sudo ./scripts/install_wlanpi_fpms.sh
+sudo ./scripts/install_wlanpi_fpms.sh
+systemctl is-active wlanpi-fpms
+sudo journalctl -u wlanpi-fpms -n 100 --no-pager
+```
+
+Confirm Apps contains exactly one Utilization entry. Open Display on a channel
+with known beacon activity, use up/down to change screens, and verify history
+continues. Press left and confirm capture stops and the channel menu returns.
+Record the OS, FPMS version, adapter, installer results, and button results in
+[the roadmap](trixie-roadmap.md) before marking item 1 complete.
+
 The installed menu is:
 
 ```text
