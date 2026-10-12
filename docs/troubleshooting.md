@@ -293,11 +293,54 @@ Look for leftover processes only after the app should have stopped:
 pgrep -af 'wlanpi-beacon-live|tshark'
 ```
 
+## The radio is busy
+
+Utilization checks the whole phy, including interfaces other than the selected
+capture interface. A capture on `wlan1` can conflict with `wlanpi0` when both
+belong to the same phy. Packet sockets identify captures from TShark/dumpcap,
+tcpdump, Scapy/Profiler, Kismet, and Core capture workers. AP/other interface
+modes, connected managed interfaces, and network controllers also prevent
+borrowing the radio. Core's background service and an idle `wlanpi0` alone do
+not count as active use.
+
+Known pending item 5 correction: the current packet-socket check also includes
+managed siblings. `lldpd` can bind there and be reported as a capture conflict;
+Core deliberately excludes that case. Do not stop `lldpd` just to bypass this
+false positive. The roadmap tracks the correction and assessment of Core's
+existing capture-session API.
+
+Stop or release the radio through the owning tool, then retry. Another adapter
+can be selected explicitly using `--iface` and optionally `--netns`. The app
+does not kill tools, stop Core, or disconnect a Wi-Fi connection automatically.
+If the only radio carries your management connection, use another management
+path before releasing it for monitor capture.
+
+NetworkManager-managed interfaces are refused even while disconnected; iwd in
+the same namespace is conservatively refused because it may scan or reconnect.
+Release those interfaces through the network controller before capture. Missing
+permissions or unreadable ownership/state information produce an error rather
+than bypassing the checks.
+
+The lock under `/run/wlanpi-beacon-live/radios/phyN.lock` prevents two
+Utilization instances from using the same radio. The file can remain after exit;
+the kernel-held lock, not file existence, indicates ownership. Do not remove a
+live lock file. Other applications do not share this lock. Keep other tools
+off that radio during capture; preflight cannot prevent a later external retune.
+
 ## The interface remains in monitor mode
 
-Live capture configures the selected interface for monitor mode. The current
-foreground runtime does not automatically restore managed mode on every exit.
-If this adapter should return to normal client operation, restore it manually:
+Live capture now restores the saved interface mode, administrative state, and
+known monitor tuning after normal exit, Ctrl+C, SIGTERM, or startup failure.
+An interface that started in monitor mode, such as Core's `wlanpi0`, remains a
+monitor after exit. This is its prior state, not a cleanup failure. Existing
+interfaces and namespace placement are preserved.
+
+Inspect the journal for `Radio restoration incomplete` if state was not
+restored. An unplugged/replaced interface is not modified. SIGKILL, power loss,
+or driver failure can bypass or prevent cleanup. There is no automatic crash
+recovery journal in this version; inspect the current radio and restore it
+through the owning tool. If an idle adapter should return to normal client
+operation, the manual commands are:
 
 ```bash
 sudo ip link set wlan0 down

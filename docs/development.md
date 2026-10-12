@@ -40,6 +40,7 @@ suggestions but does not run `apt install` itself.
 | `beacon_live/live.py` | Live hardware boundary and runtime loop. |
 | `beacon_live/channel.py` | Pure channel-operation parsing, capability, and coverage policy. |
 | `beacon_live/capture_target.py` | Read-only interface discovery and namespace context for hardware commands. |
+| `beacon_live/radio_session.py` | Radio locking, active-user checks, saved interface state, and restoration. |
 | `beacon_live/log_writer.py` | Log formats, logging service, disk safety, rollover. |
 | `beacon_live/survey.py` | Optional local survey parsing/calculation. |
 | `beacon_live/retry_debug.py` | Offline retry audit. |
@@ -131,7 +132,9 @@ sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
 The smoke script attempts to restore the interface's original type. The normal
-live runtime currently leaves its selected interface in monitor mode.
+live runtime uses a radio session that restores saved modes, up/down flags,
+and known monitor tuning after capture stops, including startup failures.
+See [the radio acceptance checks](pi_testing.md#radio-ownership-and-restoration-acceptance).
 
 ## Adding or changing a screen
 

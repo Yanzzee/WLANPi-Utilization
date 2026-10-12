@@ -50,7 +50,7 @@ Record the tested OS, package versions, adapter, and result with each item.
   both orientations and after rotation during an event batch. On October 12,
   2026, the user confirmed item 3 testing looks good. Item 3 is complete.
 
-- [ ] **4. Discover capture interfaces and network namespaces.** Replace the
+- [x] **4. Discover capture interfaces and network namespaces.** Replace the
   front-panel adapter's fixed interface default with configurable or discovered radio
   selection. Detect namespaced interfaces and support their command context
   consistently for capture, capabilities, tuning, and survey reads.
@@ -63,8 +63,9 @@ Record the tested OS, package versions, adapter, and result with each item.
   log metadata retain the selected namespace. Automated checks cover renamed
   interfaces, multiple radios, decimal iw frequencies, unavailable namespaces,
   and one shared capture pipeline. The full suite passes 381 tests on macOS
-  with Python 3.13.3. On-device acceptance is pending;
-  follow [the discovery checks](pi_testing.md#capture-interface-and-namespace-acceptance).
+  with Python 3.13.3. On October 12, 2026, the user confirmed testing looks good.
+  Item 4 is complete; the [discovery checks](pi_testing.md#capture-interface-and-namespace-acceptance)
+  remain available for additional hardware configurations.
 
 - [ ] **5. Coordinate radio use and restore state.** Detect conflicting use by
   Core, Profiler, Kismet, or another capture. Reuse a suitable available monitor
@@ -73,6 +74,28 @@ Record the tested OS, package versions, adapter, and result with each item.
   **Acceptance:** active tools are not disrupted; display and logging-only exits,
   interrupts, and failed startup clean up correctly without removing monitor
   interfaces owned by other tools.
+  **Status:** implemented, awaiting device acceptance. A per-phy lock excludes
+  concurrent Utilization sessions. Preflight checks inspect every sibling
+  interface for packet capture, a connection, AP/other modes, and network
+  controllers. Existing monitor interfaces are reused; idle siblings are
+  temporarily paused. Cleanup restores saved modes, administrative states,
+  and known monitor channel definitions after normal exit, Ctrl+C, SIGTERM,
+  and startup failure. Existing interfaces and namespaces are preserved;
+  identity checks protect replacement hardware. External tools do not share
+  the app's lock, so cross-tool coordination remains a preflight check rather
+  than an enforced system-wide lease. The full suite passes 414 tests on macOS
+  with Python 3.13.3. Follow [the radio checks](pi_testing.md#radio-ownership-and-restoration-acceptance).
+  **Architecture review:** item 5 remains open. Core 2.4.8 already exposes
+  authenticated `WS /api/v1/streaming/capture`, with owned sessions and read-only
+  subscribers; the REST capture API is still a design. The current backend
+  launches capture directly and does not register with Core's session manager.
+  Assess a Core capture backend before final acceptance, including fixed-channel
+  unfiltered input, latency, namespace/name restrictions, survey reads, and state
+  restoration. Core's existing WebSocket does not supply a system-wide phy lease
+  or restore prior tuning. Also correct the current blanket packet-socket check:
+  `lldpd` sockets on managed sibling interfaces can falsely report a busy radio.
+  References: [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
+  and [Core usage policy](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/services/network_namespace_service.py#L700).
 
 - [ ] **6. Align Python setup with Trixie.** Require an isolated environment in
   the development setup script, retain the production `/opt` environment, and

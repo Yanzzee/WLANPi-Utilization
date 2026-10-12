@@ -314,7 +314,7 @@ def test_left_exit_handler_interrupts_child_and_clears_session(
 
     assert len(processes) == 1
     assert processes[0].signal_received == signal.SIGINT
-    assert processes[0].wait_timeout == 5
+    assert processes[0].wait_timeout == channel_utilization.CAPTURE_STOP_TIMEOUT_SECONDS
     assert "channel_utilization_session" not in g_vars
     assert "page_exit_handler" not in g_vars
     assert "page_up_handler" not in g_vars

@@ -73,6 +73,13 @@ require an explicit choice. Configure `WLANPI_UTILIZATION_IFACE` and, when neede
 `WLANPI_UTILIZATION_NETNS` in the FPMS service environment as described in
 [Troubleshooting](docs/troubleshooting.md#the-wi-fi-interface-is-missing).
 
+Live capture temporarily uses the entire selected physical radio. It refuses
+an existing capture, active connection, or controller on that radio, and restores
+saved interface modes, up/down states, and known monitor tuning when closed.
+Existing WLAN Pi monitor interfaces are preserved. With one shared radio, stop
+the other tool's radio use before starting Utilization and keep it stopped until
+Utilization exits. See [radio ownership and restoration](docs/troubleshooting.md#the-radio-is-busy).
+
 ## Use the FPMS front panel
 
 Open:

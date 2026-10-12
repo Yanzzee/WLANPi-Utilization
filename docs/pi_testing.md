@@ -370,9 +370,59 @@ ip netns list
    return to a responsive channel menu. Remove test overrides afterward.
 
 Use an available test radio for namespace checks; do not move a radio used by
-another tool to manufacture this test. Radio conflict detection and state
-restoration are the next roadmap item. Record any namespace/multiple-radio
+another tool to manufacture this test. Record any namespace/multiple-radio
 checks that could not be exercised on the device.
+
+### Radio ownership and restoration acceptance
+
+Reinstall after updating the checkout:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+iw dev
+ip -j link show dev wlanpi0
+iw dev wlanpi0 info
+ip -j link show dev wlan1
+```
+
+Replace names with the actual capture interface and siblings on its phy. Save
+this output as the baseline. The administrative `UP` flag matters; monitor
+`operstate UNKNOWN` does not mean the interface is down. For a namespaced radio,
+prefix each inspection command with `sudo ip netns exec NAME`.
+
+1. Run Display on a different channel from the baseline, navigate/rotate, then
+   exit left. Repeat the baseline commands. Confirm the capture interface's
+   mode, UP flag, and original known channel/width are restored; siblings regain
+   their prior UP flags. Existing monitor interfaces and namespaces must remain.
+2. Repeat with Display + Log and logging-only Start/Stop. Start again to confirm
+   the phy lock was released and the shared analysis/history still behaves as
+   before.
+3. With front-panel capture stopped, run
+   `sudo wlanpi-beacon-live --iface wlanpi0 --band 2.4 --channel 6 --local-cu`.
+   Stop with Ctrl+C and compare the baseline. Repeat and send SIGTERM to the
+   application PID from a second terminal; compare again. Normal foreground
+   capture handles SIGTERM through graceful cleanup.
+4. While that CLI capture is running, attempt a second Utilization capture on
+   the same interface (or another VIF of the same phy). Expect a busy/lock
+   message and no changes to the first capture. Stop the first process normally.
+5. To test an existing external capture, start
+   `sudo tcpdump -i wlanpi0 -n -w /tmp/utilization-conflict.pcap` in a separate
+   terminal on the idle test radio. Launch Utilization. Expect a busy message
+   naming the capture process/socket and a responsive return to the channel
+   menu. Verify no tuning/state change; stop tcpdump normally and retry.
+6. When practical, repeat conflict checks with Profiler, a Kismet datasource,
+   or a Core-managed connection on that same radio. Utilization must refuse
+   without stopping the owner. Do not use a radio carrying the only management
+   connection for this test. Confirm a tool on a separate phy is unaffected.
+7. Using an available idle, uncontrolled managed interface, test explicit CLI
+   capture and Ctrl+C. Confirm its original managed mode and UP/down flag return.
+   When an available namespaced test radio exists, repeat restoration there.
+
+Startup failure, partial preparation, restore-command failure, and replacement
+hardware are covered by automated tests. Record any cases not exercised on the
+device. External tools do not honor Utilization's lock: keep them stopped while
+it captures. SIGKILL/power-loss recovery is not guaranteed or automatically
+journaled; it is not the graceful-exit acceptance case.
 
 ## On-device acceptance checklist
 
@@ -461,9 +511,9 @@ sudo wlanpi-beacon-live \
 ```
 
 The terminal process stays in the foreground and exits on Ctrl-C. Normal live
-capture currently leaves the interface in monitor mode; see
-[troubleshooting.md](troubleshooting.md#the-interface-remains-in-monitor-mode)
-to restore managed mode.
+capture restores saved radio state; see
+[the radio checks](#radio-ownership-and-restoration-acceptance) and
+[troubleshooting.md](troubleshooting.md#the-interface-remains-in-monitor-mode).
 
 ## Collect a debug bundle
 

@@ -61,7 +61,35 @@ requires an explicit choice if several candidates remain. A `CaptureTarget`
 retains the interface and namespace for capability queries, tuning, channel
 verification, TShark, and survey reads. Named targets prefix hardware commands
 with `ip netns exec`; analysis and renderers still share the same pipeline.
-Radio ownership checks and restoration are tracked separately in roadmap item 5.
+
+`RadioSession` locks the selected phy across Utilization instances and snapshots
+its interfaces before mutation. Preflight checks inspect packet sockets in the
+target namespace, connected managed interfaces, AP/other modes, and controller
+processes, including Core's supplicants. Idle administrative UP state alone is
+allowed. Existing external users cause a refusal before tuning. Idle sibling
+interfaces are paused for capture and restored afterward. Existing monitors
+retain their type and monitor flags; they are reused without creating or
+deleting interfaces. Saved identity (phy, wdev, ifindex, MAC) must still match
+before restoration modifies an interface.
+
+Capture and analysis children stop before radio restoration. Resource contexts
+also cover failed startup before the capture loop begins. Ctrl+C and SIGTERM
+use the same cleanup path; FPMS allows time for graceful cleanup. Restoration
+returns modes, administrative flags, and known monitor channel definitions,
+including non-HT 20 MHz and bonded tuning. It does not invent a channel when the
+original monitor had no reported channel. A managed interface must be idle and
+uncontrolled before borrowing; active Wi-Fi connections are never disconnected
+automatically. Namespace placement remains unchanged.
+
+The phy lock is advisory and currently shared only by Utilization. External
+tools can still start or retune after preflight; avoid starting another tool on
+that radio during capture. Core already exposes an authenticated capture
+WebSocket with one owner and read-only subscribers; the current direct backend
+does not participate in that session manager. A Core backend is under review
+in roadmap item 5. Its shipped API coordinates its own capture clients, rather
+than every tool on the system, and does not restore prior tuning. SIGKILL,
+power loss, and driver/device failure cannot guarantee restoration; cleanup
+errors remain explicit.
 
 Live capture configures one interface in monitor mode and launches one
 line-buffered TShark process. Automatic width selection uses a fixed 20 MHz

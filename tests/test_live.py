@@ -55,6 +55,19 @@ def hardware_free_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
         "beacon_live.live.discover_capture_target",
         lambda frequency, *, namespace=None: CaptureTarget("wlan0", namespace),
     )
+    class IdleRadio:
+        original_mode = "managed"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def prepare(self):
+            pass
+
+    monkeypatch.setattr(live, "RadioSession", lambda *args, **kwargs: IdleRadio())
 
 
 def test_namespace_routes_every_monitor_setup_command() -> None:
@@ -157,6 +170,47 @@ def test_non_monitor_radio_is_rejected_before_interface_changes(monkeypatch: pyt
     monkeypatch.setattr(live, "configure_monitor_interface", lambda *args, **kwargs: pytest.fail("must not change radio"))
     with pytest.raises(ValueError, match="root:wlan0 does not support monitor mode"):
         run_live(iface="wlan0", band="2.4", channel="1")
+
+
+@pytest.mark.parametrize("failure_stage", [None, "configure", "capture", "selector"])
+def test_radio_session_restores_after_live_exit_and_startup_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure_stage,
+) -> None:
+    from test_radio_session import RadioHardware
+
+    _prepare_one_interval_live_run(monkeypatch)
+    hardware = RadioHardware(mode="managed", up=False)
+    target = CaptureTarget("capture0")
+    monkeypatch.setattr(live, "discover_capture_target", lambda *args, **kwargs: target)
+    monkeypatch.setattr(live, "RadioSession", lambda *args, **kwargs: hardware.session(tmp_path))
+    monkeypatch.setattr(live.subprocess, "run", hardware.run)
+    monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda *args: RadioCapabilities.ht20_only())
+    monkeypatch.setattr(live, "_read_actual_channel_safely", lambda iface, requested: (requested, True))
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset())
+    def configure(iface, channel, **kwargs):
+        configure_monitor_interface(iface, channel, **kwargs)
+        if failure_stage == "configure":
+            raise RuntimeError("configure failed")
+    monkeypatch.setattr(live, "configure_monitor_interface", configure)
+    stopped = []
+    monkeypatch.setattr(live, "terminate_tshark_process", lambda process: stopped.append(process))
+    if failure_stage == "capture":
+        def fail_capture(*args, **kwargs):
+            raise RuntimeError("capture failed")
+        monkeypatch.setattr(live, "start_tshark_process", fail_capture)
+    if failure_stage == "selector":
+        def fail_selector():
+            raise RuntimeError("selector failed")
+        monkeypatch.setattr(live.selectors, "DefaultSelector", fail_selector)
+    if failure_stage:
+        with pytest.raises(RuntimeError, match=failure_stage):
+            run_live(band="2.4", channel="6")
+    else:
+        assert run_live(band="2.4", channel="6") == 0
+    assert hardware.interfaces["capture0"]["mode"] == "managed"
+    assert not hardware.interfaces["capture0"]["up"]
+    assert hardware.interfaces["wifi1"]["up"]
+    assert len(stopped) == (1 if failure_stage in {None, "selector"} else 0)
 
 
 def test_build_monitor_setup_commands_uses_ht20_channel() -> None:

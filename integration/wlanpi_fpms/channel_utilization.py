@@ -26,6 +26,7 @@ INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "auto")
 NETWORK_NAMESPACE = os.environ.get("WLANPI_UTILIZATION_NETNS")
 LOGGER = logging.getLogger(__name__)
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
+CAPTURE_STOP_TIMEOUT_SECONDS = 30
 LOGGING_STATUS_SECONDS = 1.0
 LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
 
@@ -461,7 +462,7 @@ class _DisplaySession:
         if process is not None and process.poll() is None:
             process.send_signal(signal.SIGINT)
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=CAPTURE_STOP_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
                 process.terminate()
                 try:
@@ -903,7 +904,7 @@ def _stop_process(process: Optional[subprocess.Popen[bytes]]) -> None:
         return
     process.send_signal(signal.SIGINT)
     try:
-        process.wait(timeout=5)
+        process.wait(timeout=CAPTURE_STOP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         process.terminate()
         try:
