@@ -131,6 +131,8 @@ def _run_live_command(
             live_options["lcd_frame"] = args.lcd_frame
         if args.netns is not None:
             live_options["netns"] = args.netns
+        if args.capture_backend != "direct":
+            live_options["capture_backend"] = args.capture_backend
         if args.channel_width != "auto":
             live_options["channel_width"] = parse_channel_width(args.channel_width)
         if args.center_frequency1_mhz is not None:
@@ -270,6 +272,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--capture-backend", choices=("direct", "core"), default="direct",
+        help="Capture provider. Core is an explicit owner prototype; default: direct.",
+    )
+    parser.add_argument(
         "--iface",
         default="auto",
         help="Wireless interface or auto discovery. Default: auto.",
@@ -324,7 +330,7 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         "--raw-pcapng",
         type=Path,
         help=(
-            "Save full packets from the exact TShark process used by live "
+            "Save full packets from the same capture stream used by live "
             "analysis, plus a .json diagnostic sidecar."
         ),
     )

@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from beacon_live.live import available_tshark_fields, build_tshark_command, select_tshark_frame_fields
+from beacon_live.live import available_tshark_fields, build_tshark_stream_command, select_tshark_frame_fields
 from beacon_live.parser import parse_tshark_live_record
 from beacon_live.retry_debug import analyze_retry_frames
 
@@ -23,10 +23,8 @@ def test_incremental_pcapng_stdin_decodes_before_stream_closes(name, width, freq
     pcapng = subprocess.run([tshark, '-r', str(FIXTURES / f'{name}.pcap'), '-F', 'pcapng', '-w', '-'],
                             capture_output=True, check=True, timeout=15).stdout
     fields = select_tshark_frame_fields(available_tshark_fields(tshark=tshark))
-    command = build_tshark_command('unused', field_names=fields)
+    command = build_tshark_stream_command(field_names=fields)
     command[0] = tshark
-    index = command.index('-i')
-    command[index:index + 6] = ['-r', '-']
     assert '-i' not in command
     assert '-w' not in command
     # This authored fixture conversion uses little-endian PCAPNG. Feed section,

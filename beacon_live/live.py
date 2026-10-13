@@ -645,6 +645,31 @@ def start_tshark_process(
         raise LiveCommandError(command=command, stderr=str(exc)) from exc
 
 
+def build_tshark_stream_command(*, field_names: tuple[str, ...]) -> list[str]:
+    """Decode one incoming PCAPNG stream without opening a capture interface."""
+    command = build_tshark_command("unused", field_names=field_names)
+    index = command.index("-i")
+    command[index:index + 6] = ["-r", "-"]
+    return command
+
+
+def start_core_capture_process(target, definition, *, field_names, raw_capture_path=None):
+    from beacon_live.core_capture import CoreCaptureProcess, CoreRequest, validate_core_request
+    request = CoreRequest(target, definition, raw_path=raw_capture_path)
+    validate_core_request(request)
+    command = build_tshark_stream_command(field_names=field_names)
+    try:
+        decoder = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, bufsize=0)
+    except OSError as exc:
+        raise LiveCommandError(command=command, stderr=str(exc)) from exc
+    try:
+        return CoreCaptureProcess(decoder, request)
+    except BaseException:
+        terminate_tshark_process(decoder)
+        raise
+
+
 def _live_aggregation_worker(
     stdout_fd: int,
     send_connection: object,
@@ -659,6 +684,7 @@ def _live_aggregation_worker(
     # The parent uses SIGTERM for graceful radio restoration. Workers retain
     # the normal terminate behavior and never own radio state.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     analyzer = Analyzer(
         target_primary_frequency_mhz=target_primary_frequency_mhz,
         channel_definition_max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
@@ -1134,6 +1160,7 @@ def run_live(
     *,
     iface: str = "auto",
     netns: Optional[str] = None,
+    capture_backend: str = "direct",
     channel: str = "36",
     frequency_mhz: Optional[int] = None,
     band: Optional[str] = None,
@@ -1156,6 +1183,11 @@ def run_live(
     rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
     _dashboard: Optional[LiveDashboard] = None,
 ) -> int:
+    if capture_backend not in {"direct", "core"}:
+        raise ValueError("capture_backend must be direct or core")
+    if capture_backend == "core":
+        from beacon_live.core_capture import check_core_dependency
+        check_core_dependency()
     if interval_seconds <= 0:
         raise ValueError("interval_seconds must be greater than zero")
     if logging_only and stats_csv is None and beacons_jsonl is None:
@@ -1183,6 +1215,7 @@ def run_live(
             lambda: run_live(
                 iface=iface,
                 netns=netns,
+                capture_backend=capture_backend,
                 channel=channel,
                 frequency_mhz=frequency_mhz,
                 band=band,
@@ -1279,7 +1312,8 @@ def run_live(
             print(f"Capture interface: {target.label}", file=sys.stderr, flush=True)
     hardware_iface = target if netns is not None else iface
     with (
-        RadioSession(target, tune_builder=build_definition_tune_command) as radio,
+        RadioSession(target, tune_builder=build_definition_tune_command,
+                     require_idle_before_restore=capture_backend == "core") as radio,
         ExitStack() as aggregation_resources,
         ExitStack() as capture_resources,
     ):
@@ -1321,45 +1355,70 @@ def run_live(
                 file=sys.stderr,
                 flush=True,
             )
-        radio.prepare()
-        try:
-            configure_monitor_interface(
-                hardware_iface,
-                channel,
-                frequency_mhz=frequency_mhz,
-                band=band,
-                channel_definition=initial_definition,
-                already_monitor=radio.original_mode == "monitor",
+        if capture_backend == "core":
+            from beacon_live.core_capture import CoreRequest, validate_core_request
+            if not capabilities.source_complete or radio.original_mode != "monitor":
+                raise ValueError("Core prototype requires a verified existing monitor interface")
+            validate_core_request(CoreRequest(target, initial_definition))
+            if raw_capture_path is not None:
+                raw_capture_path.parent.mkdir(parents=True, exist_ok=True)
+            process = start_core_capture_process(
+                target, initial_definition, field_names=tshark_fields,
+                raw_capture_path=raw_capture_path,
             )
-        except LiveCommandError as exc:
-            if not auto_channel_width or initial_definition.width is ChannelWidth.MHZ20:
-                raise
-            fallback_reason = str(exc)
-            initial_definition = ChannelDefinition(
-                resolved_frequency_mhz,
-                ChannelWidth.MHZ20,
-                resolved_frequency_mhz,
-                primary_channel=frequency_to_channel(resolved_frequency_mhz),
-                phy="tune-fallback",
-            )
-            print(
-                "Warning: default 80 MHz capture could not be configured "
-                f"({exc}); retrying once at 20 MHz.",
-                file=sys.stderr,
-                flush=True,
-            )
-            configure_monitor_interface(
-                hardware_iface,
-                channel,
-                frequency_mhz=frequency_mhz,
-                band=band,
-                channel_definition=initial_definition,
-                already_monitor=radio.original_mode == "monitor",
-            )
+            capture_resources.callback(process.close)
+            # Authenticate and compare Core's source inventory before pausing
+            # siblings. Core still does not expose an atomic whole-phy lease.
+            process.wait_phase("ready")
+            radio.prepare()
+            run_checked_command(target.command(["ip", "link", "set", iface, "up"]))
+            process.start_capture()
+        else:
+            radio.prepare()
+            try:
+                configure_monitor_interface(
+                    hardware_iface,
+                    channel,
+                    frequency_mhz=frequency_mhz,
+                    band=band,
+                    channel_definition=initial_definition,
+                    already_monitor=radio.original_mode == "monitor",
+                )
+            except LiveCommandError as exc:
+                if not auto_channel_width or initial_definition.width is ChannelWidth.MHZ20:
+                    raise
+                fallback_reason = str(exc)
+                initial_definition = ChannelDefinition(
+                    resolved_frequency_mhz,
+                    ChannelWidth.MHZ20,
+                    resolved_frequency_mhz,
+                    primary_channel=frequency_to_channel(resolved_frequency_mhz),
+                    phy="tune-fallback",
+                )
+                print(
+                    "Warning: default 80 MHz capture could not be configured "
+                    f"({exc}); retrying once at 20 MHz.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                configure_monitor_interface(
+                    hardware_iface,
+                    channel,
+                    frequency_mhz=frequency_mhz,
+                    band=band,
+                    channel_definition=initial_definition,
+                    already_monitor=radio.original_mode == "monitor",
+                )
         actual_definition, actual_verified = _read_actual_channel_safely(
             hardware_iface,
             initial_definition,
         )
+        if capture_backend == "core" and (
+            not actual_verified or not actual_definition.same_tuning(initial_definition)
+        ):
+            raise ValueError(
+                "Core capture actual tuning could not be verified against the request; capture stopped"
+            )
         if not actual_verified and capabilities.source_complete:
             print(
                 "Warning: iw could not verify the actual capture width; "
@@ -1447,12 +1506,13 @@ def run_live(
             )
         if raw_capture_path is not None:
             raw_capture_path.parent.mkdir(parents=True, exist_ok=True)
-        process = start_tshark_process(
-            hardware_iface,
-            field_names=tshark_fields,
-            raw_capture_path=raw_capture_path,
-        )
-        capture_resources.callback(terminate_tshark_process, process)
+        if capture_backend == "direct":
+            process = start_tshark_process(
+                hardware_iface,
+                field_names=tshark_fields,
+                raw_capture_path=raw_capture_path,
+            )
+            capture_resources.callback(terminate_tshark_process, process)
         aggregation_connection: Optional[object] = None
         aggregation_process: Optional[multiprocessing.Process] = None
         if process.stdout is not None:
@@ -2166,6 +2226,13 @@ def run_live(
                     normalized_frame_count=normalized_frame_count,
                     malformed_capture_record_count=malformed_capture_record_count,
                     tshark_stderr=tshark_stderr_text,
+                    capture_details=(
+                        {"capture_backend": "core", "core_role": "owner",
+                         "core_session_id": process.session_id,
+                         "core_stop_confirmed": process.stop_confirmed,
+                         "core_transport_error": process.capture_error}
+                        if capture_backend == "core" else None
+                    ),
                 )
 
 
@@ -2214,8 +2281,9 @@ def _write_raw_capture_metadata(
     normalized_frame_count: int,
     malformed_capture_record_count: int,
     tshark_stderr: str,
+    capture_details: Optional[dict] = None,
 ) -> None:
-    """Write an auditable sidecar for the same-process full PCAPNG stream."""
+    """Write an auditable sidecar for the same full PCAPNG capture stream."""
     drop_match = re.search(r"(\d+)\s+packets?\s+dropped", tshark_stderr, re.I)
     payload = {
         "raw_capture": str(raw_capture_path),
@@ -2246,6 +2314,8 @@ def _write_raw_capture_metadata(
         ),
         "tshark_stderr": tshark_stderr,
     }
+    if capture_details is not None:
+        payload.update(capture_details)
     sidecar = raw_capture_path.with_suffix(raw_capture_path.suffix + ".json")
     temporary = sidecar.with_name(f".{sidecar.name}.tmp")
     try:
@@ -2273,6 +2343,10 @@ def _handle_tshark_exit(
     tshark_stderr: str = "",
 ) -> int:
     returncode = process.poll()
+    transport_error = getattr(process, "capture_error", "")
+    if transport_error:
+        print(transport_error, file=sys.stderr, flush=True)
+        return 1
     if returncode in (None, 0):
         return 0
 

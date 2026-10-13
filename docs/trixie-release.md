@@ -41,8 +41,11 @@ Those original synthetic packets verify decoding of RSSI, QBSS, operation
 widths, puncturing, and repeated retries. They do not establish live driver
 coverage at every width/band or usable survey counters on every adapter.
 Record the exact image/package versions and tested band/width combinations
-with the final device bundle. No fresh-image or final reboot/reinstall result
-for item 8 has been supplied yet.
+with the final device bundle. The user reported testing the item 8 changes on
+October 13, 2026; fresh-image/reboot/reinstall coverage was not detailed in that
+report. The same report confirms Core 2.4.8-1, successful capture-WebSocket
+authentication, a populated tri-band wlanpi0 frequency list, and no sessions on
+wlanpi-bd2. An opt-in Core-owner prototype is now ready for device testing.
 
 ## Final device acceptance
 
@@ -89,8 +92,8 @@ for item 8 has been supplied yet.
 - **SSID text:** TShark 4.4 emits `wlan.ssid` as hex bytes. Display normalization
   remains a separate task, including hidden and non-text SSIDs.
 - **Core capture backend:** this release uses direct TShark capture with its own
-  per-radio guard. Core's capture WebSocket integration remains a separate
-  architectural option under [active evaluation](core-capture-evaluation.md);
+  per-radio guard. An explicit Core-owner CLI prototype is under
+  [active evaluation](core-capture-evaluation.md#controlled-owner-prototype-on-the-pi);
   the guard is not a system-wide broker used by all tools.
 - **Driver coverage:** an iw-verified width does not prove complete frame
   delivery. Treat unsupported widths, missing survey counters, and incomplete

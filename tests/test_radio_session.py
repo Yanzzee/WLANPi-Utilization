@@ -472,3 +472,20 @@ def test_controller_detection_scopes_process_namespace_and_interface(tmp_path):
     ]
     assert namespace_has_process(CaptureTarget("capture0"), "wpa_supplicant", proc)
     assert not namespace_has_process(CaptureTarget("capture0"), "iwd", proc)
+
+
+def test_core_restore_refuses_new_owner_instead_of_retuning_their_capture(tmp_path):
+    hardware = RadioHardware()
+    session = hardware.session(tmp_path, require_idle_before_restore=True)
+    session.__enter__()
+    session.prepare()
+    before = len(hardware.calls)
+    hardware.packet = PACKET_HEADER + '123 1 3 0003 6 1 0 0 0 999\n'
+    try:
+        with pytest.raises(RadioSessionError, match='cannot restore while another owner is active'):
+            session.restore()
+        later = hardware.calls[before:]
+        assert not any(command[0] == 'iw' and 'set' in command for command in later)
+        assert not any(command[:3] == ['ip', 'link', 'set'] for command in later)
+    finally:
+        session.release()

@@ -222,6 +222,7 @@ class RadioSession:
         lock_directory: Path = LOCK_DIRECTORY,
         controllers: Callable[[CaptureTarget, set[str]], list[str]] = controller_users,
         capture_users: Callable[..., list[str]] = socket_users,
+        require_idle_before_restore: bool = False,
     ) -> None:
         self.target = target
         self.tune_builder = tune_builder
@@ -229,6 +230,7 @@ class RadioSession:
         self.lock_directory = lock_directory
         self.controllers = controllers
         self.capture_users = capture_users
+        self.require_idle_before_restore = require_idle_before_restore
         self.states: tuple[InterfaceState, ...] = ()
         self.changed: list[InterfaceState] = []
         self.lock_fd: int | None = None
@@ -363,6 +365,13 @@ class RadioSession:
         self.changed.append(selected)
 
     def restore(self) -> None:
+        if self.require_idle_before_restore and self.changed:
+            try:
+                self.check_idle()
+            except RadioSessionError as error:
+                raise RadioSessionError(
+                    f"Radio restoration incomplete: cannot restore while another owner is active: {error}"
+                ) from error
         errors = []
         for state in reversed(self.changed):
             try:

@@ -155,7 +155,7 @@ Record the tested OS, package versions, adapter, and result with each item.
   [the TShark 4.4 checks](pi_testing.md#tshark-44-and-metric-acceptance) for device
   validation; synthetic packet decoding does not establish driver coverage.
 
-- [ ] **8. Expand diagnostics and finish release documentation.** Collect OS
+- [x] **8. Expand diagnostics and finish release documentation.** Collect OS
   and package versions, active FPMS paths, service status, relevant journal
   output, interfaces, and namespaces. Keep references aligned with FPMS 1.4.24
   and document the tested Trixie installation and troubleshooting steps.
@@ -163,14 +163,16 @@ Record the tested OS, package versions, adapter, and result with each item.
   output, then verify fresh installation, reboot, and repeat installation on
   DeadEye before publishing the Trixie release.
   **Status:** diagnostics and release documentation are implemented; all 485
-  tests pass on Python 3.13.3. Final device acceptance is pending. The collector uses bounded read-only commands,
+  tests pass on Python 3.13.3. The user reported successful testing of item 8
+  changes on October 13, 2026. The collector uses bounded read-only commands,
   records failures in a manifest/summary, resolves FPMS without importing its
   hardware code, compares installed app/adapter hashes with the checkout, and
   collects root/named-namespace radio evidence. Hardware-free tests reproduce
   failed startup, stale deployment, missing commands, permission errors, and
   timeouts. No obsolete FPMS 2.x references remain in the user guides. Follow
   [the final release checks](trixie-release.md#final-device-acceptance) before
-  marking this item complete or publishing the release.
+  publishing the release; fresh-image/reboot/reinstall coverage was not
+  detailed in the latest test report.
 
 ## Separate issues
 
@@ -184,7 +186,12 @@ Record the tested OS, package versions, adapter, and result with each item.
   have been evaluated. Core is the preferred platform integration point, but
   whole-radio preparation/restoration, actual tune verification, and channel
   mapping/width gaps need resolution before changing the default. A metadata-only
-  probe and incremental decoder tests are ready for the Pi. See
+  probe and incremental decoder tests are ready for the Pi. The user confirmed
+  Core 2.4.8-1 authentication, populated 2.4/5/6 GHz frequencies for wlanpi0,
+  and no active sessions on wlanpi-bd2. An explicit Core-owner CLI prototype is
+  implemented for fixed 20/80 MHz capture; device acceptance is pending. It
+  reuses the existing analyzer, requires verified tuning, and stops Core before
+  guarded radio restoration. FPMS continues to use the direct backend. See
   [the evaluation and staged migration](core-capture-evaluation.md).
 
 - [ ] **SSID names display as hex.** Reported during on-device testing after

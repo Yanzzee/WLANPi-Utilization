@@ -67,7 +67,9 @@ The supported-frequency query also matches integer `* N MHz` lines only. Our
 device's earlier `iw phy` output uses decimal frequencies. Whether
 `iw phy <phy> channels` has the same format on the device needs verification;
 empty frequency results should be investigated rather than treated as proof
-that no capture-capable radio exists.
+that no capture-capable radio exists. The user's October 13 probe returned a
+populated 2.4/5/6 GHz frequency list for wlanpi0 on Core 2.4.8-1, so this
+potential parsing gap did not affect that device's capture-frequency query.
 
 ## Single-radio and sharing policy
 
@@ -161,5 +163,92 @@ In the development venv, run the transport checks with the Pi's TShark:
    acceptance checks pass. Keep any direct fallback explicit so its independent
    radio ownership and limitations remain visible.
 
-No Core backend is connected to FPMS yet. Item 8's final device acceptance is
-still pending independently of this evaluation.
+FPMS still uses direct capture while the Core-owner prototype is tested. The
+user reported testing item 8 changes; final publication checks remain in the
+release checklist.
+
+## Controlled owner prototype on the Pi
+
+The October 13 device report confirms Core 2.4.8-1, working JWT/WebSocket
+authentication, tri-band frequencies on wlanpi0, and no active Core sessions.
+The next iteration owns a single fixed, unfiltered stream through Core.
+Host validation passes 536 regression tests; the optional transport module was
+also run separately with websockets 17.1, passing two loopback end-to-end cases
+with a real spawn worker/decoder, byte-for-byte raw preservation, and failed-tune
+cleanup. The live device owner path remains pending.
+
+Run from the updated repository using Core's Python environment. This is a
+source-checkout prototype; the production app environment remains isolated and
+FPMS continues to use its tested backend. No new packages need installation on
+the Pi because Core already has the WebSocket client dependency used by the
+successful metadata probe.
+
+1. Exit Utilization in FPMS and release the radio in any other capture tool.
+   Record the current interface and sibling state:
+
+   ```bash
+   iw dev
+   ip -j link show dev wlanpi0
+   iw dev wlanpi0 info
+   ```
+
+   Also record each sibling's administrative state. For a namespaced source,
+   run the inspections in that namespace and pass `--netns NAME` below.
+2. Start with 2.4 GHz channel 1, 20 MHz, and let it run for at least 60 seconds:
+
+   ```bash
+   sudo /opt/wlanpi-core/bin/python scripts/run_core_capture.py \
+     --iface wlanpi0 --band 2.4 --channel 1 --channel-width 20 \
+     --log --log-dir /tmp/utilization-core-24 \
+     --raw-pcapng /tmp/utilization-core-24/channel1.pcapng
+   ```
+
+   The wrapper selects `--capture-backend core`. It checks dependency, capability,
+   mode, Core namespace/layout, sessions, and frequencies before preparation.
+   Core performs the tune and Dumpcap capture. Local TShark runs `-r -` as a
+   decoder, and the existing analyzer supplies all metrics/history/renderers.
+   JWT and socket state stay in a separate spawn worker, avoiding inheritance
+   by the analysis worker.
+3. While it runs, check Core's registry from a second terminal:
+
+   ```bash
+   sudo /opt/wlanpi-core/bin/python scripts/check_core_capture.py
+   ```
+
+   Expect exactly one new session owned by `wlanpi-utilization-owner`, one
+   wlanpi0 source, one channel at 2412/20, and an empty filter. Confirm normal
+   live metrics, display navigation, logging, and usable survey data if enabled.
+4. Stop with Ctrl-C. Run the metadata probe again: the owned session must be
+   gone. Repeat the baseline interface checks; saved administrative state and
+   known monitor tuning must be restored. The radio guard rechecks ownership
+   before restoring; if a new tool took the radio or Core did not release it,
+   restoration must fail explicitly rather than retuning that owner's capture.
+5. Preserve the raw PCAPNG, CSV, JSONL, and `.pcapng.json` sidecar. The sidecar
+   must show `capture_backend: core`, `core_role: owner`, a session ID,
+   `core_stop_confirmed: true`, verified actual tuning, and no transport error.
+   Compare completed interior seconds with the offline retry audit, using the
+   same saved packets. Core does not expose live drop counters; an unavailable
+   drop count is not zero.
+6. After the first run passes, repeat 5 GHz channel 36 and 6 GHz channel 5 with
+   separate directories/filenames. Omit `--channel-width 20` to request the
+   default 80 MHz block on those bands. Use `--local-cu --survey-debug` for local
+   survey checks. This prototype supports 20/80 only; 40/160/80+80/320 and
+   punctured definitions remain outside this iteration. Known Core 80 MHz
+   mapping gaps (such as channel 157) produce an error before mutation; choose
+   20 MHz explicitly to test such a primary.
+7. Exercise a repeated start/stop and a startup failure. Verify errors stop the
+   owned session and restore state. An existing Core session is refused in this
+   iteration; subscribers are the next stage. Capture a failure promptly with:
+
+   ```bash
+   sudo journalctl -u wlanpi-core --since "5 minutes ago" -n 150 --no-pager
+   sudo ./scripts/pi_collect_debug.sh --since "5 minutes ago"
+   ```
+
+   CLI stderr is separate from the FPMS journal. Retain it with the bundle.
+
+The transport drains complete byte chunks during orderly stop, bounds stalled
+pipe writes, and reports unexpected end/tune failure rather than continuing on
+an unverified channel. Whole-phy preparation/restoration is still a local
+transaction around Core's interface-level ownership, so the cross-tool race
+described above remains a limitation until the platform offers a radio lease.

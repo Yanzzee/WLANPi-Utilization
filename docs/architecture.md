@@ -92,8 +92,13 @@ that radio during capture. Core already exposes an authenticated capture
 WebSocket with one owner and read-only subscribers; the current direct backend
 does not participate in that session manager. The item 5 assessment retains
 the direct backend for this migration and tracks Core integration separately.
-The [Core backend evaluation](core-capture-evaluation.md) recommends migrating
-through a controlled owner prototype, then compatible read-only subscription.
+An explicit `--capture-backend core` owner prototype now delegates one fixed,
+unfiltered capture to Core and decodes its PCAPNG through `tshark -r -` into
+this same analyzer. It verifies Core's source/namespace and actual tuning,
+keeps transport/JWT state in a spawn worker, and stops Core before guarded
+local radio restoration. The initial prototype supports 20/80 MHz; FPMS still
+uses direct capture. See [Core prototype acceptance](core-capture-evaluation.md#controlled-owner-prototype-on-the-pi)
+before migrating the default or adding compatible read-only subscription.
 Core's shipped API coordinates its own capture clients, rather than every tool
 on the system, and does not restore prior tuning. SIGKILL,
 power loss, and driver/device failure cannot guarantee restoration; cleanup
