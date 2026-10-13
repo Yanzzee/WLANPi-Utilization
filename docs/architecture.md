@@ -92,8 +92,10 @@ that radio during capture. Core already exposes an authenticated capture
 WebSocket with one owner and read-only subscribers; the current direct backend
 does not participate in that session manager. The item 5 assessment retains
 the direct backend for this migration and tracks Core integration separately.
-Its shipped API coordinates its own capture clients, rather
-than every tool on the system, and does not restore prior tuning. SIGKILL,
+The [Core backend evaluation](core-capture-evaluation.md) recommends migrating
+through a controlled owner prototype, then compatible read-only subscription.
+Core's shipped API coordinates its own capture clients, rather than every tool
+on the system, and does not restore prior tuning. SIGKILL,
 power loss, and driver/device failure cannot guarantee restoration; cleanup
 errors remain explicit.
 

@@ -90,7 +90,8 @@ for item 8 has been supplied yet.
   remains a separate task, including hidden and non-text SSIDs.
 - **Core capture backend:** this release uses direct TShark capture with its own
   per-radio guard. Core's capture WebSocket integration remains a separate
-  architectural option; the guard is not a system-wide broker used by all tools.
+  architectural option under [active evaluation](core-capture-evaluation.md);
+  the guard is not a system-wide broker used by all tools.
 - **Driver coverage:** an iw-verified width does not prove complete frame
   delivery. Treat unsupported widths, missing survey counters, and incomplete
   frame delivery explicitly; see [capture validation](pi_testing.md#validate-bonded-capture-and-retry-metrics).

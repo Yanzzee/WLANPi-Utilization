@@ -174,13 +174,18 @@ Record the tested OS, package versions, adapter, and result with each item.
 
 ## Separate issues
 
-- [ ] **Optional Core capture backend.** Evaluate using Core's shipped capture
-  WebSocket as an owner or subscriber, feeding one unfiltered fixed-channel
+- [ ] **Core capture backend evaluation and migration.** Evaluate using Core's
+  shipped capture WebSocket as an owner or subscriber, feeding one unfiltered fixed-channel
   stream into the existing analyzer. Resolve authentication, buffering/latency,
   source-name and width restrictions, local survey context, radio preparation,
   and restoration. Do not claim a system-wide lease from its per-interface
   capture registry. This is separate from completing the direct-backend Trixie
-  migration.
+  migration. **Status:** current upstream contract and decoder feasibility
+  have been evaluated. Core is the preferred platform integration point, but
+  whole-radio preparation/restoration, actual tune verification, and channel
+  mapping/width gaps need resolution before changing the default. A metadata-only
+  probe and incremental decoder tests are ready for the Pi. See
+  [the evaluation and staged migration](core-capture-evaluation.md).
 
 - [ ] **SSID names display as hex.** Reported during on-device testing after
   item 2. Investigate TShark SSID output and parser normalization separately
