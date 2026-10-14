@@ -8,6 +8,17 @@ Implement and test one item at a time, in the order below. Mark an item complete
 after its automated checks and applicable on-device acceptance checks pass.
 Record the tested OS, package versions, adapter, and result with each item.
 
+**Backend decision accepted October 14, 2026:** keep direct capture as the
+recommended CLI/FPMS default. Retain Core as an explicit optional backend for
+remote integration and future compatible sharing. Core acceptance does not
+trigger a default migration. Complete the direct-backend final release checks;
+optional Core expansion and the performance comparison below are separate work.
+
+**Merge acceptance October 14, 2026:** the user reports sufficient device
+testing and confidence to merge the current version into `main`. The final
+local regression run passed 624 tests with one skip. Commit the remaining
+documentation updates with the merge; release tagging/publication is separate.
+
 ## Milestones
 
 - [x] **1. Repair FPMS menu installation.** Fix the confirmed quote-sensitive
@@ -101,18 +112,18 @@ Record the tested OS, package versions, adapter, and result with each item.
   capture owners. The full suite passes 433 tests on macOS with Python 3.13.3.
   On October 12, 2026, the user confirmed the issue is resolved and testing
   looks good after both startup corrections.
-  **Architecture assessment:** retain the tested direct backend for this
-  migration. Core 2.4.8 already exposes
+  **Architecture assessment:** retain the tested direct backend as the
+  recommended default. Core 2.4.8 already exposes
   authenticated `WS /api/v1/streaming/capture`, with owned sessions and read-only
-  subscribers; the REST capture API is still a design. The current backend
+  subscribers; the REST capture API is still a design. The direct backend
   launches capture directly and does not register with Core's session manager.
   The assessment considered fixed-channel unfiltered input, latency,
   namespace/name restrictions, survey reads, and state restoration. Core's
   existing WebSocket does not supply a system-wide phy lease or restore prior
   tuning, and accepts only `wlanpiN` names and 20/40/80/160 MHz widths. A Core
-  backend would therefore require additional integration and feature decisions;
-  it is tracked separately below. The current backend remains explicitly
-  independent of Core's capture registry.
+  backend still requires local radio safety/restoration; optional integration
+  and broader acceptance are tracked separately below. The direct backend
+  remains explicitly independent of Core's capture registry.
   References: [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
   and [Core usage policy](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/services/network_namespace_service.py#L700).
 
@@ -176,39 +187,36 @@ Record the tested OS, package versions, adapter, and result with each item.
 
 ## Separate issues
 
-- [ ] **Core capture backend evaluation and migration.** Evaluate using Core's
-  shipped capture WebSocket as an owner or subscriber, feeding one unfiltered fixed-channel
-  stream into the existing analyzer. Resolve authentication, buffering/latency,
-  source-name and width restrictions, local survey context, radio preparation,
-  and restoration. Do not claim a system-wide lease from its per-interface
-  capture registry. This is separate from completing the direct-backend Trixie
-  migration. **Status:** current upstream contract and decoder feasibility
-  have been evaluated. Core is the preferred platform integration point, but
-  whole-radio preparation/restoration, actual tune verification, and channel
-  mapping/width gaps need resolution before changing the default. A metadata-only
-  probe and incremental decoder tests are ready for the Pi. The user confirmed
-  Core 2.4.8-1 authentication, populated 2.4/5/6 GHz frequencies for wlanpi0,
-  and no active sessions on wlanpi-bd2. An explicit Core-owner CLI prototype is
-  implemented for fixed 20/80 MHz capture. Device tests confirmed packet delivery,
-  tuning, Core stop and before/after radio restoration. Missing live metrics
-  were traced to a boolean FCS diagnostic parsed as an integer on multi-antenna
-  captures, causing all 1,502 decoded rows in the second test to be rejected. The
-  parser fix has unit and real TShark 4.4.19 packet regression coverage. Device
-  retesting passed on 2.4 GHz channel 1 at 20 MHz: 899 rows became 899 frames,
-  zero malformed rows, no transport error, and verified stop/restoration.
-  A 5 GHz channel 40 / 20 MHz run also passed: 518 rows became 518 frames,
-  zero malformed rows, no transport error, and restoration back to 2412 MHz
-  no-HT with sibling administrative state preserved. Bonded widths, 6 GHz,
-  repeated start/stop, startup failure and offline metric comparison
-  remain in Core acceptance. Byte/row diagnostics and saved radio verification
-  remain available for acceptance testing. The prototype
-  reuses the existing analyzer, requires verified tuning, and stops Core before
-  guarded radio restoration. Production client packaging and persistent opt-in
-  FPMS configuration are now implemented, awaiting installed-path device tests.
-  The installer supplies websockets 15.0.1 in the app's own venv; use
-  `--fpms-backend core` to enable FPMS Core capture. Standard CLI and an
-  unconfigured FPMS installation still default to direct capture. See
-  [the evaluation and staged migration](core-capture-evaluation.md).
+- [x] **Core backend evaluation and default decision.** Reviewed Core 2.4.8-1's
+  shipped WebSocket, decoder feasibility and radio lifecycle limits. Keep direct
+  capture as the default; Core remains optional. Core serves local and remote
+  consumers, but its interface registry is not a system-wide physical-radio
+  lease and it does not restore saved tuning. Use its information/control APIs
+  where they simplify integration. Reconsider the capture default only for a
+  concrete sharing/integration need or improved upstream lifecycle guarantees,
+  with a separate decision and device acceptance.
+
+- [ ] **Optional Core backend expansion and acceptance.** The owner backend,
+  client packaging and persistent FPMS opt-in are implemented. Earlier Core
+  tests passed at 2.4 GHz channel 1 / 20 MHz (899 rows/frames) and 5 GHz channel
+  40 / 20 MHz (518 rows/frames), with verified stop/restoration. On October 14,
+  the user reported successful direct and Core installs, a good 6 GHz CLI
+  display, and successful FPMS starts on each band. Exact channel widths and
+  backend-by-band combinations were not supplied. Remaining optional coverage
+  includes lifecycle/failure cases, bonded-width and saved-packet comparisons.
+  Compatible read-only subscription is future work; the current backend is
+  owner-only. Core errors must not silently start direct capture. These follow-ups
+  do not schedule a default migration or block the direct-backend release.
+  See [the evaluation, evidence and optional acceptance](core-capture-evaluation.md).
+
+- [ ] **High-utilization display performance.** On October 14, the user observed
+  some display lag with direct capture at high channel utilization, while the
+  Core/API display appeared unaffected. Record this as an observation, not a
+  measured throughput/drop-rate comparison or a default-change decision.
+  Compare both backends on the same adapter, channel/width and display/logging
+  settings. Measure capture-to-display delay, decoded frame rate, CPU and
+  buffering, and available drop evidence while preserving one capture/analyzer
+  and the existing retry timing rules. See [performance follow-ups](to_do.md).
 
 - [x] **SSID text normalization.** The user reports readable SSIDs on the device.
   Hidden, Unicode and non-text device cases were not separately reported and

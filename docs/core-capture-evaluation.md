@@ -32,7 +32,8 @@ release checks.
 Reviewed October 13, 2026: WLAN-Pi/wlanpi-core default branch `dev`, commit
 [`7e858ff40e9bc522aa881c479580362a3dd679e3`](https://github.com/WLAN-Pi/wlanpi-core/tree/7e858ff40e9bc522aa881c479580362a3dd679e3).
 Its Debian changelog identifies `2.4.8-1`. The remote default HEAD matched
-this revision on the review date; the device's installed version must be checked independently.
+this revision on the review date; the device's installed version must be checked
+independently.
 No matching 2.4.8/2.4.7 Git release tag was found during this review.
 
 The [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
@@ -201,7 +202,7 @@ feeds one PCAPNG stream to the existing decoder/analyzer. The remaining work
 does not require replacing the analysis engine or redesigning the menu, and is
 separate from direct-backend release acceptance.
 
-1. **Client packaging: implemented, device deployment pending.** The app's
+1. **Client packaging: implemented, device installation reported successful.** The app's
    `core` extra pins websockets 15.0.1, matching Core 2.4.8's dependency. The
    installer installs runtime wheels in the app venv before replacing app
    files, verifies importability in isolated Python, and supports offline wheels.
@@ -209,13 +210,15 @@ separate from direct-backend release acceptance.
    interpreter is no longer needed for installed CLI or FPMS Core capture.
    Certificate, missing dependency, endpoint and decoder errors are surfaced
    without credential output.
-2. **Integrate installed CLI and FPMS launches.** Add an explicit opt-in Core
-   setting to the existing FPMS launcher and test the installed app interpreter.
+2. **Installed CLI and FPMS integration: implemented, basic device checks passed.**
+   The user reported successful direct/Core installs, a good 6 GHz CLI display
+   and FPMS starts on each band on October 14. Complete the remaining lifecycle
+   and logging checks for the optional backend.
    The setting is implemented via `--fpms-backend core` on the installer, saved
    in `/etc/wlanpi-beacon-live/fpms.json`; reinstallation without a backend flag
    preserves it. Its update participates in FPMS patch/restart rollback. The
    service's `WLANPI_UTILIZATION_CAPTURE_BACKEND` override takes precedence.
-   Exercise Display, Display + Log, background logging, navigation, rotation,
+   Exercise Display + Log, background logging, navigation, rotation,
    menu exit and service shutdown. Preserve one analyzer/history throughout.
    Keep Core opt-in after device acceptance. Report Core errors instead of
    silently starting direct capture. Where it simplifies platform integration,
@@ -309,7 +312,8 @@ rejected; Core failure never automatically launches direct capture. The debug
 bundle records `fpms_backend.json`, `core_client.txt` and the service's effective
 backend override. Host tests passed through a fresh copied app environment
 with its own 15.0.1 client, real spawned transport/decoder and shared analyzer;
-the installed FPMS path remains pending device testing.
+the user subsequently reported successful basic installed-path checks, with
+broader lifecycle/failure coverage still pending.
 
 ## Controlled owner prototype on the Pi
 
@@ -356,14 +360,32 @@ channel. The capture sidecar records tuning during capture; the diagnostics
 before/after snapshots record the restoration baseline.
 
 The user also reports that SSID display normalization works on the device.
-Broader Core acceptance still requires bonded widths, 6 GHz, repeat start/stop,
-startup failure, and saved-packet metric comparison described below.
+On October 14, the user reported successful direct and Core installations,
+a good 6 GHz CLI display, and successful FPMS starts on each band. This adds
+basic installed-path and 6 GHz display evidence. Exact channel widths,
+backend-by-band combinations and lifecycle results were not supplied; broader
+acceptance still requires bonded-width coverage, repeat start/stop, failure
+cases, and saved-packet metric comparison described below.
+
+### High-utilization performance observation
+
+In the same October 14 report, the Core/API display appeared to avoid the
+high-utilization performance problem while direct capture still lagged a little.
+This is a device observation, not a controlled benchmark or proof of different
+packet loss. It remains a separate performance follow-up and does not change
+the agreed direct default. Compare the same adapter, channel/width and
+display/logging settings; measure capture-to-display delay, decoded frame rate,
+CPU use, buffering and available drop evidence before attributing the difference
+to transport, decoding, analysis or rendering. Preserve a single capture and
+analysis pipeline and capture-timestamp-based retry bucket closure.
+
+### Additional owner acceptance
 
 Run from the updated repository using Core's Python environment. This is a
 source-checkout prototype; the production app environment remains isolated and
 FPMS uses whichever backend its configuration selects. This source-checkout
 wrapper can still use Core's existing client dependency; the installed path
-above is the next device acceptance target.
+above has basic device checks reported; remaining acceptance is listed below.
 
 1. Exit Utilization in FPMS and release the radio in any other capture tool.
    Record the current interface and sibling state:
