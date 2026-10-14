@@ -196,22 +196,30 @@ Record the tested OS, package versions, adapter, and result with each item.
   parser fix has unit and real TShark 4.4.19 packet regression coverage. Device
   retesting passed on 2.4 GHz channel 1 at 20 MHz: 899 rows became 899 frames,
   zero malformed rows, no transport error, and verified stop/restoration.
-  Other bands, repeated start/stop, startup failure and offline metric comparison
+  A 5 GHz channel 40 / 20 MHz run also passed: 518 rows became 518 frames,
+  zero malformed rows, no transport error, and restoration back to 2412 MHz
+  no-HT with sibling administrative state preserved. Bonded widths, 6 GHz,
+  repeated start/stop, startup failure and offline metric comparison
   remain in Core acceptance. Byte/row diagnostics and saved radio verification
   remain available for acceptance testing. The prototype
   reuses the existing analyzer, requires verified tuning, and stops Core before
-  guarded radio restoration. FPMS continues to use the direct backend. See
+  guarded radio restoration. Production client packaging and persistent opt-in
+  FPMS configuration are now implemented, awaiting installed-path device tests.
+  The installer supplies websockets 15.0.1 in the app's own venv; use
+  `--fpms-backend core` to enable FPMS Core capture. Standard CLI and an
+  unconfigured FPMS installation still default to direct capture. See
   [the evaluation and staged migration](core-capture-evaluation.md).
 
-- [ ] **SSID text normalization: implemented, device testing pending.** TShark
+- [x] **SSID text normalization.** The user reports readable SSIDs on the device.
+  Hidden, Unicode and non-text device cases were not separately reported and
+  remain release-check coverage. TShark
   exports `wlan.ssid` as FT_BYTES. Live capture and offline analysis now decode
   valid UTF-8 once in the parser, so terminal, LCD, CSV and JSONL share the same
   readable name. Empty, missing and all-zero names use the existing hidden
   display; invalid UTF-8/control bytes retain a lossless `hex:…` label. Printable
   spaces and literal hex-looking names are preserved. Replay accepts
   `--ssid-encoding text` for already decoded inputs. Unit, shared-display/logging,
-  and real packet tests cover normalization; validate known names and hidden
-  SSIDs on the device before checking this item off.
+  and real packet tests cover normalization.
 
 ## Architecture constraints
 

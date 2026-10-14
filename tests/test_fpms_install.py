@@ -1,4 +1,5 @@
 import ast
+import json
 import shutil
 import stat
 import subprocess
@@ -73,6 +74,54 @@ def test_trixie_install_adds_one_app_and_is_idempotent(package: Path) -> None:
     assert [item["name"] for item in apps] == ["Kismet", "Profiler", "Scanner", "Utilization"]
     assert callable(namespace["g_vars"]["channel_utilization_return_to_menu"])
     assert callable(namespace["g_vars"]["channel_utilization_toggle_orientation"])
+
+
+def test_backend_selection_is_persistent_and_preserves_other_configuration(package, tmp_path):
+    config = tmp_path / 'settings/fpms.json'
+    config.parent.mkdir()
+    config.write_text('{"other_setting": 42}\n')
+    patcher.install_fpms(package, ADAPTER, capture_backend='core', backend_config=config)
+    assert json.loads(config.read_text()) == {'other_setting': 42, 'capture_backend': 'core'}
+    patcher.install_fpms(package, ADAPTER, backend_config=config)
+    assert json.loads(config.read_text())['capture_backend'] == 'core'
+    patcher.install_fpms(package, ADAPTER, capture_backend='direct', backend_config=config)
+    assert json.loads(config.read_text())['capture_backend'] == 'direct'
+
+
+@pytest.mark.parametrize('previous', [None, b'{"capture_backend":"direct"}\n'])
+def test_service_failure_rolls_back_backend_selection_and_menu(package, tmp_path, previous):
+    before = snapshot(package)
+    config = tmp_path / 'settings/fpms.json'
+    if previous is not None:
+        config.parent.mkdir()
+        config.write_bytes(previous)
+        config.chmod(0o640)
+    calls = 0
+    def run(command, **kw):
+        nonlocal calls
+        if command[1] == 'restart':
+            calls += 1
+            if calls == 1:
+                assert json.loads(config.read_text())['capture_backend'] == 'core'
+                raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0)
+    with pytest.raises(patcher.FPMSInstallError, match='restored the pre-install'):
+        patcher.install_fpms(package, ADAPTER, capture_backend='core', backend_config=config,
+                             restart_service=True, command_runner=run, sleep=lambda _: None)
+    assert snapshot(package) == before
+    if previous is None:
+        assert not config.exists()
+    else:
+        assert config.read_bytes() == previous and stat.S_IMODE(config.stat().st_mode) == 0o640
+
+
+def test_invalid_backend_configuration_leaves_menu_untouched(package, tmp_path):
+    config = tmp_path / 'fpms.json'
+    config.write_text('[]')
+    before = snapshot(package)
+    with pytest.raises(patcher.FPMSInstallError, match='Invalid backend configuration'):
+        patcher.install_fpms(package, ADAPTER, capture_backend='core', backend_config=config)
+    assert snapshot(package) == before and config.read_text() == '[]'
 
 
 def test_trixie_buttons_dispatch_and_exit_return_to_menu(package: Path) -> None:

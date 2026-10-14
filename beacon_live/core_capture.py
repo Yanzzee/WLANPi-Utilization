@@ -84,7 +84,16 @@ def validate_core_request(request: CoreRequest) -> None:
 
 def check_core_dependency() -> None:
     if importlib.util.find_spec('websockets') is None:
-        raise CoreCaptureError('Core prototype needs websockets; run with sudo /opt/wlanpi-core/bin/python scripts/run_core_capture.py')
+        raise CoreCaptureError('Core capture needs websockets in this Python environment; rerun the FPMS installer or install the project core extra')
+
+
+def _tls_context(request: CoreRequest):
+    if urlsplit(request.url).scheme != 'wss':
+        return None
+    try:
+        return ssl.create_default_context(cafile=str(request.ca_cert))
+    except (OSError, ssl.SSLError) as exc:
+        raise CoreCaptureError(f'Cannot load Core certificate {request.ca_cert}; check the Core installation') from exc
 
 
 def validate_core_layout(layout: dict, target: CaptureTarget) -> None:
@@ -191,6 +200,8 @@ async def _write_pipe(fd: int, data: bytes) -> None:
         await asyncio.wait_for(write(), WRITE_TIMEOUT)
     except TimeoutError as exc:
         raise CoreCaptureError('Core decoder cannot keep up; capture stopped instead of dropping stream bytes') from exc
+    except BrokenPipeError as exc:
+        raise CoreCaptureError('Core decoder closed its input stream; capture stopped') from exc
 
 
 async def run_owner(ws, token: str, request: CoreRequest, *, layout_reader, send_status,
@@ -301,7 +312,7 @@ def _transport_worker(connection, descriptor, request: CoreRequest, parent_pid: 
 
     async def worker():
         import websockets
-        context = ssl.create_default_context(cafile=str(request.ca_cert)) if urlsplit(request.url).scheme == 'wss' else None
+        context = _tls_context(request)
         token = await asyncio.to_thread(_get_token)
         async with websockets.connect(request.url, ssl=context, open_timeout=15, close_timeout=5,
                                       compression=None, max_size=2 * 1024 * 1024, max_queue=8) as ws:
@@ -337,7 +348,14 @@ def _transport_worker(connection, descriptor, request: CoreRequest, parent_pid: 
             raw = request.raw_path.open('wb')
         asyncio.run(worker())
     except BaseException as exc:
-        message = str(exc) if isinstance(exc, CoreCaptureError) else f'Core transport failed ({type(exc).__name__})'
+        if isinstance(exc, CoreCaptureError):
+            message = str(exc)
+        elif isinstance(exc, ssl.SSLError):
+            message = 'Core TLS verification failed; check the device certificate and Core service'
+        elif isinstance(exc, (ConnectionError, TimeoutError)):
+            message = 'Core capture endpoint unavailable; check wlanpi-core service and local connectivity'
+        else:
+            message = f'Core transport failed ({type(exc).__name__})'
         try:
             connection.send({'phase': 'error', 'message': message})
         except (OSError, EOFError):

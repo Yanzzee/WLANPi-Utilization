@@ -15,6 +15,57 @@ import pytest
 from integration.wlanpi_fpms import channel_utilization
 
 
+@pytest.fixture(autouse=True)
+def isolated_backend_settings(monkeypatch, tmp_path):
+    monkeypatch.delenv('WLANPI_UTILIZATION_CAPTURE_BACKEND', raising=False)
+    monkeypatch.setattr(channel_utilization, 'BACKEND_CONFIG', tmp_path / 'fpms.json')
+
+
+@pytest.mark.parametrize('logging,logging_only', [(False, False), (True, False), (True, True)])
+def test_fpms_core_setting_applies_to_every_launch_mode(logging, logging_only):
+    channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"core"}')
+    command = channel_utilization.build_launch_command(band='2.4', channel=1,
+        logging=logging, logging_only=logging_only)
+    assert command[0] == '/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live'
+    assert command[command.index('--capture-backend') + 1] == 'core'
+
+
+def test_fpms_initial_default_is_direct_and_environment_override_is_explicit(monkeypatch):
+    assert channel_utilization.configured_capture_backend() == 'direct'
+    channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"core"}')
+    monkeypatch.setenv('WLANPI_UTILIZATION_CAPTURE_BACKEND', 'direct')
+    assert channel_utilization.configured_capture_backend() == 'direct'
+
+
+@pytest.mark.parametrize('value', ['broken-json', '[]', '{"capture_backend":null}',
+    '{"capture_backend":{}}', '{"capture_backend":"automatic"}'])
+def test_invalid_fpms_configuration_never_falls_back_to_direct(value):
+    channel_utilization.BACKEND_CONFIG.write_text(value)
+    command = channel_utilization.build_launch_command(band='2.4', channel=1, logging=False)
+    assert command[command.index('--capture-backend') + 1] == 'invalid'
+
+
+@pytest.mark.parametrize('logging_only', [False, True])
+def test_core_menu_exit_allows_stop_acknowledgement_and_radio_cleanup(tmp_path, monkeypatch, logging_only):
+    channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"core"}')
+    monkeypatch.setattr(channel_utilization, 'FRAME_PATH', tmp_path / 'frame.ppm')
+    processes = []
+    def popen(command, **kw):
+        result = _FakeProcess(command)
+        processes.append(result)
+        return result
+    state = {}
+    app = channel_utilization.ChannelUtilizationApp(state, popen=popen)
+    if logging_only:
+        app.start_logging_only(band='2.4', channel=1)
+        app.stop_logging()
+    else:
+        app.launch(band='2.4', channel=1, logging=False)
+        state['page_exit_handler']()
+    assert processes[0].signal_received == signal.SIGINT
+    assert processes[0].wait_timeout == channel_utilization.CORE_CAPTURE_STOP_TIMEOUT_SECONDS
+
+
 def test_fpms_menu_is_band_channel_then_display_mode() -> None:
     menu = channel_utilization.build_channel_utilization_menu({})
 

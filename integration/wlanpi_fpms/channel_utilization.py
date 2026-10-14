@@ -24,9 +24,11 @@ FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "auto")
 NETWORK_NAMESPACE = os.environ.get("WLANPI_UTILIZATION_NETNS")
+BACKEND_CONFIG = Path("/etc/wlanpi-beacon-live/fpms.json")
 LOGGER = logging.getLogger(__name__)
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
 CAPTURE_STOP_TIMEOUT_SECONDS = 30
+CORE_CAPTURE_STOP_TIMEOUT_SECONDS = 90
 LOGGING_STATUS_SECONDS = 1.0
 LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
 
@@ -72,6 +74,32 @@ _6_GHZ_CHANNELS = tuple(range(1, 234, 4))
 _6_GHZ_PSC_CHANNELS = tuple(range(5, 230, 16))
 
 
+def configured_capture_backend() -> str:
+    """Choose the FPMS provider; malformed configuration must not select direct."""
+    backend = os.environ.get("WLANPI_UTILIZATION_CAPTURE_BACKEND")
+    if backend is None:
+        try:
+            settings = json.loads(BACKEND_CONFIG.read_text(encoding="utf-8"))
+            backend = settings.get("capture_backend", "direct")
+        except FileNotFoundError:
+            backend = "direct"
+        except (OSError, ValueError, AttributeError) as error:
+            LOGGER.error("Cannot read Utilization backend configuration %s: %s", BACKEND_CONFIG, error)
+            return "invalid"
+    if not isinstance(backend, str) or backend not in {"core", "direct"}:
+        LOGGER.error("Invalid Utilization capture backend in %s or environment", BACKEND_CONFIG)
+        return "invalid"  # CLI rejects this before touching the radio.
+    return backend
+
+
+def _capture_stop_timeout(command: list[str]) -> int:
+    if '--capture-backend' in command and command[command.index('--capture-backend') + 1] == 'core':
+        # Core's stop acknowledgement and the subsequent local restoration
+        # have bounded waits. Do not kill the parent halfway through cleanup.
+        return CORE_CAPTURE_STOP_TIMEOUT_SECONDS
+    return CAPTURE_STOP_TIMEOUT_SECONDS
+
+
 def build_launch_command(
     *,
     band: str,
@@ -108,6 +136,7 @@ def build_launch_command(
     )
     if NETWORK_NAMESPACE is not None:
         command.extend(["--netns", NETWORK_NAMESPACE])
+    command.extend(["--capture-backend", configured_capture_backend()])
     return command
 
 
@@ -462,7 +491,7 @@ class _DisplaySession:
         if process is not None and process.poll() is None:
             process.send_signal(signal.SIGINT)
             try:
-                process.wait(timeout=CAPTURE_STOP_TIMEOUT_SECONDS)
+                process.wait(timeout=_capture_stop_timeout(self.command))
             except subprocess.TimeoutExpired:
                 process.terminate()
                 try:
@@ -649,7 +678,7 @@ class _LoggingOnlySession:
         )
 
     def stop(self) -> None:
-        _stop_process(self.process)
+        _stop_process(self.process, timeout_seconds=_capture_stop_timeout(self.command))
 
 
 def _draw_frame(
@@ -899,12 +928,13 @@ def _write_logging_enabled(enabled: bool) -> None:
     )
 
 
-def _stop_process(process: Optional[subprocess.Popen[bytes]]) -> None:
+def _stop_process(process: Optional[subprocess.Popen[bytes]], *,
+                  timeout_seconds: float = CAPTURE_STOP_TIMEOUT_SECONDS) -> None:
     if process is None or process.poll() is not None:
         return
     process.send_signal(signal.SIGINT)
     try:
-        process.wait(timeout=CAPTURE_STOP_TIMEOUT_SECONDS)
+        process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         process.terminate()
         try:

@@ -1,6 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+FPMS_OPTIONS=()
+CLIENT_OPTIONS=(--with-core)
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --fpms-backend)
+      if [[ $# -lt 2 || ( "$2" != "direct" && "$2" != "core" ) ]]; then
+        echo "--fpms-backend requires direct or core" >&2
+        exit 2
+      fi
+      FPMS_OPTIONS=(--capture-backend "$2")
+      shift 2
+      ;;
+    --wheel-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "--wheel-dir requires a directory" >&2
+        exit 2
+      fi
+      CLIENT_OPTIONS+=(--wheel-dir "$2")
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: sudo $0 [--fpms-backend direct|core] [--wheel-dir DIRECTORY]"
+      echo "Without --fpms-backend, the saved FPMS choice is preserved (initial default: direct)."
+      exit 0
+      ;;
+    *) echo "Unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run this installer as root: sudo ./scripts/install_wlanpi_fpms.sh"
   exit 1
@@ -25,15 +54,17 @@ PY
 
 python3 -m venv "${APP_VENV}"
 "${APP_VENV}/bin/python" "${SCRIPT_DIR}/install_app_venv.py" \
-  --source-root "${REPO_ROOT}"
+  --source-root "${REPO_ROOT}" "${CLIENT_OPTIONS[@]}"
 "${APP_VENV}/bin/python" "${SCRIPT_DIR}/install_cli_launchers.py" \
   --app-bin "${APP_VENV}/bin" \
   --launcher-dir /usr/local/bin
 mkdir -p /run/wlanpi-beacon-live /var/log/wlanpi-beacon-live
 "${APP_VENV}/bin/python" "${SCRIPT_DIR}/patch_wlanpi_fpms.py" \
   --adapter "${ADAPTER}" \
-  --restart-service
+  --restart-service "${FPMS_OPTIONS[@]}"
 
 echo "Utilization is installed under FPMS Apps."
 echo "CLI commands installed: wlanpi-beacon-live and beacon-live"
+echo "Standard CLI default: direct; select --capture-backend core explicitly."
+echo "FPMS backend configuration: /etc/wlanpi-beacon-live/fpms.json (absent means direct)."
 echo "Select a band, channel, then Display or Display + Log."

@@ -7,7 +7,8 @@ application behavior.
 ## Local setup
 
 WLANPi Beacon Live requires Python 3.13 or newer; the tested Trixie target is
-Python 3.13. It has no third-party runtime Python dependencies.
+Python 3.13. Direct capture/replay use the standard library; Core capture adds
+the pinned `websockets==15.0.1` client through the `core` extra.
 
 ```bash
 python3 -m venv .venv
@@ -19,6 +20,7 @@ python -m pytest
 
 The development extra installs `pytest>=8.3.5,<9`. Build requirements are
 `setuptools>=75.3` and `wheel`.
+For Core transport development/tests, install `python -m pip install -e '.[dev,core]'`.
 
 On a Pi, `scripts/pi_setup.sh` requires an activated, genuine venv without
 system site-packages. It verifies the interpreter/version before running pip,
@@ -34,6 +36,17 @@ interpreter for application installation, and verifies genuine venv isolation
 and Python 3.13+ before package writes. FPMS keeps its separate package-managed
 Python environment; development setup does not install into either production
 environment.
+
+The FPMS installer installs Core runtime wheels in the app venv without building
+the application package; `--wheel-dir` supports offline runtime installation.
+Copied CLI entrypoints have a main guard so Core's spawn worker can import them
+without relaunching capture. The FPMS backend choice is independent of the
+standard CLI's direct default; see [Core installed-path testing](core-capture-evaluation.md#test-the-installed-core-path).
+Direct capture remains the recommended CLI/FPMS default. Core is an optional
+integration path, and passing its tests does not schedule a default migration.
+Use Core's device information/control APIs where they simplify integration;
+subscription and broader Core acceptance are separate follow-ups. See
+[the backend decision](core-capture-evaluation.md).
 
 ## Repository map
 

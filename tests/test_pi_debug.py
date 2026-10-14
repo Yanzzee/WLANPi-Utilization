@@ -153,11 +153,22 @@ def test_shell_wrapper_passes_options_without_development_packages():
 
 
 def test_only_effective_utilization_overrides_are_archived(tmp_path):
-    raw = '"WLANPI_UTILIZATION_IFACE=renamed" "WLANPI_UTILIZATION_NETNS=lab" CORE_API_TOKEN=secret-value'
+    raw = '"WLANPI_UTILIZATION_IFACE=renamed" "WLANPI_UTILIZATION_NETNS=lab" WLANPI_UTILIZATION_CAPTURE_BACKEND=core CORE_API_TOKEN=secret-value'
     bundle = debug.Collector(tmp_path, runner=lambda command, **kw: subprocess.CompletedProcess(command, 0, raw, ''))
     result = bundle.command('environment.txt', ['systemctl'], output_filter=debug.utilization_environment)
-    assert json.loads(result.stdout) == {'WLANPI_UTILIZATION_IFACE': 'renamed', 'WLANPI_UTILIZATION_NETNS': 'lab'}
+    assert json.loads(result.stdout) == {'WLANPI_UTILIZATION_IFACE': 'renamed', 'WLANPI_UTILIZATION_NETNS': 'lab', 'WLANPI_UTILIZATION_CAPTURE_BACKEND': 'core'}
     assert 'secret-value' not in (tmp_path / 'environment.txt').read_text()
+
+
+def test_backend_config_diagnostics_default_and_filter_unrelated_values(tmp_path):
+    path = tmp_path / 'settings.json'
+    bundle = debug.Collector(tmp_path)
+    debug.collect_backend_config(bundle, path)
+    assert json.loads((tmp_path / 'fpms_backend.json').read_text())['capture_backend'] == 'direct'
+    path.write_text('{"capture_backend":"core","token":"must-not-archive"}')
+    debug.collect_backend_config(bundle, path)
+    report = (tmp_path / 'fpms_backend.json').read_text()
+    assert json.loads(report)['capture_backend'] == 'core' and 'must-not-archive' not in report
 
 
 def test_running_fpms_environment_includes_environment_file_overrides_only(tmp_path):

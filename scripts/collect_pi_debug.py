@@ -137,6 +137,26 @@ def collect_deployment(bundle: Collector, package: Path | None, app_python: Path
     bundle.record('deployment.json', json.dumps(files, indent=2) + '\n', status=status)
     for index, path in enumerate((Path('/usr/local/bin/wlanpi-beacon-live'), Path('/usr/local/bin/beacon-live'))):
         bundle.read(f'cli_launcher_{index}.txt', path)
+    bundle.command('core_client.txt', [str(app_python), '-I', '-c',
+        "import websockets; print(websockets.__version__); print(websockets.__file__)"])
+
+
+def collect_backend_config(bundle: Collector, path=Path('/etc/wlanpi-beacon-live/fpms.json')):
+    report = {'path': str(path), 'capture_backend': 'direct', 'source': 'default'}
+    status = 'ok'
+    try:
+        settings = json.loads(path.read_text())
+        backend = settings.get('capture_backend', 'direct')
+        if not isinstance(backend, str) or backend not in {'direct', 'core'}:
+            raise ValueError('invalid capture_backend')
+        report.update(capture_backend=backend, source='file')
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, AttributeError) as error:
+        report.update(capture_backend=None, error=str(error))
+        status = 'failed'
+    # Retain just the backend selection, not arbitrary configuration values.
+    bundle.record('fpms_backend.json', json.dumps(report, indent=2) + '\n', status=status)
 
 
 def collect_network(bundle: Collector):
@@ -184,7 +204,7 @@ def utilization_environment(output: str) -> str:
             for item in shlex.split(output)
             if '=' in item
             for key, value in [item.split('=', 1)]
-            if key in {'WLANPI_UTILIZATION_IFACE', 'WLANPI_UTILIZATION_NETNS'}
+            if key in {'WLANPI_UTILIZATION_IFACE', 'WLANPI_UTILIZATION_NETNS', 'WLANPI_UTILIZATION_CAPTURE_BACKEND'}
         }
     except ValueError as exc:
         values = {'error': str(exc)}
@@ -205,7 +225,7 @@ def collect_running_environment(bundle: Collector, service_output: str, proc_roo
             for item in data.decode(errors='replace').split('\0')
             if '=' in item
             for key, value in [item.split('=', 1)]
-            if key in {'WLANPI_UTILIZATION_IFACE', 'WLANPI_UTILIZATION_NETNS'}
+            if key in {'WLANPI_UTILIZATION_IFACE', 'WLANPI_UTILIZATION_NETNS', 'WLANPI_UTILIZATION_CAPTURE_BACKEND'}
         }
     except (OSError, ValueError) as exc:
         report = {'error': str(exc)}
@@ -258,6 +278,7 @@ def collect(bundle: Collector, *, repo_root: Path, since: str, launcher=Path('/u
         output_filter=utilization_environment,
     )
     collect_running_environment(bundle, service_output)
+    collect_backend_config(bundle)
     collect_deployment(bundle, package, app_python, repo_root)
     collect_tshark(bundle)
     collect_network(bundle)

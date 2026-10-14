@@ -100,8 +100,40 @@ sudo apt update
 sudo apt install python3 python3-venv git iproute2 iw tshark wireshark-common
 ```
 
-`wireshark-common` supplies `dumpcap`. The project has no third-party Python
-runtime dependency; the `dev` extra adds pytest.
+`wireshark-common` supplies `dumpcap`. Direct capture/replay use standard-library
+Python; the `core` extra supplies websockets 15.0.1, and `dev` adds pytest.
+
+## Core capture installation and selection
+
+Direct capture is the recommended CLI/FPMS default. Core is an explicit optional
+backend; its errors do not trigger an automatic direct capture. See
+[the backend decision and limitations](core-capture-evaluation.md).
+
+The normal FPMS installer installs the client in `/opt/wlanpi-beacon-live`.
+For first installation, it needs package-index access or `--wheel-dir` with
+runtime wheels compatible with the Pi. Dependency failure stops before replacing
+the app files or changing FPMS selection. It never installs into Core's venv
+or system Python.
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-backend core
+sudo cat /etc/wlanpi-beacon-live/fpms.json
+/opt/wlanpi-beacon-live/bin/python -I -c \
+  'import websockets; print(websockets.__version__, websockets.__file__)'
+```
+
+The saved setting applies to FPMS launches only and survives reinstallation
+without a backend flag. `WLANPI_UTILIZATION_CAPTURE_BACKEND` in the service
+environment overrides it. Use `--fpms-backend direct` to switch back; absent
+configuration initially means direct. Invalid settings are rejected before
+capture rather than silently using direct.
+
+For the installed CLI, explicitly pass `--capture-backend core`. Core starts
+write `Capture backend: core` to stderr/the FPMS journal. Certificate, endpoint
+or getjwt errors appear there; inspect `core_client.txt`, `fpms_backend.json`
+and the backend override in a debug bundle. Core requires an existing `wlanpiN`
+monitor and currently supports validated 20/80 MHz definitions. Its known
+channel/width restrictions are in [Core acceptance](core-capture-evaluation.md).
 
 ## Development setup requires a Python 3.13 venv
 
@@ -558,6 +590,7 @@ Start with these files:
 | `fpms_service.txt`, `fpms_journal.txt` | Identify service state/exit status, unit paths, and recent capture/installation errors. |
 | `fpms_paths.json`, `fpms_python_probe.txt`, `fpms_environment.txt`, `fpms_process_environment.json` | Resolve the launcher's interpreter/package, configured unit overrides, and actual running-process interface/namespace overrides without importing FPMS hardware code. |
 | `app_python.txt`, `deployment.json`, `cli_launcher_*.txt` | Identify the production venv and stale app/adapter files compared with the current checkout. |
+| `fpms_backend.json`, `core_client.txt` | Identify the saved FPMS backend and the WebSocket client version/path in the app venv; effective service overrides are recorded separately. |
 | `tshark_version.txt`, `tshark_fields.json` | Identify TShark version, requested field types, and unavailable fields. |
 | `namespaces.json`, `iw_dev.txt`, `netns_N_*` | Map root/named contexts to their interface, phy, regulatory, controller, and packet-socket evidence. |
 | `processes.txt`, `radio_locks.txt`, `runtime_*`, `disk.txt`, `memory.txt` | Identify active tools, app artifacts, disk pressure, and memory pressure. |

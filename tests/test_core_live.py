@@ -95,7 +95,7 @@ def test_ready_failure_does_not_prepare_radio(prepared, monkeypatch):
 def test_missing_dependency_fails_before_radio_discovery(monkeypatch):
     monkeypatch.setattr(core_capture.importlib.util, 'find_spec', lambda name: None)
     monkeypatch.setattr(live, 'discover_capture_target', lambda *a, **kw: pytest.fail('No hardware may be inspected'))
-    with pytest.raises(ValueError, match='prototype needs websockets'):
+    with pytest.raises(ValueError, match='Core capture needs websockets'):
         live.run_live(capture_backend='core')
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install beacon_live into the current interpreter's venv without pip."""
+"""Copy the app into its venv and optionally install its isolated Core client."""
 
 from __future__ import annotations
 
@@ -7,13 +7,17 @@ import argparse
 import shutil
 import site
 import stat
+import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument("--with-core", action="store_true")
+    parser.add_argument("--wheel-dir", type=Path, help="Install Core client offline from this wheel directory")
     args = parser.parse_args()
 
     source_package = args.source_root / "beacon_live"
@@ -21,6 +25,10 @@ def main() -> int:
         raise SystemExit(f"beacon_live source package not found in {args.source_root}")
 
     site_packages = _venv_site_packages()
+    if args.wheel_dir is not None and not args.with_core:
+        parser.error("--wheel-dir requires --with-core")
+    if args.with_core:
+        _install_core_client(args.source_root, wheel_directory=args.wheel_dir)
     target_package = site_packages / "beacon_live"
     if target_package.exists():
         shutil.rmtree(target_package)
@@ -34,7 +42,30 @@ def main() -> int:
     _write_entrypoint(bin_dir / "wlanpi-beacon-live", "beacon_live.device")
     _write_entrypoint(bin_dir / "beacon-live", "beacon_live.cli")
     print(f"Installed beacon_live in {site_packages}")
+    if args.with_core:
+        subprocess.run([sys.executable, "-I", "-c",
+            "from beacon_live.core_capture import check_core_dependency; check_core_dependency()"], check=True)
     return 0
+
+
+def _install_core_client(source_root: Path, *, wheel_directory: Path | None = None,
+                         command_runner=subprocess.run) -> None:
+    """Install only declared runtime wheels, never build or borrow Core packages."""
+    _venv_site_packages()  # Must precede any pip invocation.
+    configuration = tomllib.loads((source_root / "pyproject.toml").read_text())
+    requirements = configuration["project"]["optional-dependencies"]["core"]
+    if (not isinstance(requirements, list) or not requirements
+            or any(not isinstance(item, str) or item.startswith('-') for item in requirements)):
+        raise SystemExit("Invalid Core client dependency declarations")
+    command = [sys.executable, "-I", "-m", "pip", "--isolated", "--no-cache-dir", "--disable-pip-version-check",
+               "install", "--only-binary=:all:"]
+    if wheel_directory is not None:
+        if not wheel_directory.is_dir():
+            raise SystemExit(f"Core client wheel directory not found: {wheel_directory}")
+        command.extend(["--no-index", "--find-links", str(wheel_directory.resolve())])
+    command.extend(requirements)
+    command_runner(command, check=True)
+    print("Installed Core WebSocket client in the application venv")
 
 
 def _venv_site_packages() -> Path:
@@ -65,7 +96,8 @@ def _write_entrypoint(path: Path, module: str) -> None:
     content = (
         f"#!{sys.executable}\n"
         f"from {module} import main\n"
-        "raise SystemExit(main())\n"
+        "if __name__ == '__main__':\n"
+        "    raise SystemExit(main())\n"
     )
     path.write_text(content, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

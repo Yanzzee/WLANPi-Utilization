@@ -38,12 +38,15 @@ def main() -> int:
     parser.add_argument("--fpms-package", type=Path)
     parser.add_argument("--adapter", required=True, type=Path)
     parser.add_argument("--restart-service", action="store_true")
+    parser.add_argument("--capture-backend", choices=("direct", "core"))
+    parser.add_argument("--backend-config", type=Path, default=Path("/etc/wlanpi-beacon-live/fpms.json"))
     args = parser.parse_args()
 
     try:
         package = args.fpms_package or _find_fpms_package()
         print(f"Resolved FPMS Python package: {package}", flush=True)
-        install_fpms(package, args.adapter, restart_service=args.restart_service)
+        install_fpms(package, args.adapter, restart_service=args.restart_service,
+                     capture_backend=args.capture_backend, backend_config=args.backend_config)
     except (FPMSInstallError, OSError, SyntaxError, UnicodeError) as error:
         raise SystemExit(f"Utilization FPMS installation failed: {error}") from error
     print(f"Installed Utilization FPMS adapter in {package}")
@@ -57,6 +60,8 @@ def install_fpms(
     restart_service: bool = False,
     command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     sleep: Callable[[float], None] = time.sleep,
+    capture_backend: str | None = None,
+    backend_config: Path = Path("/etc/wlanpi-beacon-live/fpms.json"),
 ) -> None:
     """Validate first, then install and recover the pre-install files on failure."""
     fpms_file = package / "fpms.py"
@@ -87,6 +92,20 @@ def install_fpms(
     for path, content in replacements.items():
         compile(content, str(path), "exec")
 
+    if capture_backend is not None:
+        if capture_backend not in {"direct", "core"}:
+            raise FPMSInstallError("Capture backend must be direct or core")
+        original = FileState.read(backend_config)
+        try:
+            settings = json.loads(original.content) if original.content is not None else {}
+            if not isinstance(settings, dict):
+                raise ValueError("expected a JSON object")
+        except ValueError as error:
+            raise FPMSInstallError(f"Invalid backend configuration {backend_config}: {error}") from error
+        settings["capture_backend"] = capture_backend
+        originals[backend_config] = original
+        replacements[backend_config] = (json.dumps(settings, indent=2) + "\n").encode()
+
     writes: dict[Path, FileState] = {}
     for path, content in replacements.items():
         original = originals[path]
@@ -102,6 +121,8 @@ def install_fpms(
     service_attempted = False
     try:
         for path, replacement in writes.items():
+            if path == backend_config:
+                path.parent.mkdir(parents=True, exist_ok=True)
             attempted.append(path)
             _atomic_write(path, replacement)
         if restart_service:

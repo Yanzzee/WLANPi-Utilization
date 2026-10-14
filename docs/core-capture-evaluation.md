@@ -1,18 +1,38 @@
 # Core capture backend evaluation
 
-Core's authenticated capture WebSocket is the platform integration point to
-use for a shared capture backend. Utilization should move toward a Core-owned,
-single-source, fixed-channel capture. The current API can carry the frames we
-need, but transport delegation alone does not preserve all of the current radio
-ownership/restoration guarantees. Address those gaps before changing the FPMS
-default.
+**Decision accepted October 14, 2026:** keep direct capture as the default for
+the standalone CLI and FPMS application. Retain Core capture as an explicit
+optional backend for remote integration and future compatible stream sharing.
+Successful Core acceptance tests do not automatically trigger a default change.
+
+Core's [architecture](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/ARCHITECTURE.md)
+centralizes device information and control for local consumers, including FPMS
+and CLI tools, as well as remote consumers. Use those APIs where they simplify
+platform integration. No requirement that every on-device analyzer use the
+capture WebSocket was found in the reviewed documentation.
+
+For capture, Core provides authenticated access, namespace resolution, a session
+registry, owner-disconnect cleanup, and one stream with multiple consumers. The
+current Utilization backend owns its capture and cannot subscribe to another
+owner, so the stream-sharing benefit is not yet fully implemented. A compatible
+shared stream must preserve our fixed-channel, single-source, unfiltered input.
+
+Core 2.4.8 does not provide a system-wide physical-radio lease, saved-state
+restoration transaction, or survey-counter API. The app still needs local radio
+safety and restoration around Core capture. Core also adds service,
+authentication and transport dependencies; their performance cost has not been
+measured. Neither backend inherently improves adapter reception or analysis
+accuracy. Reconsider the default only for a concrete sharing/integration need or
+improved upstream radio lifecycle guarantees, with a separate decision and
+device acceptance. Core expansion is separate from the direct-backend Trixie
+release checks.
 
 ## Reviewed baseline
 
 Reviewed October 13, 2026: WLAN-Pi/wlanpi-core default branch `dev`, commit
 [`7e858ff40e9bc522aa881c479580362a3dd679e3`](https://github.com/WLAN-Pi/wlanpi-core/tree/7e858ff40e9bc522aa881c479580362a3dd679e3).
-Its Debian changelog identifies `2.4.8-1`. The remote default HEAD still matches
-this revision; the device's installed version must be checked independently.
+Its Debian changelog identifies `2.4.8-1`. The remote default HEAD matched
+this revision on the review date; the device's installed version must be checked independently.
 No matching 2.4.8/2.4.7 Git release tag was found during this review.
 
 The [shipped capture contract](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/docs/capture-ws-mcp-handover.md)
@@ -31,7 +51,7 @@ control tokens, and summary endpoint are not the shipped contract.
 | --- | --- | --- |
 | One capture, all available frame types | Core runs Dumpcap and streams PCAPNG; an empty `pcap_filter` adds no BPF filter. | Feed one stream to one local TShark decoder and the existing shared analyzer. No beacon-only filter. |
 | One fixed channel | A one-entry channel list is applied at startup; it does not enter the repeated multi-channel hop loop. | Request exactly one frequency/width and verify actual tuning. |
-| Multiple consumers | An authenticated owner controls its session; other authenticated connections can subscribe read-only. | Share only a compatible existing stream, or own a new capture. |
+| Multiple consumers | An authenticated owner controls its session; other authenticated connections can subscribe read-only. | Current backend is owner-only; future subscription must verify a compatible existing stream. |
 | Source/namespace discovery | Capture accepts `wlanpiN`; Core resolves namespaces. `list_sessions` reports namespace/config. General layout is available through `/api/v1/network/config/status`. | Match the exact source and namespace. Existing arbitrary interface names cannot be passed unchanged. |
 | Channel width and centers | Configuration accepts 20/40/80/160; center frequency is computed by Core. No explicit centers, 80+80, 320, or puncturing parameter. | Check requested definitions against Core's supported tuning contract. Preserve explicit unsupported errors. |
 | Exclusive radio use | Core claims interface names in its capture manager. It does not claim the entire phy against every controller/tool. | Retain whole-radio safety checks; a Core session is not proof that sibling interfaces are idle. |
@@ -73,9 +93,10 @@ potential parsing gap did not affect that device's capture-frequency query.
 
 ## Single-radio and sharing policy
 
-Core sharing provides another option to exclusive independent captures: one
-owner controls a fixed unfiltered capture, and Utilization subscribes to its
-bytes. Multiple consumers can then analyze frames from one hardware capture.
+Core sharing could provide another option to exclusive independent captures:
+one owner controls a fixed unfiltered capture, and Utilization subscribes to its
+bytes. Multiple consumers could then analyze frames from one hardware capture.
+Subscription remains future work; the current backend refuses an existing owner.
 
 A candidate stream must have exactly one source, the requested frequency and
 width, an explicitly empty filter, and one channel. A hopping, filtered, or
@@ -106,10 +127,10 @@ A hardware-free experiment with TShark 4.6.0 emitted the first decoded packet
 about 96 ms after writing its complete PCAPNG block, while stdin remained open.
 Regression tests cover HT40/VHT160/HE80/EHT320, arbitrary 17-byte transport
 chunks, preserved RSSI/QBSS, nine decoded frames, and three retries of four
-eligible frames. All use the existing live parser and analyzer. TShark 4.4
-stdin behavior and real Core/Dumpcap latency remain device checks. The full
-Python 3.13 suite passes all 507 tests, including metadata-only protocol and
-incremental decoder tests.
+eligible frames. All use the existing live parser and analyzer. Subsequent
+TShark 4.4.19 tests and device runs confirmed decoding and normalization;
+end-to-end latency and dropped-frame accounting still need device validation.
+Current regression and device evidence is recorded below.
 
 The raw stream can be written once for evidence while the same bytes feed the
 decoder. A transport failure must stop the owned capture and mark incomplete
@@ -136,8 +157,9 @@ Defaults evaluate `wlanpi0`, 2412 MHz, 20 MHz. To assess another requested
 configuration, pass `--interface`, `--frequency-mhz`, and `--width`. Output
 labels matching sessions as **configured candidates** and leaves actual tuning
 unverified. Empty session lists are normal when no Core client owns a capture.
-The actual production backend must install its own compatible WebSocket client
-in the isolated app environment; borrowing Core's interpreter is for this probe.
+The installer now installs its own pinned WebSocket client in the isolated app
+environment. Borrowing Core's interpreter is still useful for this source probe;
+normal installed Core capture uses `/opt/wlanpi-beacon-live/bin/python`.
 
 In the development venv, run the transport checks with the Pi's TShark:
 
@@ -145,44 +167,169 @@ In the development venv, run the transport checks with the Pi's TShark:
 .venv/bin/python -m pytest -q tests/test_core_stream.py
 ```
 
-## Iterative migration
+## Optional Core development
+
+These stages describe retained optional-backend work. They do not schedule a
+default migration or block completion of the direct-backend Trixie release.
 
 1. **Evaluation/device inventory:** run the metadata probe and decoder transport
    checks; confirm the installed Core contract and namespace/frequency behavior.
 2. **Controlled owner prototype:** add an explicit Core backend for one fixed,
    unfiltered `wlanpiN` stream. Reuse the current analyzer and renderers. Test
    tuning failure, orderly stop/disconnect, cleanup, logging, and actual-channel
-   verification before making it the FPMS default.
+   verification for the optional backend.
 3. **Parity and upstream gaps:** resolve radio preparation/restoration ownership,
    width/center limitations, mapping gaps, buffering/drop diagnostics, and the
    app venv dependency/credential lifecycle. Compare live/raw metrics on the Pi.
 4. **Compatible subscription:** add opt-in subscription with verified source,
    namespace, fixed tuning, and empty filter; reject incompatible sessions and
    preserve the owner's state on exit.
-5. **Default migration:** select Core for supported configurations once the
-   acceptance checks pass. Keep any direct fallback explicit so its independent
-   radio ownership and limitations remain visible.
+5. **Reassess only when justified:** consider a default change for a concrete
+   sharing/integration requirement or improved upstream radio lifecycle support.
+   That requires a separate decision and device acceptance; passing the above
+   checks alone keeps direct capture as the default. Core errors must not silently
+   start direct capture.
 
-FPMS still uses direct capture while the Core-owner prototype is tested. The
+FPMS defaults to direct capture; Core is now an explicit persistent opt-in. The
 user reported testing item 8 changes; final publication checks remain in the
 release checklist.
+
+### Remaining optional-backend work
+
+The owner prototype already delegates tuning and packet capture to Core and
+feeds one PCAPNG stream to the existing decoder/analyzer. The remaining work
+does not require replacing the analysis engine or redesigning the menu, and is
+separate from direct-backend release acceptance.
+
+1. **Client packaging: implemented, device deployment pending.** The app's
+   `core` extra pins websockets 15.0.1, matching Core 2.4.8's dependency. The
+   installer installs runtime wheels in the app venv before replacing app
+   files, verifies importability in isolated Python, and supports offline wheels.
+   Dependency failures leave the previous app files in place. Core's Python
+   interpreter is no longer needed for installed CLI or FPMS Core capture.
+   Certificate, missing dependency, endpoint and decoder errors are surfaced
+   without credential output.
+2. **Integrate installed CLI and FPMS launches.** Add an explicit opt-in Core
+   setting to the existing FPMS launcher and test the installed app interpreter.
+   The setting is implemented via `--fpms-backend core` on the installer, saved
+   in `/etc/wlanpi-beacon-live/fpms.json`; reinstallation without a backend flag
+   preserves it. Its update participates in FPMS patch/restart rollback. The
+   service's `WLANPI_UTILIZATION_CAPTURE_BACKEND` override takes precedence.
+   Exercise Display, Display + Log, background logging, navigation, rotation,
+   menu exit and service shutdown. Preserve one analyzer/history throughout.
+   Keep Core opt-in after device acceptance. Report Core errors instead of
+   silently starting direct capture. Where it simplifies platform integration,
+   extend the current authenticated layout read to actual-channel verification:
+   `/api/v1/network/config/status` already includes each monitor's raw `channel`
+   string with frequency, width and centers. Validate that data and namespace
+   against the request, avoiding an extra local `iw` read where complete.
+3. **Define the supported channel contract.** The pilot supports verified
+   20/80 MHz captures on existing `wlanpiN` monitors. Resolve or explicitly
+   exclude known 80 MHz mappings that Core 2.4.8 cannot represent. Add 40/160
+   only after center/direction handling is verified; 80+80/320 and puncturing
+   need Core API work for parity. Do not advertise unsupported configurations
+   as full coverage or silently use direct tuning to bypass the API.
+4. **Complete device and failure acceptance.** Test 5/6 GHz 80 MHz, including
+   restore to a different original channel; repeated launches; startup/tuning
+   failure; busy-radio conflicts; SIGTERM/FPMS exit; Core restart/disconnect;
+   decoder failure/backpressure and adapter removal. Confirm local survey CU
+   remains correctly scoped. Compare completed interior retry/QBSS intervals
+   with the same saved packets and check raw/log byte/frame accounting.
+   Define what recovery is possible after abrupt termination; the current
+   parent cannot restore local radio state after it is forcibly killed.
+5. **Document optional support after acceptance.** Record the tested Core/API
+   version, widths, lifecycle behavior and limitations. Direct remains the
+   normal CLI/FPMS backend; a future default change requires the separate
+   reassessment described above.
+
+**Sharing is a future feature and the strongest potential reason to expand
+Core integration.** Add opt-in subscription only to a verified single-source, fixed,
+unfiltered matching session. Subscribers detach on exit, do not prepare/restore
+the radio, and do not stop the existing owner. This needs its own tests for
+configuration changes, owner exit and slow-consumer detachment.
+
+**Core packet capture and zero local radio access are different scopes.** The
+shipped capture API has no whole-phy lease, saved-state restoration transaction,
+or survey-counter API. Core's existing
+[layout/status implementation](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/utils/network_config.py)
+and [response schema](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/wlanpi_core/schemas/network/config_status.py)
+can replace discovery and monitor-channel reads, subject to validated field
+coverage. Its `wlan-link` endpoint describes managed associations/MLO links;
+it is not a monitor-capture state contract.
+
+Keep local radio reservation, preparation/restoration and survey handling around
+the Core owner until those services exist upstream. Removing every local radio
+operation needs a Core whole-phy reservation and temporary preparation/restore
+transaction, adequate administrative-state/identity readback, survey counters
+and recovery handling. Moving packet capture alone does not supply them.
+
+### Test the installed Core path
+
+Exit active Utilization captures before reinstalling. Run:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-backend core
+sudo cat /etc/wlanpi-beacon-live/fpms.json
+/opt/wlanpi-beacon-live/bin/python -I -c \
+  'import websockets; print(websockets.__version__, websockets.__file__)'
+```
+
+Expect version 15.0.1 from `/opt/wlanpi-beacon-live/lib/python3.13/site-packages`.
+The source-copy installer still avoids package builds and system Python changes;
+its new runtime wheel installation requires an index connection unless
+`--wheel-dir DIRECTORY` is supplied with wheels matching the Pi's architecture.
+
+First confirm the installed CLI, independently of the FPMS backend setting:
+
+```bash
+sudo wlanpi-beacon-live --capture-backend core --iface wlanpi0 \
+  --band 2.4 --channel 1 --channel-width 20 \
+  --log --log-dir /tmp/utilization-core-installed \
+  --raw-pcapng /tmp/utilization-core-installed/channel1.pcapng \
+  --core-diagnostics /tmp/utilization-core-installed/core-diagnostics.json
+sudo cat /tmp/utilization-core-installed/core-diagnostics.json
+```
+
+Then test FPMS 2.4 GHz channel 1: Display, Display + Log, logging-only,
+navigation, Key 2 rotation, Key 3 snapshot and return to menu. Verify one Core
+session while running and no owned session after exit. Check the app selection:
+
+```bash
+sudo journalctl -u wlanpi-fpms --since "5 minutes ago" -n 150 --no-pager
+```
+
+Expect `Capture backend: core`. Core exit waits allow up to 90 seconds for
+bounded stop/restoration before forced termination; normal cleanup returns
+promptly. Service-stop/restart behavior still needs device acceptance.
+
+Standard CLI commands without `--capture-backend` still use direct capture.
+Changing the FPMS setting does not change that CLI default. To return FPMS to
+direct capture, reinstall with `--fpms-backend direct`. Invalid settings are
+rejected; Core failure never automatically launches direct capture. The debug
+bundle records `fpms_backend.json`, `core_client.txt` and the service's effective
+backend override. Host tests passed through a fresh copied app environment
+with its own 15.0.1 client, real spawned transport/decoder and shared analyzer;
+the installed FPMS path remains pending device testing.
 
 ## Controlled owner prototype on the Pi
 
 The October 13 device report confirms Core 2.4.8-1, working JWT/WebSocket
 authentication, tri-band frequencies on wlanpi0, and no active Core sessions.
-The next iteration owns a single fixed, unfiltered stream through Core.
-Host validation passes 603 regression tests; the optional transport module was
-also run separately with websockets 17.1, passing three loopback end-to-end cases
+The implemented owner backend uses a single fixed, unfiltered stream through Core.
+Host validation passes 624 regression tests; the optional transport module was
+also run from a fresh copied app venv with its own websockets 15.0.1 client,
+passing three loopback end-to-end cases
 with a real spawn worker/decoder, byte-for-byte raw preservation, and failed-tune
 cleanup, including live publication through the real shared analyzer worker.
+Worker startup re-imports the actual installed CLI entrypoint in that check;
+the installed launchers now guard their main call against recursive startup.
 Incremental stdin decoding and decoder signal isolation also pass with
 the official TShark 4.4.19 macOS build; broader device acceptance remains pending.
 The first owner test on wlanpi-bd2 verified 2412/20 tuning and an acknowledged
 stop with no remaining Core sessions, but reported zero decoded rows and zero
 normalized frames in the parent's last publication. The saved PCAPNG contained
 2,866 radiotap packets, and device offline decoding succeeded with both basic
-and production restricted-protocol settings. Core delivery is confirmed; live
+and production restricted-protocol settings. Core delivery is confirmed;
 the initial decoding/analysis handoff failed acceptance. The worker previously
 withheld progress when it had no usable metrics or beacons; progress now includes
 rejected rows, so a zero parent count no longer hides parser failures.
@@ -200,15 +347,23 @@ The subsequent 2.4 GHz channel 1 / 20 MHz device run passed: 328,160 bytes
 received and forwarded, 899 decoded rows normalized to 899 frames, zero
 malformed rows, no transport error, confirmed Core stop and verified radio
 restoration. `wlanpi0` remained up on its saved no-HT channel and the managed
-sibling retained its original down state. Broader acceptance still requires
-the other bands, repeat start/stop, startup failure, and saved-packet metric
-comparison described below.
+sibling retained its original down state. A later 5 GHz channel 40 / 20 MHz
+run also passed: 215,532 bytes received and forwarded, 518 rows normalized to
+518 frames, zero malformed rows, no transport error, and verified Core stop
+and restoration. The saved before/after frequency was 2412 MHz because cleanup
+returned the radio from the requested 5200 MHz capture to its prior no-HT
+channel. The capture sidecar records tuning during capture; the diagnostics
+before/after snapshots record the restoration baseline.
+
+The user also reports that SSID display normalization works on the device.
+Broader Core acceptance still requires bonded widths, 6 GHz, repeat start/stop,
+startup failure, and saved-packet metric comparison described below.
 
 Run from the updated repository using Core's Python environment. This is a
 source-checkout prototype; the production app environment remains isolated and
-FPMS continues to use its tested backend. No new packages need installation on
-the Pi because Core already has the WebSocket client dependency used by the
-successful metadata probe.
+FPMS uses whichever backend its configuration selects. This source-checkout
+wrapper can still use Core's existing client dependency; the installed path
+above is the next device acceptance target.
 
 1. Exit Utilization in FPMS and release the radio in any other capture tool.
    Record the current interface and sibling state:

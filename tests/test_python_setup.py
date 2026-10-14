@@ -3,6 +3,7 @@ import shlex
 import subprocess
 import sys
 import venv
+import json
 from pathlib import Path
 
 import pytest
@@ -167,6 +168,42 @@ def test_production_copy_rejects_inherited_system_packages(tmp_path, isolated_en
         install_app_venv._venv_site_packages()
 
 
+def test_core_client_install_stays_isolated_and_can_use_offline_wheels(tmp_path, isolated_env, monkeypatch):
+    monkeypatch.setattr(install_app_venv.sys, 'prefix', str(isolated_env))
+    monkeypatch.setattr(install_app_venv.site, 'getsitepackages',
+                        lambda: [str(isolated_env / 'lib/python3.13/site-packages')])
+    wheels = tmp_path / 'wheels'
+    wheels.mkdir()
+    commands = []
+    install_app_venv._install_core_client(ROOT, wheel_directory=wheels,
+        command_runner=lambda command, **kw: commands.append((command, kw)))
+    command, kwargs = commands[0]
+    assert command[:5] == [sys.executable, '-I', '-m', 'pip', '--isolated']
+    assert '--only-binary=:all:' in command and '--no-index' in command
+    assert command[command.index('--find-links') + 1] == str(wheels)
+    assert kwargs == {'check': True}
+
+
+def test_core_dependency_failure_preserves_the_existing_app(tmp_path, isolated_env):
+    site_packages = next(isolated_env.glob('lib/python*/site-packages'))
+    package = site_packages / 'beacon_live'
+    package.mkdir()
+    marker = package / 'previous.py'
+    marker.write_text('# previous working app\n')
+    result = subprocess.run([str(isolated_env / 'bin/python'), str(INSTALL),
+        '--source-root', str(ROOT), '--with-core', '--wheel-dir', str(tmp_path / 'missing')],
+        capture_output=True, text=True)
+    assert result.returncode != 0 and 'wheel directory not found' in result.stderr
+    assert marker.exists()
+
+
+def test_core_client_refuses_system_python_before_pip(monkeypatch, tmp_path):
+    monkeypatch.setattr(install_app_venv.sys, 'prefix', str(tmp_path))
+    monkeypatch.setattr(install_app_venv.sys, 'base_prefix', str(tmp_path))
+    with pytest.raises(SystemExit, match='system Python will not be modified'):
+        install_app_venv._install_core_client(ROOT, command_runner=lambda *a, **kw: pytest.fail('No pip'))
+
+
 def test_fresh_production_install_launchers_replay_and_repeat_install(tmp_path, isolated_env):
     variables = dict(os.environ, PYTHONPATH="", PYTHONNOUSERSITE="1")
     command = [str(isolated_env / "bin/python"), str(INSTALL), "--source-root", str(ROOT)]
@@ -178,6 +215,12 @@ def test_fresh_production_install_launchers_replay_and_repeat_install(tmp_path, 
             env=variables, capture_output=True, text=True,
         )
         assert help_result.returncode == 0, help_result.stderr
+        imported = subprocess.run([str(isolated_env / 'bin/python'), '-I', '-c',
+            "import runpy, sys; sys.argv=['capture', '--invalid-argument']; "
+            f"runpy.run_path({str(isolated_env / 'bin' / launcher)!r}, "
+            "run_name='__mp_main__'); print('spawn import safe')"],
+            cwd=tmp_path, env=variables, capture_output=True, text=True)
+        assert imported.returncode == 0 and 'spawn import safe' in imported.stdout, imported.stderr
     replay = subprocess.run(
         [str(isolated_env / "bin/beacon-live"), "replay", "--input", str(ROOT / "samples/tshark_qbss_sample.tsv")],
         cwd=tmp_path, env=variables, capture_output=True, text=True,

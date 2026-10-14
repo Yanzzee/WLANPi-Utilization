@@ -163,6 +163,23 @@ def test_layout_requires_unique_monitor_source():
         core.validate_core_layout({'root': {'wlanpi0': {'type':'managed'}}}, CaptureTarget('wlanpi0'))
 
 
+def test_missing_core_certificate_has_actionable_error(tmp_path):
+    spec = core.CoreRequest(CaptureTarget('wlanpi0'), ChannelDefinition(2412),
+                            ca_cert=tmp_path / 'missing.cert')
+    with pytest.raises(core.CoreCaptureError, match='Cannot load Core certificate'):
+        core._tls_context(spec)
+
+
+def test_closed_decoder_pipe_is_reported_as_decoder_failure():
+    read, write = os.pipe()
+    os.close(read)
+    try:
+        with pytest.raises(core.CoreCaptureError, match='decoder closed its input'):
+            asyncio.run(core._write_pipe(write, b'pcapng'))
+    finally:
+        os.close(write)
+
+
 def test_close_stops_transport_before_decoder_even_after_decoder_exit():
     calls = []
     process = core.CoreCaptureProcess.__new__(core.CoreCaptureProcess)

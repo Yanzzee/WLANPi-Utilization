@@ -62,6 +62,37 @@ in `/usr/local/bin` that run the existing executables in the isolated app
 environment; the installer does not copy the application into the system
 Python environment.
 
+It also installs the pinned Core WebSocket client (`websockets 15.0.1`) into
+the app environment. This downloads a runtime wheel on first installation;
+for an offline Pi, pass `--wheel-dir DIRECTORY` containing a compatible wheel.
+
+**Direct capture is the recommended default** for the standalone CLI and FPMS
+application. Core is an optional backend for remote integration and future
+compatible stream sharing; passing Core tests does not schedule a default
+change. The current Core backend is owner-only and still uses local radio safety
+and restoration. See [the backend decision](docs/core-capture-evaluation.md).
+To opt FPMS into Core capture:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-backend core
+```
+
+This saves `capture_backend` in `/etc/wlanpi-beacon-live/fpms.json`. Reinstalling
+without that option preserves the choice. Use `--fpms-backend direct` to switch
+FPMS back. A service environment override, `WLANPI_UTILIZATION_CAPTURE_BACKEND`,
+takes precedence over the file. Invalid settings fail instead of selecting
+direct capture. The standard CLI does not read this FPMS setting; select Core
+explicitly with `--capture-backend core`:
+
+```bash
+sudo wlanpi-beacon-live --capture-backend core --iface wlanpi0 \
+  --band 2.4 --channel 1 --channel-width 20
+```
+
+Core starts log `Capture backend: core` to stderr/the FPMS journal. The owner
+backend still requires an existing `wlanpiN` monitor and supports verified
+20/80 MHz configurations; see [Core acceptance](docs/core-capture-evaluation.md).
+
 Rerun the installer after updating this repository or upgrading FPMS. It
 safely refreshes its managed CLI launchers as well as the application and FPMS
 integration. It locates FPMS through its launcher's Python environment and

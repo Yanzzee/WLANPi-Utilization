@@ -1195,6 +1195,8 @@ def run_live(
     if capture_backend == "core":
         from beacon_live.core_capture import check_core_dependency
         check_core_dependency()
+        if _dashboard is None:
+            print("Capture backend: core", file=sys.stderr, flush=True)
     if interval_seconds <= 0:
         raise ValueError("interval_seconds must be greater than zero")
     if logging_only and stats_csv is None and beacons_jsonl is None:

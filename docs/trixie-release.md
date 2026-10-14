@@ -17,7 +17,8 @@ the earlier release; this branch does not preserve Bookworm compatibility.
   checks competing use, and restores saved interface state and known monitor
   tuning on normal exit and handled startup failures.
 - Python setup requires an isolated 3.13+ environment. Production remains under
-  `/opt/wlanpi-beacon-live`; no third-party Python runtime packages are needed.
+  `/opt/wlanpi-beacon-live`; the installer now supplies the pinned Core client
+  there, independently of Core's package-managed environment.
 - TShark field checks run before radio preparation. Optional metadata is
   negotiated. Width and survey parsing reject misleading declarations and
   invalid counter pairs.
@@ -46,6 +47,19 @@ October 13, 2026; fresh-image/reboot/reinstall coverage was not detailed in that
 report. The same report confirms Core 2.4.8-1, successful capture-WebSocket
 authentication, a populated tri-band wlanpi0 frequency list, and no sessions on
 wlanpi-bd2. An opt-in Core-owner prototype is now ready for device testing.
+
+Subsequent Core-owner runs passed on 2.4 GHz channel 1 / 20 MHz (899 decoded
+rows normalized to 899 frames) and 5 GHz channel 40 / 20 MHz (518 rows normalized
+to 518 frames), with zero malformed rows, no transport error, confirmed Core
+stop and verified radio restoration. Installed CLI/FPMS Core acceptance and
+broader band/width/failure coverage remain pending; these results do not prove
+complete frame delivery at every hardware configuration.
+
+**Backend decision accepted October 14, 2026:** direct capture remains the
+recommended default for the standalone CLI and FPMS application. Core stays
+optional for remote integration and future compatible sharing. Successful Core
+tests do not schedule a default change. Complete the direct-backend acceptance
+below before publishing; broader optional Core work is tracked separately.
 
 ## Final device acceptance
 
@@ -89,14 +103,18 @@ wlanpi-bd2. An opt-in Core-owner prototype is now ready for device testing.
 
 ## Known follow-ups
 
-- **SSID text:** normalization is implemented and awaits device testing. Valid
-  UTF-8 names are shared by displays/logs; hidden names retain their hidden
+- **SSID text:** normalization is implemented and readable names were confirmed
+  on the device. Valid UTF-8 names are shared by displays/logs; hidden names retain their hidden
   label, and non-text/control bytes use `hex:…`. Verify known names in FPMS,
-  CLI and logs after reinstallation.
-- **Core capture backend:** this release uses direct TShark capture with its own
-  per-radio guard. An explicit Core-owner CLI prototype is under
-  [active evaluation](core-capture-evaluation.md#controlled-owner-prototype-on-the-pi);
-  the guard is not a system-wide broker used by all tools.
+  CLI and logs after reinstallation, including hidden/Unicode/non-text cases
+  that were not detailed in the latest device report.
+- **Core capture backend:** direct remains the CLI and initial FPMS default.
+  Installed Core capture now has its own client dependency and an opt-in FPMS
+  setting (`--fpms-backend core`); installed-path acceptance is pending. Further
+  Core expansion is a separate optional follow-up, with no default migration
+  scheduled. Its current backend is owner-only and still needs local radio
+  safety/restoration; the guard is not a system-wide broker used by all tools.
+  See [the backend decision and optional acceptance](core-capture-evaluation.md).
 - **Driver coverage:** an iw-verified width does not prove complete frame
   delivery. Treat unsupported widths, missing survey counters, and incomplete
   frame delivery explicitly; see [capture validation](pi_testing.md#validate-bonded-capture-and-retry-metrics).
