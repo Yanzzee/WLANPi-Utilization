@@ -172,7 +172,7 @@ release checklist.
 The October 13 device report confirms Core 2.4.8-1, working JWT/WebSocket
 authentication, tri-band frequencies on wlanpi0, and no active Core sessions.
 The next iteration owns a single fixed, unfiltered stream through Core.
-Host validation passes 548 regression tests; the optional transport module was
+Host validation passes 565 regression tests; the optional transport module was
 also run separately with websockets 17.1, passing three loopback end-to-end cases
 with a real spawn worker/decoder, byte-for-byte raw preservation, and failed-tune
 cleanup, including live publication through the real shared analyzer worker.
@@ -186,6 +186,19 @@ and production restricted-protocol settings. Core delivery is confirmed; live
 decoding/analysis handoff has not passed acceptance. The worker previously
 withheld progress when it had no usable metrics or beacons; progress now includes
 rejected rows, so a zero parent count no longer hides parser failures.
+
+The next device run reported 1,502 decoded rows, all rejected by normalization,
+with Core stop and before/after radio restoration both verified. Saved-row
+inspection traced rejection to `radiotap.flags.badfcs=False`: this diagnostic
+FT_BOOLEAN field was incorrectly parsed as an integer. Multiple antenna signal
+values sent every row through that full parser path. It now uses boolean
+validation, accepting textual and numeric boolean representations. Regression
+tests cover beacon, data and control frames without counting antenna signals
+as additional frames. A synthetic three-antenna packet capture also passes with
+TShark 4.4.19, retaining all nine frames, beacon metrics and 3/4 retries = 75%.
+Retest the updated source on the device; normalized frame counts should increase
+and the shared display/logging path should receive metrics. The fix does not
+change capture filters, radio state handling, or retry eligibility rules.
 
 Run from the updated repository using Core's Python environment. This is a
 source-checkout prototype; the production app environment remains isolated and
@@ -241,7 +254,7 @@ successful metadata probe.
    verification after the terminal UI closes. Inspect the full report:
 
    ```bash
-   cat /tmp/utilization-core-24/core-diagnostics.json
+   sudo cat /tmp/utilization-core-24/core-diagnostics.json
    ```
 
    `restoration_verified: true` compares saved identity, interface mode and

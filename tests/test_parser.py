@@ -456,3 +456,43 @@ def test_live_parser_keeps_complete_beacon_parsing() -> None:
     assert records[0].is_beacon
     assert records[0].ssid == "Alpha"
     assert records[0].qbss_station_count == 7
+
+
+@pytest.mark.parametrize('bad_fcs', ['False', 'True', '0', '1', ''])
+@pytest.mark.parametrize('frame_type,subtype', [(0, 8), (2, 8), (1, 11)])
+def test_boolean_fcs_flag_with_multiple_antenna_signals_preserves_one_frame(
+    bad_fcs, frame_type, subtype,
+):
+    fields = TSHARK_FRAME_FIELD_NAMES + TSHARK_OPTIONAL_FRAME_FIELD_NAMES
+    values = {name: '' for name in fields}
+    values.update({
+        'frame.time_epoch': '1700000000.065781842',
+        'wlan.fc.type': str(frame_type), 'wlan.fc.subtype': str(subtype),
+        'wlan.fc.retry': 'False', 'wlan.bssid': '02:00:00:00:00:10',
+        'wlan.ta': '02:00:00:00:00:10', 'wlan.ra': '02:00:00:00:00:20',
+        'radiotap.dbm_antsignal': '-42|-48|-43', 'radiotap.flags.badfcs': bad_fcs,
+        'wlan_radio.frequency': '2412', 'radiotap.channel.freq': '2412',
+        'frame.cap_len': '438', 'frame.len': '438', 'wlan.seq': '1462', 'wlan.frag': '0',
+    })
+    if frame_type == 0:
+        values.update({'wlan.fixed.beacon': '100', 'wlan.qbss.cu': '14',
+            'wlan.qbss.scount': '2', 'wlan.qbss.adc': '29687',
+            'wlan.ht.info.primarychannel': '1', 'wlan.ht.info.secchanoffset': '0x00'})
+    row = '\t'.join(values[name] for name in fields)
+    for parse in (parse_tshark_capture_record, parse_tshark_live_record):
+        frames = parse(row, field_names=fields, band='2.4')
+        assert len(frames) == 1  # Antenna measurements are not extra MPDUs.
+        frame = frames[0]
+        assert frame.rssi_dbm == -42 and frame.frame_type == frame_type
+        assert frame.retry_flag is False and frame.retry_eligible == (frame_type == 2)
+        if frame.is_beacon:
+            assert frame.qbss_cu_raw == 14 and frame.qbss_station_count == 2
+            assert frame.channel_definition.primary_frequency_mhz == 2412
+
+
+def test_malformed_boolean_fcs_flag_is_rejected_in_full_parser():
+    fields = TSHARK_FRAME_FIELD_NAMES + ('radiotap.flags.badfcs',)
+    values = {name: '' for name in fields}
+    values.update({'frame.time_epoch': '1700000000.25', 'wlan.fc.type': '0',
+        'wlan.fc.subtype': '8', 'radiotap.flags.badfcs': 'garbage'})
+    assert not parse_tshark_live_record('\t'.join(values[name] for name in fields), field_names=fields)

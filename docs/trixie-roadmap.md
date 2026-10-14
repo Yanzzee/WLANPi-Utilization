@@ -189,11 +189,13 @@ Record the tested OS, package versions, adapter, and result with each item.
   probe and incremental decoder tests are ready for the Pi. The user confirmed
   Core 2.4.8-1 authentication, populated 2.4/5/6 GHz frequencies for wlanpi0,
   and no active sessions on wlanpi-bd2. An explicit Core-owner CLI prototype is
-  implemented for fixed 20/80 MHz capture; device acceptance is pending. It
-  started and stopped successfully in the first owner test; the saved file
-  contained 2,866 decodable packets, but no live metrics were published.
-  Byte/row diagnostics and saved before/after radio verification
-  are now available to locate that failure before advancing the migration. It
+  implemented for fixed 20/80 MHz capture. Device tests confirmed packet delivery,
+  tuning, Core stop and before/after radio restoration. Missing live metrics
+  were traced to a boolean FCS diagnostic parsed as an integer on multi-antenna
+  captures, causing all 1,502 decoded rows in the second test to be rejected. The
+  parser fix has unit and real TShark 4.4.19 packet regression coverage, and
+  device retesting is pending. Byte/row diagnostics and saved radio verification
+  remain available for acceptance testing. The prototype
   reuses the existing analyzer, requires verified tuning, and stops Core before
   guarded radio restoration. FPMS continues to use the direct backend. See
   [the evaluation and staged migration](core-capture-evaluation.md).

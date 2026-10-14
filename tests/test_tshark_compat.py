@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 
 import pytest
 
@@ -66,6 +67,39 @@ def test_real_tshark_decodes_packet_fixture(name, frequency, width, center, punc
     command[index:index + 6] = ['-r', str(ROOT / f'{name}.pcap')]
     result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
     check_records(result.stdout.splitlines(), fields, frequency, width, center, puncturing)
+
+
+def test_real_tshark_boolean_fcs_and_multiple_antennas(tmp_path):
+    tshark = os.environ.get('WLANPI_TEST_TSHARK') or shutil.which('tshark')
+    if not tshark:
+        pytest.skip('TShark unavailable; boolean/multi-antenna parser tests run separately')
+    # Original synthetic frames with three radiotap namespaces, each exposing
+    # an antenna signal. FLAGS is a boolean source, as on the device adapter.
+    radio = (struct.pack('<BBHIII', 0, 0, 28, 0xA000082A, 0xA0000820, 0x820)
+             + struct.pack('<BxHHbBbBbB', 0, 2412, 0x0040, -47, 0, -55, 1, -48, 2))
+    source = (ROOT / 'ht40.pcap').read_bytes()
+    capture = bytearray(source[:24])
+    offset = 24
+    while offset < len(source):
+        sec, usec, length, original_length = struct.unpack_from('<IIII', source, offset)
+        packet = source[offset + 16:offset + 16 + length]
+        radio_length = int.from_bytes(packet[2:4], 'little')
+        packet = radio + packet[radio_length:]
+        capture += struct.pack('<IIII', sec, usec, len(packet), original_length + len(radio) - radio_length)
+        capture += packet
+        offset += 16 + length
+    path = tmp_path / 'multi-antenna.pcap'
+    path.write_bytes(capture)
+    fields = live.select_tshark_frame_fields(live.available_tshark_fields(tshark=tshark))
+    command = live.build_tshark_stream_command(field_names=fields)
+    command[0] = tshark
+    command[command.index('-r') + 1] = str(path)
+    decoded = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
+    rows = decoded.stdout.splitlines()
+    values = [dict(zip(fields, row.split('\t'))) for row in rows]
+    assert all(row['radiotap.dbm_antsignal'] == '-47|-55|-48' for row in values)
+    assert all(row['radiotap.flags.badfcs'].lower() in {'false', '0'} for row in values)
+    check_records(rows, fields, 2412, '40', 2422, None)
 
 
 def test_optional_metadata_missing_does_not_disable_capture():

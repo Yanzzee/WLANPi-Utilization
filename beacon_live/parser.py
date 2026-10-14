@@ -542,6 +542,13 @@ def _parse_named_tshark_frame_fields(
     for name in TSHARK_OPTIONAL_FRAME_FIELD_NAMES:
         if name not in values:
             continue
+        if name == "radiotap.flags.badfcs":
+            # TShark emits this FT_BOOLEAN field as True/False. In particular,
+            # multi-antenna RSSI rows take this full parser path even for data
+            # and control frames; treating False as an integer rejected them.
+            if _parse_optional_bool(values[name]) is _MALFORMED:
+                return None
+            continue
         parsed = _parse_optional_int(values[name], minimum=0)
         if parsed is _MALFORMED:
             return None
