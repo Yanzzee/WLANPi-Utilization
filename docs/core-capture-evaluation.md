@@ -172,10 +172,20 @@ release checklist.
 The October 13 device report confirms Core 2.4.8-1, working JWT/WebSocket
 authentication, tri-band frequencies on wlanpi0, and no active Core sessions.
 The next iteration owns a single fixed, unfiltered stream through Core.
-Host validation passes 536 regression tests; the optional transport module was
-also run separately with websockets 17.1, passing two loopback end-to-end cases
+Host validation passes 548 regression tests; the optional transport module was
+also run separately with websockets 17.1, passing three loopback end-to-end cases
 with a real spawn worker/decoder, byte-for-byte raw preservation, and failed-tune
-cleanup. The live device owner path remains pending.
+cleanup, including live publication through the real shared analyzer worker.
+Incremental stdin decoding and decoder signal isolation also pass with
+the official TShark 4.4.19 macOS build; Linux/device acceptance remains pending.
+The first owner test on wlanpi-bd2 verified 2412/20 tuning and an acknowledged
+stop with no remaining Core sessions, but reported zero decoded rows and zero
+normalized frames in the parent's last publication. The saved PCAPNG contained
+2,866 radiotap packets, and device offline decoding succeeded with both basic
+and production restricted-protocol settings. Core delivery is confirmed; live
+decoding/analysis handoff has not passed acceptance. The worker previously
+withheld progress when it had no usable metrics or beacons; progress now includes
+rejected rows, so a zero parent count no longer hides parser failures.
 
 Run from the updated repository using Core's Python environment. This is a
 source-checkout prototype; the production app environment remains isolated and
@@ -200,7 +210,8 @@ successful metadata probe.
    sudo /opt/wlanpi-core/bin/python scripts/run_core_capture.py \
      --iface wlanpi0 --band 2.4 --channel 1 --channel-width 20 \
      --log --log-dir /tmp/utilization-core-24 \
-     --raw-pcapng /tmp/utilization-core-24/channel1.pcapng
+     --raw-pcapng /tmp/utilization-core-24/channel1.pcapng \
+     --core-diagnostics /tmp/utilization-core-24/core-diagnostics.json
    ```
 
    The wrapper selects `--capture-backend core`. It checks dependency, capability,
@@ -208,7 +219,10 @@ successful metadata probe.
    Core performs the tune and Dumpcap capture. Local TShark runs `-r -` as a
    decoder, and the existing analyzer supplies all metrics/history/renderers.
    JWT and socket state stay in a separate spawn worker, avoiding inheritance
-   by the analysis worker.
+   by the analysis worker. The wrapper now saves a radio baseline automatically
+   before preparation, updates transport/analyzer counters while running, and
+   writes a readback comparison after radio cleanup. Without an explicit path,
+   it uses `/tmp/wlanpi-utilization-core-PID.json` and prints its location on exit.
 3. While it runs, check Core's registry from a second terminal:
 
    ```bash
@@ -223,6 +237,19 @@ successful metadata probe.
    known monitor tuning must be restored. The radio guard rechecks ownership
    before restoring; if a new tool took the radio or Core did not release it,
    restoration must fail explicitly rather than retuning that owner's capture.
+   The wrapper prints byte/row/frame counts, stop acknowledgement, and radio
+   verification after the terminal UI closes. Inspect the full report:
+
+   ```bash
+   cat /tmp/utilization-core-24/core-diagnostics.json
+   ```
+
+   `restoration_verified: true` compares saved identity, interface mode and
+   administrative UP flags for all siblings, and known monitor frequency,
+   width, centers and no-HT state. It does not infer a previous channel when the
+   baseline had none. An empty Core registry proves that no registered capture
+   remains; it does not prove restoration by itself. An existing `wlanpi0`
+   monitor interface should remain a monitor interface after cleanup.
 5. Preserve the raw PCAPNG, CSV, JSONL, and `.pcapng.json` sidecar. The sidecar
    must show `capture_backend: core`, `core_role: owner`, a session ID,
    `core_stop_confirmed: true`, verified actual tuning, and no transport error.
@@ -252,3 +279,34 @@ pipe writes, and reports unexpected end/tune failure rather than continuing on
 an unverified channel. Whole-phy preparation/restoration is still a local
 transaction around Core's interface-level ownership, so the cross-tool race
 described above remains a limitation until the platform offers a radio lease.
+
+### Diagnosing an empty display
+
+Use the same report from a second terminal while capture runs. `received_bytes`
+counts WebSocket binary bytes (including PCAPNG headers, not just packets);
+`forwarded_bytes` counts completed writes to the decoder. `decoded_records` and
+`normalized_frames` come from the existing shared analysis path. Counts in the
+report describe the latest publication observed by the parent; the final
+buffered tail can differ from an offline file count. No additional live reader
+or capture is created.
+
+After stopping, inspect the preserved stream without using the radio:
+
+```bash
+ls -lh /tmp/utilization-core-24/channel1.pcapng
+capinfos -c -E /tmp/utilization-core-24/channel1.pcapng
+tshark -r /tmp/utilization-core-24/channel1.pcapng -Y wlan \
+  -T fields -e frame.number -e wlan.fc.type -e wlan.fc.subtype | head -n 10
+sudo journalctl -u wlanpi-core --since "15 minutes ago" -n 100 --no-pager
+```
+
+Zero received bytes points to the Core/Dumpcap delivery path. Nonzero bytes
+alone may contain only headers, so check the completed file's packet count.
+Packets with no `wlan` rows require checking encapsulation/decoding. Offline
+WLAN rows with zero live rows narrow the issue to the stream decoder or its
+analysis handoff. Missing QBSS fields do not imply that no packets were captured.
+Rejected rows now publish progress even without usable metrics, without
+finalizing any retry bucket on a wall-clock deadline.
+The local decoder now runs in its own process session so foreground Ctrl-C
+reaches the parent, which stops Core before closing the decoder and restoring
+the radio. Transport status is drained even when no decoded rows arrive.

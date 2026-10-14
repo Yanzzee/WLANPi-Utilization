@@ -190,6 +190,10 @@ Record the tested OS, package versions, adapter, and result with each item.
   Core 2.4.8-1 authentication, populated 2.4/5/6 GHz frequencies for wlanpi0,
   and no active sessions on wlanpi-bd2. An explicit Core-owner CLI prototype is
   implemented for fixed 20/80 MHz capture; device acceptance is pending. It
+  started and stopped successfully in the first owner test; the saved file
+  contained 2,866 decodable packets, but no live metrics were published.
+  Byte/row diagnostics and saved before/after radio verification
+  are now available to locate that failure before advancing the migration. It
   reuses the existing analyzer, requires verified tuning, and stops Core before
   guarded radio restoration. FPMS continues to use the direct backend. See
   [the evaluation and staged migration](core-capture-evaluation.md).

@@ -62,3 +62,24 @@ def test_incremental_pcapng_stdin_decodes_before_stream_closes(name, width, freq
     assert frames[0].channel_definition.primary_frequency_mhz == frequency
     audit = next(r for r in analyze_retry_frames(frames) if r.scope == 'channel')
     assert audit.retry_eligible_frame_count == 4 and audit.retry_frame_count == 3
+
+
+def test_core_decoder_has_its_own_session_for_orderly_foreground_interrupt(monkeypatch):
+    from beacon_live import live, core_capture
+    from beacon_live.capture_target import CaptureTarget
+    from beacon_live.channel import ChannelDefinition
+    tshark = os.environ.get('WLANPI_TEST_TSHARK') or shutil.which('tshark')
+    if not tshark:
+        pytest.skip('TShark is required for decoder signal isolation')
+    fields = select_tshark_frame_fields(available_tshark_fields(tshark=tshark))
+    command = build_tshark_stream_command(field_names=fields)
+    command[0] = tshark
+    monkeypatch.setattr(live, 'build_tshark_stream_command', lambda **kwargs: command)
+    monkeypatch.setattr(core_capture, 'CoreCaptureProcess', lambda decoder, request: decoder)
+    decoder = live.start_core_capture_process(CaptureTarget('wlanpi0'), ChannelDefinition(2412), field_names=fields)
+    try:
+        assert os.getsid(decoder.pid) == decoder.pid
+        assert os.getsid(decoder.pid) != os.getsid(0)
+    finally:
+        decoder.kill()
+        decoder.communicate(timeout=5)

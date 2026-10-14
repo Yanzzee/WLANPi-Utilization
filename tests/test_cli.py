@@ -28,6 +28,14 @@ def test_live_passes_auto_discovery_namespace_constraint(monkeypatch: pytest.Mon
     assert calls[0]["netns"] == "lab"
 
 
+def test_live_passes_core_diagnostics_path(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr('beacon_live.cli.run_live', lambda **kwargs: (calls.append(kwargs) or 0))
+    path = tmp_path / 'core.json'
+    assert main(['live', '--capture-backend', 'core', '--core-diagnostics', str(path)]) == 0
+    assert calls[0]['core_diagnostics_path'] == path
+
+
 def test_replay_accepts_pi_smoke_files_and_prints_summary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

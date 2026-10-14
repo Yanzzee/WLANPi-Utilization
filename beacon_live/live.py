@@ -660,7 +660,7 @@ def start_core_capture_process(target, definition, *, field_names, raw_capture_p
     command = build_tshark_stream_command(field_names=field_names)
     try:
         decoder = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, bufsize=0)
+                                   stderr=subprocess.PIPE, bufsize=0, start_new_session=True)
     except OSError as exc:
         raise LiveCommandError(command=command, stderr=str(exc)) from exc
     try:
@@ -820,7 +820,10 @@ def _live_aggregation_worker(
                             )
                 if completed_batch:
                     send(completed_batch)
-                elif pending_beacons and time.monotonic() - last_send >= 0.25:
+                elif capture_record_count and time.monotonic() - last_send >= 0.25:
+                    # Publish decoder/parser progress even if every row was
+                    # rejected or no beacon was heard. This does not finalize
+                    # any retry bucket on a wall-clock deadline.
                     send([])
         finally:
             selector.close()
@@ -1161,6 +1164,7 @@ def run_live(
     iface: str = "auto",
     netns: Optional[str] = None,
     capture_backend: str = "direct",
+    core_diagnostics_path: Optional[Path] = None,
     channel: str = "36",
     frequency_mhz: Optional[int] = None,
     band: Optional[str] = None,
@@ -1185,6 +1189,8 @@ def run_live(
 ) -> int:
     if capture_backend not in {"direct", "core"}:
         raise ValueError("capture_backend must be direct or core")
+    if core_diagnostics_path is not None and capture_backend != "core":
+        raise ValueError("Core diagnostics requires the Core backend")
     if capture_backend == "core":
         from beacon_live.core_capture import check_core_dependency
         check_core_dependency()
@@ -1216,6 +1222,7 @@ def run_live(
                 iface=iface,
                 netns=netns,
                 capture_backend=capture_backend,
+                core_diagnostics_path=core_diagnostics_path,
                 channel=channel,
                 frequency_mhz=frequency_mhz,
                 band=band,
@@ -1311,12 +1318,15 @@ def run_live(
         if netns is not None:
             print(f"Capture interface: {target.label}", file=sys.stderr, flush=True)
     hardware_iface = target if netns is not None else iface
+    from beacon_live.core_diagnostics import CoreDiagnostics
     with (
+        CoreDiagnostics(core_diagnostics_path) as core_diagnostics,
         RadioSession(target, tune_builder=build_definition_tune_command,
                      require_idle_before_restore=capture_backend == "core") as radio,
         ExitStack() as aggregation_resources,
         ExitStack() as capture_resources,
     ):
+        core_diagnostics.bind_radio(radio)
         capabilities = _read_radio_capabilities_safely(hardware_iface)
         if capabilities.source_complete and not capabilities.supports_monitor:
             raise ValueError(f"Capture interface {target.label} does not support monitor mode")
@@ -1367,12 +1377,14 @@ def run_live(
                 raw_capture_path=raw_capture_path,
             )
             capture_resources.callback(process.close)
+            core_diagnostics.update(process, force=True)
             # Authenticate and compare Core's source inventory before pausing
             # siblings. Core still does not expose an atomic whole-phy lease.
             process.wait_phase("ready")
             radio.prepare()
             run_checked_command(target.command(["ip", "link", "set", iface, "up"]))
             process.start_capture()
+            core_diagnostics.update(process, force=True)
         else:
             radio.prepare()
             try:
@@ -2029,6 +2041,13 @@ def run_live(
                     continue
 
                 current = time.monotonic()
+                if capture_backend == "core":
+                    process.poll()  # Drain transport status even when no decoder rows arrive.
+                    core_diagnostics.update(process, records=capture_record_count,
+                        frames=normalized_frame_count, malformed=malformed_capture_record_count)
+                    if process.capture_error:
+                        raise LiveCommandError(build_tshark_stream_command(field_names=tshark_fields),
+                                               stderr=process.capture_error)
                 if current >= next_display_refresh:
                     # Paint on one hard wall-clock cadence. Capture publications
                     # only update shared state and logs; they never trigger a
@@ -2208,6 +2227,9 @@ def run_live(
                 logging_service.stop()
             selector.close()
             capture_resources.close()
+            if capture_backend == "core":
+                core_diagnostics.update(process, records=capture_record_count,
+                    frames=normalized_frame_count, malformed=malformed_capture_record_count, force=True)
             aggregation_resources.close()
             if stderr_collector is not None:
                 tshark_stderr_text = stderr_collector.finish()

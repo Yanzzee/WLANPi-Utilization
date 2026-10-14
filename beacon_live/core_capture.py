@@ -292,6 +292,12 @@ def _transport_worker(connection, descriptor, request: CoreRequest, parent_pid: 
     fd = descriptor.detach()
     os.set_blocking(fd, False)
     raw = None
+    received = forwarded = chunks = 0
+    last_progress = 0.0
+
+    def progress():
+        connection.send({'phase': 'progress', 'received_bytes': received,
+                         'forwarded_bytes': forwarded, 'chunks': chunks})
 
     async def worker():
         import websockets
@@ -312,9 +318,18 @@ def _transport_worker(connection, descriptor, request: CoreRequest, parent_pid: 
             async def layout_reader():
                 return await asyncio.to_thread(_get_layout, request, token, context)
             async def write(chunk):
+                nonlocal received, forwarded, chunks, last_progress
+                received += len(chunk)
+                chunks += 1
                 if raw is not None:
                     raw.write(chunk)
                 await _write_pipe(fd, chunk)
+                forwarded += len(chunk)
+                if time.monotonic() - last_progress >= 1:
+                    if raw is not None:
+                        raw.flush()
+                    progress()
+                    last_progress = time.monotonic()
             await run_owner(ws, token, request, layout_reader=layout_reader,
                             send_status=connection.send, next_control=next_control, write_bytes=write)
     try:
@@ -328,6 +343,10 @@ def _transport_worker(connection, descriptor, request: CoreRequest, parent_pid: 
         except (OSError, EOFError):
             pass
     finally:
+        try:
+            progress()
+        except (OSError, EOFError):
+            pass
         if raw is not None:
             raw.close()
         os.close(fd)
@@ -345,6 +364,7 @@ class CoreCaptureProcess:
         self.stop_confirmed = False
         self.attempted = False
         self.closed = False
+        self.received_bytes = self.forwarded_bytes = self.chunks = 0
         self.events: list[dict] = []
         context = multiprocessing.get_context('spawn')
         self.connection, child = context.Pipe()
@@ -366,6 +386,10 @@ class CoreCaptureProcess:
                 elif event['phase'] == 'stopped':
                     self.stop_confirmed = event['confirmed']
                     self.attempted = event['attempted']
+                elif event['phase'] == 'progress':
+                    self.received_bytes = event['received_bytes']
+                    self.forwarded_bytes = event['forwarded_bytes']
+                    self.chunks = event['chunks']
                 else:
                     self.events.append(event)
         except (EOFError, OSError):

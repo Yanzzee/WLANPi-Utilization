@@ -22,6 +22,7 @@ def prepared(monkeypatch):
     events = []
     class Radio:
         original_mode = 'monitor'
+        states = ()
         def __enter__(self): return self
         def prepare(self): events.append('prepare')
         def __exit__(self, *args): events.append('restore')
@@ -37,6 +38,8 @@ def prepared(monkeypatch):
         capture_error = ''
         session_id = 'cap_test'
         stop_confirmed = False
+        received_bytes = forwarded_bytes = 1024
+        chunks = 3
         def wait_phase(self, phase): events.append(phase)
         def start_capture(self): events.append('core-start')
         def close(self):
@@ -102,3 +105,13 @@ def test_stream_command_retains_decoder_preferences_without_capture_arguments():
     assert command[command.index('-r') + 1] == '-'
     assert '-l' in command and command[command.index('-Y') + 1] == 'wlan'
     assert 'wlan.defragment:FALSE' in command and 'wlan.enable_decryption:FALSE' in command
+
+
+def test_core_diagnostics_uses_counts_from_the_shared_analysis_path(prepared, tmp_path):
+    path = tmp_path / 'core.json'
+    assert live.run_live(capture_backend='core', core_diagnostics_path=path,
+                         band='2.4', channel='1', interval_seconds=.1) == 0
+    report = json.loads(path.read_text())
+    assert report['decoded_records'] > 0 and report['normalized_frames'] > 0
+    assert report['core_stop_confirmed'] and report['received_bytes'] == 1024
+    assert report['restoration_verified'] is False  # Fake radio supplied no baseline.

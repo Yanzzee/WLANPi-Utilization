@@ -133,6 +133,8 @@ def _run_live_command(
             live_options["netns"] = args.netns
         if args.capture_backend != "direct":
             live_options["capture_backend"] = args.capture_backend
+        if args.core_diagnostics is not None:
+            live_options["core_diagnostics_path"] = args.core_diagnostics
         if args.channel_width != "auto":
             live_options["channel_width"] = parse_channel_width(args.channel_width)
         if args.center_frequency1_mhz is not None:
@@ -274,6 +276,10 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--capture-backend", choices=("direct", "core"), default="direct",
         help="Capture provider. Core is an explicit owner prototype; default: direct.",
+    )
+    parser.add_argument(
+        "--core-diagnostics", type=Path,
+        help="Core prototype: JSON transport counters and before/after radio verification.",
     )
     parser.add_argument(
         "--iface",
