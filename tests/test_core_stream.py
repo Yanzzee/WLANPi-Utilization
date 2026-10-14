@@ -55,9 +55,10 @@ def test_incremental_pcapng_stdin_decodes_before_stream_closes(name, width, freq
             process.kill()
             process.wait(timeout=5)
     rows = [first] + remaining.decode().splitlines()
-    frames = tuple(frame for row in rows for frame in parse_tshark_live_record(row, field_names=fields))
+    frames = tuple(frame for row in rows for frame in parse_tshark_live_record(row, field_names=fields, ssid_encoding='hex'))
     assert len(frames) == 9
     assert frames[0].rssi_dbm == -47 and frames[0].qbss_cu_raw == 128
+    assert frames[0].ssid == 'Trixie-Test'
     assert frames[0].channel_definition.width.value == width
     assert frames[0].channel_definition.primary_frequency_mhz == frequency
     audit = next(r for r in analyze_retry_frames(frames) if r.scope == 'channel')

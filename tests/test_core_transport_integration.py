@@ -95,14 +95,16 @@ def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, 
                         assert await asyncio.to_thread(receiver.poll, 10), 'Shared analyzer published no live frames'
                         message = receiver.recv()
                         assert message.capture_record_count > 0 and message.normalized_frame_count > 0
+                        assert message.beacons and message.beacons[0].ssid == 'Trixie-Test'
                     else:
                         rows = []
                         for _ in range(9):
                             row = await asyncio.wait_for(asyncio.to_thread(decoder.stdout.readline), 10)
                             assert row
                             rows.append(row.decode())
-                        frames = tuple(f for row in rows for f in parse_tshark_live_record(row, field_names=fields))
+                        frames = tuple(f for row in rows for f in parse_tshark_live_record(row, field_names=fields, ssid_encoding='hex'))
                         assert len(frames) == 9 and frames[0].qbss_cu_raw == 128
+                        assert frames[0].ssid == 'Trixie-Test'
                         assert frames[0].channel_definition.width is ChannelWidth.MHZ80
                     await asyncio.wait_for(streamed.wait(), 10)
             finally:

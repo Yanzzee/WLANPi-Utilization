@@ -22,11 +22,12 @@ CASES = [('ht40', 2412, '40', 2422, None), ('vht160', 5180, '160', 5250, None),
 
 
 def check_records(rows, fields, frequency, width, center, puncturing):
-    frames = tuple(f for row in rows for f in parse_tshark_capture_record(row, field_names=fields))
-    fast = tuple(f for row in rows for f in parse_tshark_live_record(row, field_names=fields))
+    frames = tuple(f for row in rows for f in parse_tshark_capture_record(row, field_names=fields, ssid_encoding='hex'))
+    fast = tuple(f for row in rows for f in parse_tshark_live_record(row, field_names=fields, ssid_encoding='hex'))
     assert len(frames) == len(fast) == 9
     beacon = frames[0]
     assert beacon.is_beacon and beacon.rssi_dbm == -47
+    assert beacon.ssid == fast[0].ssid == 'Trixie-Test'
     assert beacon.qbss_cu_raw == 128
     assert beacon.qbss_cu_percent == pytest.approx(128 / 255 * 100)
     assert beacon.qbss_station_count == 12 and beacon.qbss_admission_capacity == 42

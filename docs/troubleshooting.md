@@ -522,9 +522,17 @@ Field inspection now stops before radio discovery/preparation if TShark cannot
 be queried, times out, or lacks a required field. The journal or CLI error
 names the problem. Missing optional AP metadata is omitted safely.
 
-TShark 4.4.19 reports `wlan.ssid` as FT_BYTES and emits names as hex. This is a
-confirmed separate issue awaiting parser normalization; changing adapters or
-reinstalling FPMS does not fix it. Keep a known SSID/capture for that follow-up.
+TShark 4.4.19 exports `wlan.ssid` as hex bytes (see the
+[Wireshark field reference](https://www.wireshark.org/docs/dfref/w/wlan.html)).
+The parser now decodes UTF-8 names once for both displays and logs. The packet
+check verifies the synthetic `Trixie-Test` name as well as the metrics.
+If a known text name still appears encoded in FPMS, rerun the installer from
+the updated checkout and compare the installed code with the debug collector.
+
+Empty, missing and all-zero names use the hidden label. Non-text or control
+bytes intentionally use a lossless `hex:…` fallback. For replay TSVs containing
+already decoded names, use `--ssid-encoding text`; this preserves names that
+literally look like hex, such as `4142`.
 
 ## Collect a debug bundle
 

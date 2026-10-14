@@ -754,6 +754,7 @@ def _live_aggregation_worker(
                         line,
                         field_names=field_names,
                         band=band,
+                        ssid_encoding="hex",
                     )
                     if not frames:
                         malformed_capture_record_count += 1
@@ -1868,6 +1869,7 @@ def run_live(
                         line,
                         field_names=tshark_fields,
                         band=resolved_band,
+                        ssid_encoding="hex",
                     )
                     if not frames:
                         malformed_capture_record_count += 1

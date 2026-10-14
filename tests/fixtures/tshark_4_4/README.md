@@ -28,8 +28,8 @@ Each beacon advertises QBSS CU 128/255, station count 12, admission capacity
 | eht320 | 5955 | 320 | 6105 | bitmap 0x4 |
 
 TShark 4.4.19 emits `wlan.ssid` as FT_BYTES / `5472697869652d54657374`, which
-confirms the separate hex SSID issue. These fixtures intentionally preserve
-that output; SSID normalization remains a separate task.
+confirmed the hex SSID issue. These fixtures preserve the decoder's raw output;
+parser regression checks now require the readable `Trixie-Test` name.
 
 Saved TSV regression tests always run without TShark. Packet decode tests run
 when TShark is available; set `WLANPI_TEST_TSHARK` to select a specific binary.

@@ -172,18 +172,18 @@ release checklist.
 The October 13 device report confirms Core 2.4.8-1, working JWT/WebSocket
 authentication, tri-band frequencies on wlanpi0, and no active Core sessions.
 The next iteration owns a single fixed, unfiltered stream through Core.
-Host validation passes 565 regression tests; the optional transport module was
+Host validation passes 603 regression tests; the optional transport module was
 also run separately with websockets 17.1, passing three loopback end-to-end cases
 with a real spawn worker/decoder, byte-for-byte raw preservation, and failed-tune
 cleanup, including live publication through the real shared analyzer worker.
 Incremental stdin decoding and decoder signal isolation also pass with
-the official TShark 4.4.19 macOS build; Linux/device acceptance remains pending.
+the official TShark 4.4.19 macOS build; broader device acceptance remains pending.
 The first owner test on wlanpi-bd2 verified 2412/20 tuning and an acknowledged
 stop with no remaining Core sessions, but reported zero decoded rows and zero
 normalized frames in the parent's last publication. The saved PCAPNG contained
 2,866 radiotap packets, and device offline decoding succeeded with both basic
 and production restricted-protocol settings. Core delivery is confirmed; live
-decoding/analysis handoff has not passed acceptance. The worker previously
+the initial decoding/analysis handoff failed acceptance. The worker previously
 withheld progress when it had no usable metrics or beacons; progress now includes
 rejected rows, so a zero parent count no longer hides parser failures.
 
@@ -196,9 +196,13 @@ validation, accepting textual and numeric boolean representations. Regression
 tests cover beacon, data and control frames without counting antenna signals
 as additional frames. A synthetic three-antenna packet capture also passes with
 TShark 4.4.19, retaining all nine frames, beacon metrics and 3/4 retries = 75%.
-Retest the updated source on the device; normalized frame counts should increase
-and the shared display/logging path should receive metrics. The fix does not
-change capture filters, radio state handling, or retry eligibility rules.
+The subsequent 2.4 GHz channel 1 / 20 MHz device run passed: 328,160 bytes
+received and forwarded, 899 decoded rows normalized to 899 frames, zero
+malformed rows, no transport error, confirmed Core stop and verified radio
+restoration. `wlanpi0` remained up on its saved no-HT channel and the managed
+sibling retained its original down state. Broader acceptance still requires
+the other bands, repeat start/stop, startup failure, and saved-packet metric
+comparison described below.
 
 Run from the updated repository using Core's Python environment. This is a
 source-checkout prototype; the production app environment remains isolated and

@@ -8,6 +8,7 @@ from beacon_live.channel import definition_from_operation_fields
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
+from beacon_live.ssid import normalize_tshark_ssid
 
 TSHARK_FIELD_NAMES = (
     "frame.time_epoch",
@@ -122,7 +123,7 @@ PHASE_THREE_TSHARK_FRAME_FIELD_COUNT = 16
 LEGACY_TSHARK_FRAME_FIELD_COUNT = 12
 
 
-def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
+def parse_tshark_row(row: str, *, ssid_encoding: str = 'text') -> Optional[BeaconRecord]:
     """Parse one tab-separated TShark beacon row.
 
     Returns None when the row is malformed. Empty SSID and QBSS fields are
@@ -174,7 +175,7 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
 
     return BeaconRecord(
         timestamp=timestamp,
-        ssid=ssid_text if ssid_text != "" else None,
+        ssid=normalize_tshark_ssid(ssid_text, encoding=ssid_encoding),
         bssid=bssid,
         qbss_cu_raw=qbss_cu_raw,
         qbss_cu_percent=qbss_cu_percent,
@@ -184,10 +185,10 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
     )
 
 
-def parse_tshark_rows(rows: Iterable[str]) -> Iterator[BeaconRecord]:
+def parse_tshark_rows(rows: Iterable[str], *, ssid_encoding: str = 'text') -> Iterator[BeaconRecord]:
     """Yield valid beacon records from an iterable of TSV lines."""
     for row in rows:
-        record = parse_tshark_row(row)
+        record = parse_tshark_row(row, ssid_encoding=ssid_encoding)
         if record is not None:
             yield record
 
@@ -197,6 +198,7 @@ def parse_tshark_frame_row(
     *,
     field_names: Optional[tuple[str, ...]] = None,
     band: Optional[str] = None,
+    ssid_encoding: str = 'text',
 ) -> Optional[FrameRecord]:
     """Parse one lightweight all-frame TShark row for live analysis."""
     line = row.rstrip("\r\n")
@@ -209,7 +211,7 @@ def parse_tshark_frame_row(
         and tuple(field_names) != TSHARK_FRAME_FIELD_NAMES
         and len(fields) == len(field_names)
     ):
-        return _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        return _parse_named_tshark_frame_fields(fields, field_names, band=band, ssid_encoding=ssid_encoding)
     if len(fields) not in (
         LEGACY_TSHARK_FRAME_FIELD_COUNT,
         PHASE_THREE_TSHARK_FRAME_FIELD_COUNT,
@@ -358,7 +360,7 @@ def parse_tshark_frame_row(
     return FrameRecord(
         timestamp=timestamp,
         bssid=bssid,
-        ssid=ssid_text if ssid_text != "" else None,
+        ssid=normalize_tshark_ssid(ssid_text, encoding=ssid_encoding),
         rssi_dbm=rssi_dbm,
         frame_type=frame_type,
         frame_subtype=frame_subtype,
@@ -381,9 +383,9 @@ def parse_tshark_frame_row(
     )
 
 
-def parse_tshark_frame_rows(rows: Iterable[str]) -> Iterator[FrameRecord]:
+def parse_tshark_frame_rows(rows: Iterable[str], *, ssid_encoding: str = 'text') -> Iterator[FrameRecord]:
     for row in rows:
-        yield from parse_tshark_capture_record(row)
+        yield from parse_tshark_capture_record(row, ssid_encoding=ssid_encoding)
 
 
 def parse_tshark_capture_record(
@@ -391,6 +393,7 @@ def parse_tshark_capture_record(
     *,
     field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
     band: Optional[str] = None,
+    ssid_encoding: str = 'text',
 ) -> tuple[FrameRecord, ...]:
     """Expand every decoded WLAN MPDU occurrence in one capture record.
 
@@ -404,14 +407,14 @@ def parse_tshark_capture_record(
         return ()
     fields = line.split("\t")
     if len(fields) != len(field_names):
-        legacy = parse_tshark_frame_row(row)
+        legacy = parse_tshark_frame_row(row, ssid_encoding=ssid_encoding)
         return (legacy,) if legacy is not None else ()
 
     # The overwhelmingly common case is one decoded WLAN header. Avoid
     # splitting, rebuilding, and reparsing the row solely to discover that it
     # has one occurrence.
     if not any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
-        record = _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band, ssid_encoding=ssid_encoding)
         return (record,) if record is not None else ()
 
     split_fields = [value.split(TSHARK_MULTI_VALUE_SEPARATOR) for value in fields]
@@ -443,6 +446,7 @@ def parse_tshark_capture_record(
             expanded,
             field_names,
             band=band,
+            ssid_encoding=ssid_encoding,
         )
         if record is not None:
             records.append(record)
@@ -459,6 +463,7 @@ def parse_tshark_live_record(
     *,
     field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
     band: Optional[str] = None,
+    ssid_encoding: str = 'text',
 ) -> tuple[FrameRecord, ...]:
     """Parse the common non-beacon path without building field dictionaries.
 
@@ -475,12 +480,14 @@ def parse_tshark_live_record(
             row,
             field_names=field_names,
             band=band,
+            ssid_encoding=ssid_encoding,
         )
     if any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
         return parse_tshark_capture_record(
             row,
             field_names=field_names,
             band=band,
+            ssid_encoding=ssid_encoding,
         )
 
     indexes = _live_field_indexes(field_names)
@@ -498,7 +505,7 @@ def parse_tshark_live_record(
 
     # Beacon rows need QBSS, operation, vendor, and truncation fields.
     if frame_type == 0 and frame_subtype == 8:
-        record = _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band, ssid_encoding=ssid_encoding)
         return (record,) if record is not None else ()
 
     retry = _parse_optional_bool(value("wlan.fc.retry"))
@@ -531,10 +538,11 @@ def _parse_named_tshark_frame_fields(
     field_names: tuple[str, ...],
     *,
     band: Optional[str],
+    ssid_encoding: str,
 ) -> Optional[FrameRecord]:
     values = dict(zip(field_names, fields))
     core_row = "\t".join(values.get(name, "") for name in TSHARK_FRAME_FIELD_NAMES)
-    record = parse_tshark_frame_row(core_row)
+    record = parse_tshark_frame_row(core_row, ssid_encoding=ssid_encoding)
     if record is None or record.frame_type is None:
         return None
 

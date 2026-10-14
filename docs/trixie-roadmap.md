@@ -193,20 +193,25 @@ Record the tested OS, package versions, adapter, and result with each item.
   tuning, Core stop and before/after radio restoration. Missing live metrics
   were traced to a boolean FCS diagnostic parsed as an integer on multi-antenna
   captures, causing all 1,502 decoded rows in the second test to be rejected. The
-  parser fix has unit and real TShark 4.4.19 packet regression coverage, and
-  device retesting is pending. Byte/row diagnostics and saved radio verification
+  parser fix has unit and real TShark 4.4.19 packet regression coverage. Device
+  retesting passed on 2.4 GHz channel 1 at 20 MHz: 899 rows became 899 frames,
+  zero malformed rows, no transport error, and verified stop/restoration.
+  Other bands, repeated start/stop, startup failure and offline metric comparison
+  remain in Core acceptance. Byte/row diagnostics and saved radio verification
   remain available for acceptance testing. The prototype
   reuses the existing analyzer, requires verified tuning, and stops Core before
   guarded radio restoration. FPMS continues to use the direct backend. See
   [the evaluation and staged migration](core-capture-evaluation.md).
 
-- [ ] **SSID names display as hex.** Reported during on-device testing after
-  item 2. Investigate TShark SSID output and parser normalization separately
-  from front-panel controls, using a known SSID and a sanitized capture/output
-  sample. Verify readable names in the LCD, CLI, and logs; retain correct hidden
-  SSID and non-text byte handling. Item 7 confirmed that TShark 4.4.19 reports
-  `wlan.ssid` as FT_BYTES and emits the synthetic `Trixie-Test` name as hex.
-  Normalization is still deferred; no SSID fix is included in item 7.
+- [ ] **SSID text normalization: implemented, device testing pending.** TShark
+  exports `wlan.ssid` as FT_BYTES. Live capture and offline analysis now decode
+  valid UTF-8 once in the parser, so terminal, LCD, CSV and JSONL share the same
+  readable name. Empty, missing and all-zero names use the existing hidden
+  display; invalid UTF-8/control bytes retain a lossless `hex:…` label. Printable
+  spaces and literal hex-looking names are preserved. Replay accepts
+  `--ssid-encoding text` for already decoded inputs. Unit, shared-display/logging,
+  and real packet tests cover normalization; validate known names and hidden
+  SSIDs on the device before checking this item off.
 
 ## Architecture constraints
 

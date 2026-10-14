@@ -89,8 +89,10 @@ wlanpi-bd2. An opt-in Core-owner prototype is now ready for device testing.
 
 ## Known follow-ups
 
-- **SSID text:** TShark 4.4 emits `wlan.ssid` as hex bytes. Display normalization
-  remains a separate task, including hidden and non-text SSIDs.
+- **SSID text:** normalization is implemented and awaits device testing. Valid
+  UTF-8 names are shared by displays/logs; hidden names retain their hidden
+  label, and non-text/control bytes use `hex:…`. Verify known names in FPMS,
+  CLI and logs after reinstallation.
 - **Core capture backend:** this release uses direct TShark capture with its own
   per-radio guard. An explicit Core-owner CLI prototype is under
   [active evaluation](core-capture-evaluation.md#controlled-owner-prototype-on-the-pi);

@@ -90,7 +90,14 @@ After installation, check TShark decoding without opening a radio:
 For installation or capture failures, collect a diagnostic bundle from this
 checkout with `sudo ./scripts/pi_collect_debug.sh`. See the
 [Trixie release checks](docs/trixie-release.md) for tested behavior, remaining
-hardware validation, and known follow-ups, including hex SSID display.
+hardware validation, and known follow-ups.
+
+SSID bytes from TShark are decoded once before analysis. Printable UTF-8 names
+appear as text in the displays and logs; empty or hidden names use the existing
+hidden label. Non-text or control bytes retain a lossless `hex:…` representation.
+For replay TSVs that already contain decoded names, use `--ssid-encoding text`
+to preserve names that themselves look like hex. Raw TShark TSV replay defaults
+to `--ssid-encoding hex`.
 
 ## Use the FPMS front panel
 

@@ -41,12 +41,12 @@ def main():
             index = command.index('-i')
             command[index:index + 6] = ['-r', str(ROOT / 'tests' / 'fixtures' / 'tshark_4_4' / f'{name}.pcap')]
             decoded = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
-            frames = tuple(f for row in decoded.stdout.splitlines() for f in parse_tshark_live_record(row, field_names=fields))
+            frames = tuple(f for row in decoded.stdout.splitlines() for f in parse_tshark_live_record(row, field_names=fields, ssid_encoding='hex'))
             if len(frames) != 9:
                 raise ValueError(f'{name}: expected 9 decoded frames, received {len(frames)}')
             beacon = frames[0]
             definition = beacon.channel_definition
-            if (not beacon.is_beacon or beacon.rssi_dbm != -47 or beacon.qbss_cu_raw != 128
+            if (not beacon.is_beacon or beacon.ssid != 'Trixie-Test' or beacon.rssi_dbm != -47 or beacon.qbss_cu_raw != 128
                     or beacon.qbss_station_count != 12 or beacon.qbss_admission_capacity != 42
                     or definition is None or not definition.complete
                     or definition.primary_frequency_mhz != frequency or definition.width.value != width
@@ -55,7 +55,7 @@ def main():
             audit = next(r for r in analyze_retry_frames(frames) if r.scope == 'channel')
             if audit.retry_eligible_frame_count != 4 or audit.retry_frame_count != 3:
                 raise ValueError(f'{name}: expected 3 retries / 4 eligible frames')
-            print(f'{name}: OK (RSSI/QBSS/width, 3/4 retries = 75%)', flush=True)
+            print(f'{name}: OK (SSID/RSSI/QBSS/width, 3/4 retries = 75%)', flush=True)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f'TShark check failed: {exc}', file=sys.stderr)
         if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:

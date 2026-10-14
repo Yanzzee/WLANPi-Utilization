@@ -36,6 +36,16 @@ def test_live_passes_core_diagnostics_path(monkeypatch, tmp_path):
     assert calls[0]['core_diagnostics_path'] == path
 
 
+@pytest.mark.parametrize('encoding,expected', [('hex', 'AB'), ('text', '4142')])
+def test_replay_ssid_format_is_explicit(tmp_path, encoding, expected):
+    source = tmp_path / 'beacons.tsv'
+    source.write_text('1000.25\t4142\t02:00:00:00:00:10\t128\t2\t1000\t-42\n')
+    beacons = tmp_path / 'beacons.jsonl'
+    assert main(['replay', '--input', str(source), '--ssid-encoding', encoding,
+                 '--beacons-jsonl', str(beacons)]) == 0
+    assert json.loads(beacons.read_text())['ssid'] == expected
+
+
 def test_replay_accepts_pi_smoke_files_and_prints_summary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

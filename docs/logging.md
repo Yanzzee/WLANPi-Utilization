@@ -172,6 +172,12 @@ logging is active. Objects contain local time, run metadata, SSID/BSSID, QBSS
 values, RSSI, beacon interval, AP-name/vendor clues, and the other normalized
 beacon fields available to the parser.
 
+SSID values use the same normalization as the displays: UTF-8 names are stored
+as text, empty/missing/all-zero names are null in JSONL (empty in CSV), and
+non-text or control bytes use a lossless `hex:…` label. Saved PCAPNG data retains
+the original bytes. Replay defaults to TShark's hex-byte format; select
+`--ssid-encoding text` for TSVs with already decoded names.
+
 The logging worker writes small ordered batches and flushes once per batch
 (normally within 50 ms). Direct `CaptureLogWriter` callers still receive an
 immediate flush. Normal beacon objects do not include a `record_type` field;
