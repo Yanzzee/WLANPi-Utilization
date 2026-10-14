@@ -267,6 +267,38 @@ def test_logging_worker_write_error_preserves_low_disk_stop_behavior(
     assert service.active is False
 
 
+def test_full_logging_queue_samples_instead_of_blocking_capture(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    entered_write = threading.Event()
+    release_write = threading.Event()
+    original_write_beacon = CaptureLogWriter.write_beacon
+
+    def delayed_write(
+        writer: CaptureLogWriter,
+        record: BeaconRecord,
+    ) -> None:
+        entered_write.set()
+        release_write.wait(timeout=2.0)
+        original_write_beacon(writer, record)
+
+    monkeypatch.setattr(CaptureLogWriter, "write_beacon", delayed_write)
+    service = _logging_service(tmp_path, write_queue_capacity=1)
+    assert service.start()
+
+    service.write_beacon(_beacon(timestamp=1000.0))
+    assert entered_write.wait(timeout=1.0)
+    service.write_beacon(_beacon(timestamp=1001.0))
+    service.write_beacon(_beacon(timestamp=1002.0))
+
+    assert service.sampled_record_count == 1
+    assert service.maintain(now=0.0) is LoggingEvent.SAMPLED
+
+    release_write.set()
+    assert service.stop()
+
+
 def test_low_disk_stops_logging_and_writes_markers_to_both_formats(
     tmp_path: Path,
 ) -> None:

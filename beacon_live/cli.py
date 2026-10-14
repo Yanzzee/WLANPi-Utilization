@@ -53,6 +53,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             beacons_jsonl=args.beacons_jsonl,
             interface=args.interface,
             channel=args.channel,
+            ssid_encoding=args.ssid_encoding,
         )
 
     if args.command == "live":
@@ -129,6 +130,12 @@ def _run_live_command(
         )
         if args.lcd_frame is not None:
             live_options["lcd_frame"] = args.lcd_frame
+        if args.netns is not None:
+            live_options["netns"] = args.netns
+        if args.capture_backend != "direct":
+            live_options["capture_backend"] = args.capture_backend
+        if args.core_diagnostics is not None:
+            live_options["core_diagnostics_path"] = args.core_diagnostics
         if args.channel_width != "auto":
             live_options["channel_width"] = parse_channel_width(args.channel_width)
         if args.center_frequency1_mhz is not None:
@@ -185,6 +192,10 @@ def _build_parser() -> argparse.ArgumentParser:
         required=False,
         type=Path,
         help="Path to a TShark beacon TSV file from pi_smoke.sh.",
+    )
+    replay.add_argument(
+        "--ssid-encoding", choices=("hex", "text"), default="hex",
+        help="SSID format in the TSV: hex bytes from TShark (default), or already decoded text.",
     )
     replay.add_argument(
         "--survey-before",
@@ -268,9 +279,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--capture-backend", choices=("direct", "core"), default="direct",
+        help="Capture provider. Core is an explicit owner prototype; default: direct.",
+    )
+    parser.add_argument(
+        "--core-diagnostics", type=Path,
+        help="Core prototype: JSON transport counters and before/after radio verification.",
+    )
+    parser.add_argument(
         "--iface",
-        default="wlan0",
-        help="Wireless interface to use. Default: wlan0.",
+        default="auto",
+        help="Wireless interface or auto discovery. Default: auto.",
+    )
+    parser.add_argument(
+        "--netns",
+        help="Named network namespace; with --iface auto, restrict discovery to it.",
     )
     parser.add_argument(
         "--channel",
@@ -318,7 +341,7 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         "--raw-pcapng",
         type=Path,
         help=(
-            "Save full packets from the exact TShark process used by live "
+            "Save full packets from the same capture stream used by live "
             "analysis, plus a .json diagnostic sidecar."
         ),
     )
@@ -432,6 +455,7 @@ def _run_replay(
     beacons_jsonl: Optional[Path] = None,
     interface: str = "wlan0",
     channel: str = "36",
+    ssid_encoding: str = "hex",
 ) -> int:
     replay_frequency_mhz = _resolve_replay_frequency_mhz(channel)
     log_metadata = LogMetadata(
@@ -441,7 +465,7 @@ def _run_replay(
         band=frequency_to_band(replay_frequency_mhz),
     )
     local_cu_percent = _load_local_survey_cu_percent(survey_before, survey_after)
-    replay_data = _read_beacon_replay(beacons_tsv)
+    replay_data = _read_beacon_replay(beacons_tsv, ssid_encoding=ssid_encoding)
     local_cu_by_second = {
         int(record.timestamp): local_cu_percent
         for record in replay_data.records
@@ -570,7 +594,7 @@ class _BeaconReplayData:
         return last_timestamp - first_timestamp
 
 
-def _read_beacon_replay(beacons_tsv: Path) -> _BeaconReplayData:
+def _read_beacon_replay(beacons_tsv: Path, *, ssid_encoding: str = "text") -> _BeaconReplayData:
     records: list[BeaconRecord] = []
     total_rows = 0
     malformed_rows = 0
@@ -579,7 +603,7 @@ def _read_beacon_replay(beacons_tsv: Path) -> _BeaconReplayData:
     with beacons_tsv.open("r", encoding="utf-8") as input_file:
         for row in input_file:
             total_rows += 1
-            record = parse_tshark_row(row)
+            record = parse_tshark_row(row, ssid_encoding=ssid_encoding)
             if record is None:
                 malformed_rows += 1
                 continue

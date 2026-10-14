@@ -112,3 +112,12 @@ Features & changes
         why does it take several seconds to start showing the graphs?
         why is the display bursty at times instead of regular update cadence?
         how else can the code be more efficient?
+        October 14, 2026 device observation: direct display still lags a little
+        at high channel utilization; Core/API display appeared unaffected.
+        Compare the same adapter, channel/width and display/logging settings;
+        measure capture-to-display delay, decoded frame rate, CPU, buffering
+        and available drop evidence. Keep the single pipeline and retry timing
+        rules. This observation does not change the agreed direct default.
+37. DONE    normalize TShark hex SSIDs to readable strings where possible.
+        Readable SSIDs confirmed on the device; hidden/Unicode/non-text cases
+        remain final release coverage. See trixie-roadmap.md.

@@ -54,6 +54,61 @@ creates another analyzer or capture worker.
 
 ## Acquisition layer
 
+Live capture selects one interface before configuring the radio. Automatic
+discovery inspects root and named network namespaces, filters by monitor-mode
+and selected-frequency support, prefers existing monitor interfaces, and
+requires an explicit choice if several candidates remain. A `CaptureTarget`
+retains the interface and namespace for capability queries, tuning, channel
+verification, TShark, and survey reads. Named targets prefix hardware commands
+with `ip netns exec`; analysis and renderers still share the same pipeline.
+
+`RadioSession` locks the selected phy across Utilization instances and snapshots
+its interfaces before mutation. Preflight checks inspect packet sockets in the
+target namespace, connected managed interfaces, AP/other modes, and controller
+processes, including Core's supplicants. Idle administrative UP state alone is
+allowed. Existing external users cause a refusal before tuning. Idle sibling
+interfaces are paused for capture and restored afterward. Existing monitors
+retain their type and monitor flags; they are reused without creating or
+deleting interfaces. Saved identity (phy, wdev, ifindex, MAC) must still match
+before restoration modifies an interface.
+
+`lldpd` holds filtered Ethernet discovery sockets on managed interfaces and is
+not a radio capture owner. Only identified `lldpd` sockets bound to a managed
+interface are exempted; other/shared owners and unidentified sockets remain
+blockers. Monitor-interface and namespace-wide sockets receive no exemption.
+
+Capture and analysis children stop before radio restoration. Resource contexts
+also cover failed startup before the capture loop begins. Ctrl+C and SIGTERM
+use the same cleanup path; FPMS allows time for graceful cleanup. Restoration
+returns modes, administrative flags, and known monitor channel definitions,
+including non-HT 20 MHz and bonded tuning. It does not invent a channel when the
+original monitor had no reported channel. A managed interface must be idle and
+uncontrolled before borrowing; active Wi-Fi connections are never disconnected
+automatically. Namespace placement remains unchanged.
+
+The phy lock is advisory and currently shared only by Utilization. External
+tools can still start or retune after preflight; avoid starting another tool on
+that radio during capture. Core already exposes an authenticated capture
+WebSocket with one owner and read-only subscribers; the current direct backend
+does not participate in that session manager. Direct capture is the recommended
+default for the standalone CLI and FPMS application. Core integration remains
+optional; successful Core acceptance alone does not trigger a default change.
+An explicit `--capture-backend core` owner prototype now delegates one fixed,
+unfiltered capture to Core and decodes its PCAPNG through `tshark -r -` into
+this same analyzer. It verifies Core's source/namespace and actual tuning,
+keeps transport/JWT state in a spawn worker, and stops Core before guarded
+local radio restoration. The initial prototype supports 20/80 MHz. FPMS defaults
+to direct capture, with a persistent opt-in Core setting; the standard CLI
+selects Core only with an explicit backend flag. Compatible read-only
+subscription is future work. See [the backend decision and optional acceptance](core-capture-evaluation.md).
+Use Core's device information/control APIs where they simplify integration.
+A future capture-default change requires a concrete sharing/integration need or
+improved upstream lifecycle support, a separate decision, and device acceptance.
+Core's shipped API coordinates its own capture clients, rather than every tool
+on the system, and does not restore prior tuning. SIGKILL,
+power loss, and driver/device failure cannot guarantee restoration; cleanup
+errors remain explicit.
+
 Live capture configures one interface in monitor mode and launches one
 line-buffered TShark process. Automatic width selection uses a fixed 20 MHz
 definition on 2.4 GHz and the standard 80 MHz block containing the selected
@@ -82,6 +137,33 @@ snapshot length and warns once per BSSID when a larger beacon is truncated and
 later information elements may be unavailable. Interactive terminal renderers
 show runtime capture warnings, including confirmed partial coverage, inside
 their managed footer instead of writing beneath the curses screen.
+
+On POSIX hardware, TShark stdout is owned by a dedicated aggregation process.
+The common non-beacon path parses only timestamp, frame-control, Retry, and MAC
+header fields. Each MPDU updates its active one-second accumulator exactly once
+and is then released; individual data frames are never retained for the
+two-minute window. The GUI process receives compact completed-second snapshots
+and beacon events, allowing TShark, aggregation, and rendering/logging to run
+on separate CPU cores without creating a second capture pipeline.
+
+Live renderers publish only on the configured monotonic display deadline.
+Capture completion and logging never trigger an extra paint. Display history is
+placed into 120 wall-clock slots ending with the preceding completed second;
+an unavailable second is an explicit gap instead of allowing stale capture
+history to scroll later while a producer backlog is drained. Headline values
+come from the newest actual completed sample in those slots, not from a
+synthetic right-edge gap. The newest analyzer identities and composition remain
+visible while any actual sample remains in the displayed window; state is
+cleared only when all 120 slots are unavailable.
+
+Live startup has no fixed sleep or multi-sample warm-up. The frame file is
+painted as `Collecting` before radio capability discovery, interface tuning,
+or TShark startup, so those hardware operations do not leave the GUI waiting
+for its first frame. The partial wall-clock second in which capture begins is
+deliberately excluded, and the first complete second is published only after
+its 102.4 ms delayed-beacon allowance. The resulting roughly 1.1–2.1 second
+analysis delay, followed by the next configured display deadline, is required
+to avoid representing a partial capture interval as a full RET/BL sample.
 
 Optional `--raw-pcapng` adds `-P -w` and restores full-length `-s 0` capture on
 that same TShark process. It therefore saves the raw packets feeding live
@@ -139,20 +221,30 @@ maintains:
 - per-second and rolling-window unique client-MAC sets;
 - automatically selected display BSSIDs;
 - best-effort radio groups;
-- per-second strongest-radio beacon loss; and
+- per-second beacon loss across recently heard BSSIDs above -75 dBm; and
 - channel-composition state.
 
 The analyzer ingests live rows continuously but avoids rebuilding a snapshot
 for every busy-channel frame. It publishes a second after ordered capture time
 passes that boundary by the 102.4 ms beacon-delay allowance, and when pending
-data is flushed during shutdown.
+data is flushed during shutdown. Independently, it publishes a provisional
+snapshot on every configured display refresh interval. A provisional refresh
+does not finalize a capture second while TShark may still have buffered rows.
+
+TShark stdout is read in bounded batches. The event loop returns to input,
+display, survey, and logging deadlines between batches instead of draining an
+unbounded user-space row queue. TShark stderr is drained concurrently into a
+bounded diagnostic tail so a full stderr pipe cannot stop capture.
 
 Frame association, retry eligibility, and client detection are projected once
 per capture second. Completed one-second projections are retained for the
 rolling window and merged for snapshot publication. If the retained BSSID set
-changes, affected projections are rebuilt from the single raw-frame store so
-address-based association keeps the same meaning. The completed projection is
-also reused when publishing that second, avoiding a second window scan.
+changes, affected projections are rebuilt from the single compact association-
+input store so address-based association keeps the same meaning. Rolling input
+is stored in per-second buckets as compact timestamp/type/retry/address tuples
+rather than full normalized frame objects. Complete seconds are cached;
+provisional snapshots merge those caches with only the partial boundary
+seconds. The completed projection is also reused when publishing that second.
 
 Target-primary association uses timestamp-indexed beacon timelines and binary
 search instead of scanning every retained beacon for every frame. Projection
@@ -243,15 +335,17 @@ prevent grouping. Complete-link compatibility prevents a chain of weak matches
 from collapsing clearly different radios.
 
 AP names and vendor-specific fields are clues, not standardized identities.
-Composition counts and Beacon Loss screen radio membership must therefore be
-treated as estimates.
+Composition counts and radio membership must therefore be treated as
+estimates. Beacon Loss does not use radio grouping; it includes every recently
+heard BSSID whose latest RSSI is strictly greater than -75 dBm.
 
-Rolling BSSID state remains available for the full two-minute window, but a
-BSSID is eligible for strongest-radio selection only when its latest beacon is
-no more than 1.1024 seconds old. That covers one complete reporting second plus
-the delayed-beacon allowance: a genuinely missed second can still be measured,
-while an old high-RSSI observation cannot hold Beacon Loss at zero after that
-radio stops being heard.
+Rolling BSSID state remains available for the full two-minute window. For
+Beacon Loss, a BSSID above the RSSI threshold remains eligible only when its
+latest beacon is no more than 1.1024 seconds old. That covers one complete
+reporting second plus the delayed-beacon allowance: a genuinely missed second
+can still be measured, while an old high-RSSI observation cannot keep
+contributing after the BSSID stops being heard. Composition independently uses
+this same freshness window when selecting its strongest estimated radio.
 
 ## Snapshot model
 
@@ -264,8 +358,8 @@ The immutable snapshot contains:
 - rolling unique client-MAC counts for the channel and for each retained
   BSSID, plus the analyzer-selected top count and its `qbss` or `mac` source;
   and
-- `BeaconReceptionSnapshot` and `CompositionSnapshot` views of the selected
-  strongest radio.
+- `BeaconReceptionSnapshot` for RSSI-qualified BSSIDs and
+  `CompositionSnapshot` for the selected strongest radio.
 
 UI code reads the snapshot and formats a view. It must not independently parse
 frames, select BSSIDs, or compute metrics.
@@ -305,10 +399,11 @@ It consumes valid beacon projections and completed analyzer statistics, and it
 owns file state, disk checks, low-disk markers, and rollover. Logging-only mode
 substitutes a no-op renderer but runs the same acquisition and analyzer.
 
-Log records enter a bounded FIFO queue and one logging thread owns record
-serialization, writes, and per-record flushes. Rollover, stop, and low-disk
-handling drain and join that worker before closing or replacing its files.
-Queue saturation applies backpressure rather than dropping records.
+Log records enter a bounded FIFO queue and one logging thread owns ordered
+serialization and batched flushes. Rollover, stop, and low-disk handling drain
+and join that worker before closing or replacing its files. If sustained slow
+storage fills the queue, new log records are sampled and a runtime warning is
+shown; capture, analysis, and display never wait indefinitely for the disk.
 
 Logging state can change without changing the analyzer or capture process. If
 disk pressure stops logging during display mode, display capture continues. If

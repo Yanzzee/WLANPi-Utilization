@@ -8,25 +8,55 @@ This guide covers common WLAN Pi, capture, display, metric, and logging issues.
 The front-panel installer expects:
 
 - `/usr/sbin/fpms`;
-- one FPMS Python package under
-  `/opt/wlanpi-fpms/lib/python*/site-packages/fpms`; and
-- the FPMS 2.x files/patch anchors used by the bundled adapter installer.
+- a direct absolute Python shebang in that launcher, pointing to an executable
+  FPMS interpreter with one installed `fpms` package; and
+- the FPMS 1.4.24 layout tested with WLAN Pi OS 26.10 DeadEye.
 
 Confirm FPMS is installed and running:
 
 ```bash
 ls -l /usr/sbin/fpms
+head -n 1 /usr/sbin/fpms
 systemctl status wlanpi-fpms --no-pager
 ```
 
+The installer follows the launcher symlink and asks its Python interpreter for
+the package location without importing FPMS or initializing hardware. It prints
+`Resolved FPMS Python package: ...` before patching. Stale Python directories
+under `/opt/wlanpi-fpms/lib` and packages supplied through `PYTHONPATH` do not
+affect discovery. The venv interpreter path is preserved even if its executable
+is a symlink to the system Python.
+
+Missing interpreters, invalid package locations, shell wrappers, and `/usr/bin/env`
+shebangs produce an explicit discovery error. Unsupported package layouts are
+rejected before FPMS files are modified. For a custom launcher, the patcher
+supports an explicit `--fpms-package` path; the normal installer uses discovery.
+
 An FPMS package upgrade can replace the app adapter or patched navigation
-files. Rerun the installer afterward:
+files, or change its Python environment. Rerun the installer afterward:
 
 ```bash
 sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
 The patcher keeps one-time `.beacon-live.bak` copies of modified FPMS files.
+It validates all proposed files before writing. If writing or the FPMS restart
+fails, it restores the files as they were immediately before that installation
+attempt, including any existing adapter and backups. A failed restart also
+triggers a restart and check of the restored FPMS installation. The application
+environment and CLI launchers remain installed.
+
+If the installer reports `FPMS page-exit branch not found` on Trixie, update to
+the installer that matches Python syntax rather than single-quoted text, then
+rerun the full installer. It can repair the partial `fpms.py` patch left by the
+earlier installer. An installation error produces a nonzero exit status; a
+recovery error is reported separately. Inspect the service and journal before
+retrying:
+
+```bash
+systemctl status wlanpi-fpms --no-pager
+sudo journalctl -u wlanpi-fpms -n 100 --no-pager
+```
 
 ## `sudo: unable to resolve host`
 
@@ -58,6 +88,8 @@ it avoids repeated `sudo` delays and noise.
 Run the setup check:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 ./scripts/pi_setup.sh
 ```
 
@@ -65,11 +97,59 @@ On Raspberry Pi OS/Debian, the usual packages are:
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip python3-venv git iproute2 iw tshark wireshark-common
+sudo apt install python3 python3-venv git iproute2 iw tshark wireshark-common
 ```
 
-`wireshark-common` supplies `dumpcap`. The project has no third-party Python
-runtime dependency; the `dev` extra adds pytest.
+`wireshark-common` supplies `dumpcap`. Direct capture/replay use standard-library
+Python; the `core` extra supplies websockets 15.0.1, and `dev` adds pytest.
+
+## Core capture installation and selection
+
+Direct capture is the recommended CLI/FPMS default. Core is an explicit optional
+backend; its errors do not trigger an automatic direct capture. See
+[the backend decision and limitations](core-capture-evaluation.md).
+
+The normal FPMS installer installs the client in `/opt/wlanpi-beacon-live`.
+For first installation, it needs package-index access or `--wheel-dir` with
+runtime wheels compatible with the Pi. Dependency failure stops before replacing
+the app files or changing FPMS selection. It never installs into Core's venv
+or system Python.
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-backend core
+sudo cat /etc/wlanpi-beacon-live/fpms.json
+/opt/wlanpi-beacon-live/bin/python -I -c \
+  'import websockets; print(websockets.__version__, websockets.__file__)'
+```
+
+The saved setting applies to FPMS launches only and survives reinstallation
+without a backend flag. `WLANPI_UTILIZATION_CAPTURE_BACKEND` in the service
+environment overrides it. Use `--fpms-backend direct` to switch back; absent
+configuration initially means direct. Invalid settings are rejected before
+capture rather than silently using direct.
+
+For the installed CLI, explicitly pass `--capture-backend core`. Core starts
+write `Capture backend: core` to stderr/the FPMS journal. Certificate, endpoint
+or getjwt errors appear there; inspect `core_client.txt`, `fpms_backend.json`
+and the backend override in a debug bundle. Core requires an existing `wlanpiN`
+monitor and currently supports validated 20/80 MHz definitions. Its known
+channel/width restrictions are in [Core acceptance](core-capture-evaluation.md).
+
+## Development setup requires a Python 3.13 venv
+
+`scripts/pi_setup.sh` installs development tools only into a genuine activated
+venv. If it reports no venv or Python below 3.13, create and activate a fresh
+environment with the Trixie interpreter. Setting `VIRTUAL_ENV` manually is not
+sufficient: its interpreter must actually belong to that environment. Venvs
+created with `--system-site-packages` are rejected.
+
+Use `python3 --version` to check the system interpreter and
+`python -c 'import sys; print(sys.version, sys.prefix, sys.base_prefix)'` after
+activation. If ensurepip cannot repair missing pip, install `python3-venv` and
+create a fresh environment. Packaging/editable-install failures stop with pip's
+error output; check that output and connectivity before retrying. The script
+does not install packages into system Python or bypass Debian's packaging
+protections. Production installation uses the separate `/opt` venv.
 
 ## `sudo: beacon-live: command not found`
 
@@ -89,7 +169,7 @@ If a custom `sudo` configuration omits `/usr/local/bin` from its secure PATH,
 use the absolute system launcher:
 
 ```bash
-sudo /usr/local/bin/wlanpi-beacon-live --iface wlan0 --channel 36
+sudo /usr/local/bin/wlanpi-beacon-live --band 5 --channel 36
 ```
 
 The `.venv/bin` commands are separate and are intended only for repository
@@ -103,14 +183,55 @@ List interfaces known to `iw`:
 iw dev
 ```
 
-The FPMS integration currently uses `wlan0`. CLI and test scripts can use
-another name through `--iface` or the script's first argument.
+The app and live CLI default to `--iface auto`. They inspect the root namespace
+and named namespaces from `ip netns list`, then consider managed or monitor
+interfaces whose phy supports monitor mode and the selected frequency. Existing
+monitor interfaces are preferred. If several candidates remain, capture stops
+with their names and asks for an explicit choice. An interface named `wlan0`
+may belong to a radio without monitor support; interface numbering is not a
+capability check.
+
+Use `--iface capture1` to select an interface in the root namespace. For a named
+namespace, also pass `--netns capture-lab`. Using `--netns capture-lab` with
+automatic discovery restricts the search to that namespace. Capabilities,
+tuning, channel verification, TShark, and survey reads all use that context.
+For example:
+
+```bash
+ip netns list
+sudo ip netns exec capture-lab iw dev
+sudo wlanpi-beacon-live --iface capture1 --netns capture-lab --band 2.4 --channel 1
+```
+
+To configure another front-panel interface, run `sudo systemctl edit wlanpi-fpms`
+and add the following, replacing `capture1` with the chosen interface:
+
+```ini
+[Service]
+Environment="WLANPI_UTILIZATION_IFACE=capture1"
+# Include this only when capture1 is in a named namespace:
+Environment="WLANPI_UTILIZATION_NETNS=capture-lab"
+```
+
+Then run `sudo systemctl restart wlanpi-fpms`. The adapter reads this setting
+when FPMS starts. Leave both overrides unset for automatic discovery across
+namespaces, or set only `WLANPI_UTILIZATION_NETNS` to search one namespace.
+Remove an obsolete override when a radio is renamed or moved. The capture
+journal reports the discovered target as `root:wlanpi0` or, for example,
+`capture-lab:capture1`.
 
 Confirm the adapter/driver supports monitor mode:
 
 ```bash
 iw phy
 ```
+
+If selecting Display leaves the menu visible and the journal reports
+`iw dev wlan0 set type monitor` followed by `Operation not supported`, capture
+has failed to start on the selected radio. Update and rerun the installer to
+use automatic discovery and the failed-launch menu recovery. The updated
+adapter briefly reports an exited capture child and returns to the channel
+menu. Inspect `journalctl -u wlanpi-fpms` for the underlying command error.
 
 ## The channel cannot be set
 
@@ -127,7 +248,7 @@ iw reg get
 For bonded capture, also inspect the actual definition:
 
 ```bash
-iw dev wlan0 info
+iw dev wlanpi0 info  # replace with the selected capture interface
 ```
 
 The default is fixed at 20 MHz on 2.4 GHz and 80 MHz on 5 GHz and 6 GHz. The
@@ -137,7 +258,7 @@ at 20 MHz. An explicit override undergoes the same capability check and is not
 silently changed:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+sudo wlanpi-beacon-live --iface auto --frequency-mhz 5180 \
   --channel-width 80 --center-frequency1-mhz 5210
 ```
 
@@ -166,16 +287,35 @@ elements may be unavailable. Interactive CLI mode renders this warning in its
 managed footer so it does not corrupt the screen. Re-run with `--raw-pcapng`
 when a full-length diagnostic capture is needed.
 
-Use an explicit center frequency when testing 5 GHz or 6 GHz:
+## Display remains responsive but a graph has empty recent points
+
+Live graphs are fixed to the preceding 120 wall-clock seconds. If capture
+aggregation cannot deliver a completed second before its display slot, that
+slot is intentionally shown as unavailable; old data is not scrolled forward
+and presented as current. Check the TShark and `beacon-live-aggregate`
+processes separately:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+pgrep -af 'wlanpi-beacon-live|beacon-live-aggregate|tshark'
+free -m
+vmstat 1
+```
+
+Normal live mode uses a dedicated aggregation process and does not retain
+individual data frames. Sustained swap activity or a saturated TShark process
+therefore points to system, driver, or dissection pressure rather than the GUI
+waiting to replay a 120-second frame-object queue.
+
+Use an explicit primary frequency when testing 5 GHz or 6 GHz:
+
+```bash
+sudo wlanpi-beacon-live --iface auto --frequency-mhz 5975
 ```
 
 For band-qualified channel notation, 6 GHz channel 5 maps to 5975 MHz:
 
 ```bash
-sudo wlanpi-beacon-live --iface wlan0 --band 6 --channel 5
+sudo wlanpi-beacon-live --iface auto --band 6 --channel 5
 ```
 
 Do not pass a frequency to `--channel`; `--channel 5975` means channel number
@@ -203,11 +343,66 @@ Look for leftover processes only after the app should have stopped:
 pgrep -af 'wlanpi-beacon-live|tshark'
 ```
 
+## The radio is busy
+
+Utilization checks the whole phy, including interfaces other than the selected
+capture interface. A capture on `wlan1` can conflict with `wlanpi0` when both
+belong to the same phy. Packet sockets identify captures from TShark/dumpcap,
+tcpdump, Scapy/Profiler, Kismet, and Core capture workers. AP/other interface
+modes, connected managed interfaces, and network controllers also prevent
+borrowing the radio. Core's background service and an idle `wlanpi0` alone do
+not count as active use.
+
+The packet-socket check distinguishes `lldpd` link discovery on managed
+interfaces from capture ownership. Those `lldpd` sockets are allowed; other
+processes and unidentified sockets remain blockers. The exception does not
+apply to monitor-interface or namespace-wide sockets. If an older installation
+reports `Radio ... is busy: lldpd (pid ...)`, update this checkout and rerun
+`sudo ./scripts/install_wlanpi_fpms.sh`. Leave `lldpd` running. This corrects the
+item 5 false positive caused by treating every bound packet socket as a capture.
+
+Stop or release the radio through the owning tool, then retry. Another adapter
+can be selected explicitly using `--iface` and optionally `--netns`. The app
+does not kill tools, stop Core, or disconnect a Wi-Fi connection automatically.
+If the only radio carries your management connection, use another management
+path before releasing it for monitor capture.
+
+NetworkManager-managed interfaces are refused even while disconnected; iwd in
+the same namespace is conservatively refused because it may scan or reconnect.
+Release those interfaces through the network controller before capture. Missing
+permissions or unreadable ownership/state information produce an error rather
+than bypassing the checks.
+
+If the journal reports `nmcli ... device show wlanpi0 failed: Error: Device
+'wlanpi0' not found`, update this checkout and rerun
+`sudo ./scripts/install_wlanpi_fpms.sh`. This was an item 5 startup regression:
+the guard queried every iw interface through NetworkManager even when NM had no
+device object for an existing monitor. The corrected guard first lists NM's
+devices, checks ownership only for listed radio interfaces, and uses a fixed
+locale for machine-readable values. It still rejects managed interfaces and
+failed inventory/ownership queries. Do not add the monitor to NetworkManager
+or stop NetworkManager as a workaround.
+
+The lock under `/run/wlanpi-beacon-live/radios/phyN.lock` prevents two
+Utilization instances from using the same radio. The file can remain after exit;
+the kernel-held lock, not file existence, indicates ownership. Do not remove a
+live lock file. Other applications do not share this lock. Keep other tools
+off that radio during capture; preflight cannot prevent a later external retune.
+
 ## The interface remains in monitor mode
 
-Live capture configures the selected interface for monitor mode. The current
-foreground runtime does not automatically restore managed mode on every exit.
-If this adapter should return to normal client operation, restore it manually:
+Live capture now restores the saved interface mode, administrative state, and
+known monitor tuning after normal exit, Ctrl+C, SIGTERM, or startup failure.
+An interface that started in monitor mode, such as Core's `wlanpi0`, remains a
+monitor after exit. This is its prior state, not a cleanup failure. Existing
+interfaces and namespace placement are preserved.
+
+Inspect the journal for `Radio restoration incomplete` if state was not
+restored. An unplugged/replaced interface is not modified. SIGKILL, power loss,
+or driver failure can bypass or prevent cleanup. There is no automatic crash
+recovery journal in this version; inspect the current radio and restore it
+through the owning tool. If an idle adapter should return to normal client
+operation, the manual commands are:
 
 ```bash
 sudo ip link set wlan0 down
@@ -223,11 +418,18 @@ restore it when that script exits.
 Not every AP advertises a QBSS Load element. Beacon capture can be working even
 when Utilization shows `<No QBSS Beacons>` or graph gaps.
 
-Use the smoke capture and inspect its beacon TSV:
+Exit Utilization in FPMS, then save one application-owned capture:
 
 ```bash
-./scripts/pi_smoke.sh wlan0 5180
-sed -n '1,20p' samples/pi_tshark_qbss_sample.tsv
+sudo wlanpi-beacon-live --iface auto --band 5 --channel 36 \
+  --raw-pcapng /tmp/utilization-qbss.pcapng
+```
+
+After stopping with Ctrl-C, inspect the saved beacons without reopening a radio:
+
+```bash
+tshark -r /tmp/utilization-qbss.pcapng -Y 'wlan.fc.type_subtype == 0x08' \
+  -T fields -e wlan.bssid -e wlan.qbss.cu -e wlan.qbss.scount
 ```
 
 Empty QBSS columns indicate the observed beacons did not provide those fields.
@@ -242,7 +444,7 @@ Enable diagnostics:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 --channel 36 --survey-debug
+  --iface auto --band 5 --channel 36 --local-cu --survey-debug
 ```
 
 Diagnostic lines show target frequency, active/busy deltas, computed value,
@@ -292,22 +494,21 @@ beacon-live retry-debug \
 ```
 
 See [screens.md](screens.md#4-retries) and the detailed capture procedure in
-[pi_testing.md](pi_testing.md#capture-and-audit-retry-metrics).
+[pi_testing.md](pi_testing.md#validate-bonded-capture-and-retry-metrics).
 
 ## Beacon received count briefly shows zero
 
 `BCN_REC` is not a count of every beacon on the channel. It is the number of
-phase-matched beacons received for BSSIDs grouped with the automatically
-selected strongest radio during that completed capture second. Other screens
-can still show RSSI, QBSS, or composition values from the latest beacon retained
-in the rolling window.
+phase-matched beacons received for recently heard BSSIDs above -75 dBm during
+that completed capture second. Other screens can still show RSSI, QBSS, or
+composition values from the latest beacon retained in the rolling window.
 
-A zero for one second means no beacon was assigned to the selected radio in
-that second. Strongest-radio eligibility lasts for that reporting second plus
-the 102.4 ms delayed-beacon allowance; after that, an inactive high-RSSI BSSID
-cannot keep the metric at zero while another radio is actively beaconing. If a
-zero persists, use the beacon JSONL timestamps and raw PCAPNG to distinguish a
-capture gap from best-effort radio grouping or missing decoded beacon rows.
+A zero for one second means no beacon was assigned to an expected slot for the
+qualifying BSSIDs in that second. Beacon Loss eligibility lasts for that
+reporting second plus the 102.4 ms delayed-beacon allowance; after that, an
+inactive high-RSSI BSSID cannot keep the metric at zero. If a zero persists,
+use the beacon JSONL timestamps and raw PCAPNG to distinguish a capture gap
+from missing decoded beacon rows.
 
 ## Logs are missing
 
@@ -341,15 +542,73 @@ Rerun the installer after FPMS or repository updates. If terminal live capture
 works but the LCD does not, the issue is likely in FPMS integration, display
 hardware, or the installed adapter rather than parsing/analysis.
 
-## Collect a debug bundle
+## TShark fields or hex SSID names
+
+Run the read-only packet check from the updated checkout:
 
 ```bash
-./scripts/pi_collect_debug.sh
+/opt/wlanpi-beacon-live/bin/python scripts/check_tshark.py
 ```
 
-The script creates `debug/pi_debug_<timestamp>/` and a matching `.tar.gz`
-archive. It collects system, Wi-Fi, TShark, interface, rfkill, and recent kernel
-information when available.
+Field inspection now stops before radio discovery/preparation if TShark cannot
+be queried, times out, or lacks a required field. The journal or CLI error
+names the problem. Missing optional AP metadata is omitted safely.
 
-Review before sharing: bundles and captures can contain real SSIDs, BSSIDs,
-MAC addresses, interface addresses, kernel messages, and other local details.
+TShark 4.4.19 exports `wlan.ssid` as hex bytes (see the
+[Wireshark field reference](https://www.wireshark.org/docs/dfref/w/wlan.html)).
+The parser now decodes UTF-8 names once for both displays and logs. The packet
+check verifies the synthetic `Trixie-Test` name as well as the metrics.
+If a known text name still appears encoded in FPMS, rerun the installer from
+the updated checkout and compare the installed code with the debug collector.
+
+Empty, missing and all-zero names use the hidden label. Non-text or control
+bytes intentionally use a lossless `hex:…` fallback. For replay TSVs containing
+already decoded names, use `--ssid-encoding text`; this preserves names that
+literally look like hex, such as `4142`.
+
+## Collect a debug bundle
+
+Run from the checkout after reproducing a failure:
+
+```bash
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
+```
+
+Use `--output-dir /tmp/utilization-debug` to choose another destination or
+`--timeout-seconds 20` if a slow device needs more time per command. The script
+creates a unique `debug/pi_debug_<timestamp>_<suffix>/` directory and matching
+`.tar.gz`. Root allows collection of journals, runtime files, and named network
+namespaces. Without it, permission failures are recorded; the script does not
+prompt for sudo during collection.
+
+Start with these files:
+
+| Evidence | Purpose |
+| --- | --- |
+| `SUMMARY.txt`, `manifest.json` | Show each failed, unavailable, timed-out, or mismatched check; the command files retain exit status and stderr. |
+| `os_release.txt`, `wlanpi_release.txt`, `packages.txt` | Identify the actual image, Debian, FPMS, Core, Python, and wireless-tool versions. |
+| `fpms_service.txt`, `fpms_journal.txt` | Identify service state/exit status, unit paths, and recent capture/installation errors. |
+| `fpms_paths.json`, `fpms_python_probe.txt`, `fpms_environment.txt`, `fpms_process_environment.json` | Resolve the launcher's interpreter/package, configured unit overrides, and actual running-process interface/namespace overrides without importing FPMS hardware code. |
+| `app_python.txt`, `deployment.json`, `cli_launcher_*.txt` | Identify the production venv and stale app/adapter files compared with the current checkout. |
+| `fpms_backend.json`, `core_client.txt` | Identify the saved FPMS backend and the WebSocket client version/path in the app venv; effective service overrides are recorded separately. |
+| `tshark_version.txt`, `tshark_fields.json` | Identify TShark version, requested field types, and unavailable fields. |
+| `namespaces.json`, `iw_dev.txt`, `netns_N_*` | Map root/named contexts to their interface, phy, regulatory, controller, and packet-socket evidence. |
+| `processes.txt`, `radio_locks.txt`, `runtime_*`, `disk.txt`, `memory.txt` | Identify active tools, app artifacts, disk pressure, and memory pressure. |
+
+For `Capture Stopped (2)`, read `fpms_journal.txt` first. Use the named target
+in that error to select the matching namespace files. A busy-radio error can
+be compared with `packet_sockets.txt`, `packet_owners.txt`, and process IDs
+in the matching namespace; a stale-code suspicion
+can be checked through `matches_checkout` in `deployment.json`. Command failures
+do not discard the rest of the bundle. A successful collection means the
+archive was written, not that every diagnostic check succeeded.
+
+The collector opens no live capture, tunes no radio, acquires no radio lock,
+and restarts/stops no service. It does not copy log CSVs, raw packet captures,
+or screenshots. Retain those separately when comparing metrics. CLI errors
+must also be saved separately; they do not appear in the FPMS journal.
+
+Review before sharing: bundles and captures can contain SSIDs, BSSIDs, MAC/IP
+addresses, process arguments, kernel messages, and other local details. Only
+Utilization's interface/namespace overrides are retained from service environment
+output; unrelated environment values are excluded.

@@ -49,6 +49,33 @@ def test_future_beacons_do_not_recompute_completed_frame_projections() -> None:
     assert analyzer._frame_projections_by_second[1000][1] is original
 
 
+def test_rolling_store_keeps_compact_canonical_frame_inputs() -> None:
+    analyzer = Analyzer()
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1000.1,
+            bssid="AA:BB:CC:DD:EE:FF",
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=False,
+            transmitter_address="00:11:22:33:44:55",
+            receiver_address="AA:BB:CC:DD:EE:FF",
+            source_address="00:11:22:33:44:55",
+            destination_address="AA:BB:CC:DD:EE:FF",
+            phy_bandwidth="diagnostic-value-not-needed-by-rolling-analysis",
+        ),
+        publish_snapshot=False,
+    )
+
+    retained = analyzer._frames_by_second[1000][0][2]
+    assert not isinstance(retained, FrameRecord)
+    assert not hasattr(retained, "__dict__")
+    assert retained.bssid == "aa:bb:cc:dd:ee:ff"
+    assert retained.bssid is retained.receiver_address
+    assert retained.transmitter_address is retained.source_address
+    assert not hasattr(retained, "phy_bandwidth")
+
+
 def test_analyzer_expires_bssid_state_and_history_after_120_seconds() -> None:
     analyzer = Analyzer()
 
@@ -559,7 +586,7 @@ def test_selected_beacon_rate_uses_advertised_interval_when_available() -> None:
     )
 
 
-def test_beacon_reception_uses_all_bssids_on_strongest_radio_including_hidden() -> None:
+def test_beacon_reception_uses_all_bssids_above_rssi_threshold() -> None:
     analyzer = Analyzer()
     visible = "00:11:22:33:44:50"
     hidden = "00:11:22:33:44:51"
@@ -587,19 +614,60 @@ def test_beacon_reception_uses_all_bssids_on_strongest_radio_including_hidden() 
     analyzer.advance(1001, None)
 
     beacons = analyzer.snapshot.beacons
-    assert beacons.strongest_radio_bssids == (visible, hidden)
-    assert tuple(member.bssid for member in beacons.bssids) == (visible, hidden)
-    assert [(member.received_count, member.expected_count) for member in beacons.bssids] == [
+    assert analyzer.snapshot.composition.strongest_radio_bssids == (
+        visible,
+        hidden,
+    )
+    assert beacons.strongest_radio_bssids == (visible, hidden, weaker)
+    assert tuple(member.bssid for member in beacons.bssids) == (
+        visible,
+        hidden,
+        weaker,
+    )
+    assert [
+        (member.received_count, member.expected_count)
+        for member in beacons.bssids
+    ] == [
         (10, 10),
         (9, 10),
+        (10, 10),
     ]
     assert [member.loss_percent for member in beacons.bssids] == pytest.approx(
-        [0.0, 10.0]
+        [0.0, 10.0, 0.0]
     )
-    assert beacons.received_count == 19
-    assert beacons.expected_count == 20
-    assert beacons.loss_percent == pytest.approx(5.0)
-    assert analyzer.snapshot.current.beacon_loss_percent == pytest.approx(5.0)
+    assert beacons.received_count == 29
+    assert beacons.expected_count == 30
+    assert beacons.loss_percent == pytest.approx(100 / 30)
+    assert analyzer.snapshot.current.beacon_loss_percent == pytest.approx(
+        100 / 30
+    )
+
+
+def test_beacon_reception_excludes_rssi_at_or_below_threshold() -> None:
+    analyzer = Analyzer()
+    included = "00:11:22:33:44:50"
+    boundary = "00:11:23:33:44:50"
+    weak = "00:11:24:33:44:50"
+
+    for slot in range(11):
+        timestamp = 999.95 + slot * 0.1024
+        analyzer.ingest(
+            _radio_beacon(timestamp, included, "Included", -74, "Room-101")
+        )
+        analyzer.ingest(
+            _radio_beacon(timestamp, boundary, "Boundary", -75, "Room-202")
+        )
+        analyzer.ingest(
+            _radio_beacon(timestamp, weak, "Weak", -76, "Room-303")
+        )
+
+    analyzer.advance(1001, None)
+
+    beacons = analyzer.snapshot.beacons
+    assert beacons.strongest_radio_bssids == (included,)
+    assert tuple(member.bssid for member in beacons.bssids) == (included,)
+    assert beacons.displayed_bssid == included
+    assert beacons.displayed_rssi_dbm == -74
 
 
 def test_beacon_reception_lookback_allows_nine_or_ten_expected_and_counts_drop() -> None:
@@ -1127,6 +1195,52 @@ def _frame(
         retry_flag=retry,
         receiver_address=receiver_address,
     )
+
+
+def test_streaming_analyzer_matches_retained_frame_results_without_retaining_mpdus() -> None:
+    bssid = "02:00:00:00:00:01"
+    client = "02:00:00:00:10:01"
+    records = [
+        _beacon_frame(1000.0, bssid, "Alpha", -40, retry=False),
+        FrameRecord(
+            timestamp=1000.1,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=True,
+            transmitter_address=client,
+            receiver_address=bssid,
+            source_address=client,
+            destination_address=bssid,
+        ),
+        FrameRecord(
+            timestamp=1000.2,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=False,
+            transmitter_address=bssid,
+            receiver_address=client,
+            source_address=bssid,
+            destination_address=client,
+        ),
+        _beacon_frame(1001.2, bssid, "Alpha", -39, retry=False),
+    ]
+    retained = Analyzer()
+    streaming = Analyzer(streaming=True)
+    for record in records:
+        retained.ingest(record, publish_snapshot=False)
+        streaming.ingest(record, publish_snapshot=False)
+
+    retained_rows = retained.flush(include_history=False)
+    streaming_rows = streaming.flush(include_history=False)
+
+    assert streaming_rows == retained_rows
+    assert streaming._frames_by_second == {}
+    assert sum(
+        projection.frame_count
+        for projection in streaming._streaming_frames_by_second.values()
+    ) == len(records)
 
 
 def _address_frame(

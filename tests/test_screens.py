@@ -131,6 +131,28 @@ def test_total_station_graph_keeps_fixed_64_count_scale() -> None:
     assert [point.value for point in view.graph_points] == [65]
 
 
+def test_total_station_graph_distinguishes_missing_slots_from_real_zeroes() -> None:
+    empty = MetricsSnapshot.empty()
+    real_zero = replace(empty.current, second=1000)
+    missing = replace(empty.current, second=1001, sample_available=False)
+    snapshot = replace(
+        empty,
+        generated_at=1002.0,
+        current=real_zero,
+        history=(real_zero, missing),
+    )
+
+    view = TotalStationCountScreen().render(snapshot)
+
+    assert [point.value for point in view.graph_points] == [0.0, None]
+    assert [point.value for point in view.secondary_graph_points] == [0.0, None]
+
+    unavailable = TotalStationCountScreen().render(
+        replace(snapshot, current=missing, history=(missing,))
+    )
+    assert unavailable.summary == "SUM -- MAC 0 TOP --"
+
+
 def test_total_station_screen_shows_window_mac_total_and_per_second_series() -> None:
     bssid = "02:00:00:00:00:01"
     client_a = "02:00:00:00:10:01"
@@ -286,12 +308,16 @@ def test_composition_screen_uses_required_missing_name_placeholders() -> None:
 
 def test_retry_screen_uses_shared_history_and_highest_retry_bssid() -> None:
     snapshot = _retry_analyzer_with_history().snapshot
+    snapshot = replace(
+        snapshot,
+        current=replace(snapshot.current, retry_percent=99.0),
+    )
 
     view = RetryScreen().render(snapshot)
 
     assert view.title == "Retry Percentage"
     assert view.metadata_tokens == ("Retries",)
-    assert view.summary == "RET 50% AVG 65% MAX 80%"
+    assert view.summary == "RET 99% AVG 65% MAX 80%"
     assert view.graph_label == "One-second retry percentage"
     assert view.graph_maximum == 100
     assert view.identity.ssid == "Bravo"
@@ -307,7 +333,7 @@ def test_retry_screen_distinguishes_sub_one_percent_from_zero() -> None:
     assert _retry_percent(0.4) == "<1"
 
 
-def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
+def test_beacons_screen_renders_shared_rssi_qualified_metric_and_identity() -> None:
     empty = MetricsSnapshot.empty()
     first = replace(
         empty.current,
@@ -342,6 +368,10 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
             displayed_rssi_dbm=-35,
         ),
     )
+    snapshot = replace(
+        snapshot,
+        beacons=replace(snapshot.beacons, loss_percent=77.0),
+    )
 
     view = BeaconsScreen().render(snapshot)
 
@@ -349,12 +379,32 @@ def test_beacons_screen_renders_shared_radio_metric_and_identity() -> None:
     assert view.metadata_tokens == ("Beacon Loss",)
     assert view.metadata_metric_token_count == 2
     assert view.summary == "BL 5% AVG 12% MAX 20%"
-    assert view.graph_label == "Strongest-radio beacon loss"
+    assert view.graph_label == "Beacon loss above -75 dBm"
     assert view.graph_maximum == 100
     assert [point.value for point in view.graph_points] == [20.0, 5.0]
     assert view.identity.ssid == "Alpha"
     assert view.identity.bssid == "00:11:22:33:44:50"
     assert view.identity.rssi_dbm == -35
+
+
+def test_retry_and_beacon_headlines_use_latest_actual_sample_not_tail_gap() -> None:
+    empty = MetricsSnapshot.empty()
+    actual = replace(
+        empty.current,
+        second=1000,
+        retry_percent=25.0,
+        beacon_loss_percent=10.0,
+    )
+    missing = replace(empty.current, second=1001, sample_available=False)
+    snapshot = replace(
+        empty,
+        generated_at=1002.0,
+        current=actual,
+        history=(actual, missing),
+    )
+
+    assert RetryScreen().render(snapshot).summary == "RET 25% AVG 25% MAX 25%"
+    assert BeaconsScreen().render(snapshot).summary == "BL 10% AVG 10% MAX 10%"
 
 
 def test_analyzer_and_history_continue_while_another_screen_is_active() -> None:

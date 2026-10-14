@@ -1,12 +1,14 @@
 """Parsing helpers for legacy and capability-negotiated TShark output."""
 
 from dataclasses import replace
+from functools import lru_cache
 from typing import Iterable, Iterator, Optional, Union
 
 from beacon_live.channel import definition_from_operation_fields
 from beacon_live.models import BeaconRecord
 from beacon_live.models import FrameRecord
 from beacon_live.models import QBSS_ADMISSION_CAPACITY_MAX
+from beacon_live.ssid import normalize_tshark_ssid
 
 TSHARK_FIELD_NAMES = (
     "frame.time_epoch",
@@ -44,9 +46,12 @@ TSHARK_FRAME_FIELD_NAMES = (
     "wlan.bssid_resolved",
 )
 
-# These fields are appended only when ``tshark -G fields`` reports them. This
-# lets one source tree work with the older TShark commonly installed on WLAN Pi
-# images while using HE/EHT and packet-audit data on newer versions.
+# Core decoding fields must exist before the radio is prepared. AP names and
+# address resolution are useful metadata, but are not capture prerequisites.
+TSHARK_REQUIRED_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[:14]
+TSHARK_METADATA_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[14:]
+
+# Request optional fields only when the installed TShark reports them.
 TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
     "wlan.fc",
     "wlan_radio.frequency",
@@ -118,7 +123,7 @@ PHASE_THREE_TSHARK_FRAME_FIELD_COUNT = 16
 LEGACY_TSHARK_FRAME_FIELD_COUNT = 12
 
 
-def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
+def parse_tshark_row(row: str, *, ssid_encoding: str = 'text') -> Optional[BeaconRecord]:
     """Parse one tab-separated TShark beacon row.
 
     Returns None when the row is malformed. Empty SSID and QBSS fields are
@@ -170,7 +175,7 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
 
     return BeaconRecord(
         timestamp=timestamp,
-        ssid=ssid_text if ssid_text != "" else None,
+        ssid=normalize_tshark_ssid(ssid_text, encoding=ssid_encoding),
         bssid=bssid,
         qbss_cu_raw=qbss_cu_raw,
         qbss_cu_percent=qbss_cu_percent,
@@ -180,10 +185,10 @@ def parse_tshark_row(row: str) -> Optional[BeaconRecord]:
     )
 
 
-def parse_tshark_rows(rows: Iterable[str]) -> Iterator[BeaconRecord]:
+def parse_tshark_rows(rows: Iterable[str], *, ssid_encoding: str = 'text') -> Iterator[BeaconRecord]:
     """Yield valid beacon records from an iterable of TSV lines."""
     for row in rows:
-        record = parse_tshark_row(row)
+        record = parse_tshark_row(row, ssid_encoding=ssid_encoding)
         if record is not None:
             yield record
 
@@ -193,6 +198,7 @@ def parse_tshark_frame_row(
     *,
     field_names: Optional[tuple[str, ...]] = None,
     band: Optional[str] = None,
+    ssid_encoding: str = 'text',
 ) -> Optional[FrameRecord]:
     """Parse one lightweight all-frame TShark row for live analysis."""
     line = row.rstrip("\r\n")
@@ -205,7 +211,7 @@ def parse_tshark_frame_row(
         and tuple(field_names) != TSHARK_FRAME_FIELD_NAMES
         and len(fields) == len(field_names)
     ):
-        return _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        return _parse_named_tshark_frame_fields(fields, field_names, band=band, ssid_encoding=ssid_encoding)
     if len(fields) not in (
         LEGACY_TSHARK_FRAME_FIELD_COUNT,
         PHASE_THREE_TSHARK_FRAME_FIELD_COUNT,
@@ -354,7 +360,7 @@ def parse_tshark_frame_row(
     return FrameRecord(
         timestamp=timestamp,
         bssid=bssid,
-        ssid=ssid_text if ssid_text != "" else None,
+        ssid=normalize_tshark_ssid(ssid_text, encoding=ssid_encoding),
         rssi_dbm=rssi_dbm,
         frame_type=frame_type,
         frame_subtype=frame_subtype,
@@ -377,9 +383,9 @@ def parse_tshark_frame_row(
     )
 
 
-def parse_tshark_frame_rows(rows: Iterable[str]) -> Iterator[FrameRecord]:
+def parse_tshark_frame_rows(rows: Iterable[str], *, ssid_encoding: str = 'text') -> Iterator[FrameRecord]:
     for row in rows:
-        yield from parse_tshark_capture_record(row)
+        yield from parse_tshark_capture_record(row, ssid_encoding=ssid_encoding)
 
 
 def parse_tshark_capture_record(
@@ -387,6 +393,7 @@ def parse_tshark_capture_record(
     *,
     field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
     band: Optional[str] = None,
+    ssid_encoding: str = 'text',
 ) -> tuple[FrameRecord, ...]:
     """Expand every decoded WLAN MPDU occurrence in one capture record.
 
@@ -400,14 +407,14 @@ def parse_tshark_capture_record(
         return ()
     fields = line.split("\t")
     if len(fields) != len(field_names):
-        legacy = parse_tshark_frame_row(row)
+        legacy = parse_tshark_frame_row(row, ssid_encoding=ssid_encoding)
         return (legacy,) if legacy is not None else ()
 
     # The overwhelmingly common case is one decoded WLAN header. Avoid
     # splitting, rebuilding, and reparsing the row solely to discover that it
     # has one occurrence.
     if not any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
-        record = _parse_named_tshark_frame_fields(fields, field_names, band=band)
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band, ssid_encoding=ssid_encoding)
         return (record,) if record is not None else ()
 
     split_fields = [value.split(TSHARK_MULTI_VALUE_SEPARATOR) for value in fields]
@@ -439,10 +446,91 @@ def parse_tshark_capture_record(
             expanded,
             field_names,
             band=band,
+            ssid_encoding=ssid_encoding,
         )
         if record is not None:
             records.append(record)
     return tuple(records)
+
+
+@lru_cache(maxsize=16)
+def _live_field_indexes(field_names: tuple[str, ...]) -> dict[str, int]:
+    return {name: index for index, name in enumerate(field_names)}
+
+
+def parse_tshark_live_record(
+    row: str,
+    *,
+    field_names: tuple[str, ...] = TSHARK_FRAME_FIELD_NAMES,
+    band: Optional[str] = None,
+    ssid_encoding: str = 'text',
+) -> tuple[FrameRecord, ...]:
+    """Parse the common non-beacon path without building field dictionaries.
+
+    Data traffic dominates a busy capture.  It needs only the MAC header fields
+    used by retry and client aggregation.  Beacons and unusual multi-MPDU rows
+    retain the complete parser so beacon-derived behavior remains unchanged.
+    """
+    line = row.rstrip("\r\n")
+    if not line:
+        return ()
+    fields = line.split("\t")
+    if len(fields) != len(field_names):
+        return parse_tshark_capture_record(
+            row,
+            field_names=field_names,
+            band=band,
+            ssid_encoding=ssid_encoding,
+        )
+    if any(TSHARK_MULTI_VALUE_SEPARATOR in value for value in fields):
+        return parse_tshark_capture_record(
+            row,
+            field_names=field_names,
+            band=band,
+            ssid_encoding=ssid_encoding,
+        )
+
+    indexes = _live_field_indexes(field_names)
+
+    def value(name: str) -> str:
+        index = indexes.get(name)
+        return fields[index] if index is not None else ""
+
+    try:
+        timestamp = float(value("frame.time_epoch"))
+        frame_type = int(value("wlan.fc.type"), 0)
+        frame_subtype = int(value("wlan.fc.subtype"), 0)
+    except (TypeError, ValueError):
+        return ()
+
+    # Beacon rows need QBSS, operation, vendor, and truncation fields.
+    if frame_type == 0 and frame_subtype == 8:
+        record = _parse_named_tshark_frame_fields(fields, field_names, band=band, ssid_encoding=ssid_encoding)
+        return (record,) if record is not None else ()
+
+    retry = _parse_optional_bool(value("wlan.fc.retry"))
+    if retry is _MALFORMED:
+        return ()
+    if retry is None:
+        frame_control = _parse_optional_int(value("wlan.fc"), minimum=0)
+        if frame_control is _MALFORMED:
+            return ()
+        if frame_control is not None:
+            retry = bool(frame_control & 0x0008)
+
+    return (
+        FrameRecord(
+            timestamp=timestamp,
+            bssid=_parse_optional_mac(value("wlan.bssid")),
+            frame_type=frame_type,
+            frame_subtype=frame_subtype,
+            retry_flag=retry,
+            transmitter_address=_parse_optional_mac(value("wlan.ta")),
+            receiver_address=_parse_optional_mac(value("wlan.ra")),
+            source_address=_parse_optional_mac(value("wlan.sa")),
+            destination_address=_parse_optional_mac(value("wlan.da")),
+        ),
+    )
 
 
 def _parse_named_tshark_frame_fields(
@@ -450,16 +538,24 @@ def _parse_named_tshark_frame_fields(
     field_names: tuple[str, ...],
     *,
     band: Optional[str],
+    ssid_encoding: str,
 ) -> Optional[FrameRecord]:
     values = dict(zip(field_names, fields))
     core_row = "\t".join(values.get(name, "") for name in TSHARK_FRAME_FIELD_NAMES)
-    record = parse_tshark_frame_row(core_row)
+    record = parse_tshark_frame_row(core_row, ssid_encoding=ssid_encoding)
     if record is None or record.frame_type is None:
         return None
 
     integers: dict[str, Optional[int]] = {}
     for name in TSHARK_OPTIONAL_FRAME_FIELD_NAMES:
         if name not in values:
+            continue
+        if name == "radiotap.flags.badfcs":
+            # TShark emits this FT_BOOLEAN field as True/False. In particular,
+            # multi-antenna RSSI rows take this full parser path even for data
+            # and control frames; treating False as an integer rejected them.
+            if _parse_optional_bool(values[name]) is _MALFORMED:
+                return None
             continue
         parsed = _parse_optional_int(values[name], minimum=0)
         if parsed is _MALFORMED:

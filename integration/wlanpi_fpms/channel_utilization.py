@@ -8,6 +8,8 @@ in the ``beacon_live`` package launched as a child process.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
 import signal
 import subprocess
@@ -20,8 +22,13 @@ from typing import Callable, Optional
 EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live"
 FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
-INTERFACE = "wlan0"
+INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "auto")
+NETWORK_NAMESPACE = os.environ.get("WLANPI_UTILIZATION_NETNS")
+BACKEND_CONFIG = Path("/etc/wlanpi-beacon-live/fpms.json")
+LOGGER = logging.getLogger(__name__)
 NAVIGATION_DEBOUNCE_SECONDS = 0.2
+CAPTURE_STOP_TIMEOUT_SECONDS = 30
+CORE_CAPTURE_STOP_TIMEOUT_SECONDS = 90
 LOGGING_STATUS_SECONDS = 1.0
 LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
 
@@ -67,6 +74,32 @@ _6_GHZ_CHANNELS = tuple(range(1, 234, 4))
 _6_GHZ_PSC_CHANNELS = tuple(range(5, 230, 16))
 
 
+def configured_capture_backend() -> str:
+    """Choose the FPMS provider; malformed configuration must not select direct."""
+    backend = os.environ.get("WLANPI_UTILIZATION_CAPTURE_BACKEND")
+    if backend is None:
+        try:
+            settings = json.loads(BACKEND_CONFIG.read_text(encoding="utf-8"))
+            backend = settings.get("capture_backend", "direct")
+        except FileNotFoundError:
+            backend = "direct"
+        except (OSError, ValueError, AttributeError) as error:
+            LOGGER.error("Cannot read Utilization backend configuration %s: %s", BACKEND_CONFIG, error)
+            return "invalid"
+    if not isinstance(backend, str) or backend not in {"core", "direct"}:
+        LOGGER.error("Invalid Utilization capture backend in %s or environment", BACKEND_CONFIG)
+        return "invalid"  # CLI rejects this before touching the radio.
+    return backend
+
+
+def _capture_stop_timeout(command: list[str]) -> int:
+    if '--capture-backend' in command and command[command.index('--capture-backend') + 1] == 'core':
+        # Core's stop acknowledgement and the subsequent local restoration
+        # have bounded waits. Do not kill the parent halfway through cleanup.
+        return CORE_CAPTURE_STOP_TIMEOUT_SECONDS
+    return CAPTURE_STOP_TIMEOUT_SECONDS
+
+
 def build_launch_command(
     *,
     band: str,
@@ -101,6 +134,9 @@ def build_launch_command(
             "enabled" if logging else "disabled",
         ]
     )
+    if NETWORK_NAMESPACE is not None:
+        command.extend(["--netns", NETWORK_NAMESPACE])
+    command.extend(["--capture-backend", configured_capture_backend()])
     return command
 
 
@@ -219,6 +255,8 @@ class ChannelUtilizationApp:
         self.wall_clock = wall_clock
 
     def launch(self, *, band: str, channel: int, logging: bool) -> None:
+        if self.g_vars.get("channel_utilization_recovering"):
+            return
         logging_only_session = self.g_vars.get(
             "channel_utilization_logging_session"
         )
@@ -233,6 +271,7 @@ class ChannelUtilizationApp:
 
         session = self.g_vars.get("channel_utilization_session")
         logging_started = False
+        new_session = False
         if not isinstance(session, _DisplaySession):
             _write_logging_enabled(logging)
             session = _DisplaySession(
@@ -254,12 +293,23 @@ class ChannelUtilizationApp:
                 session.start()
             except OSError:
                 self.g_vars.pop("channel_utilization_session", None)
-                _display_error(self.g_vars, "Unable to start capture.")
+                LOGGER.exception("Unable to launch Utilization capture")
+                self.g_vars["channel_utilization_recovering"] = True
+                try:
+                    _display_status(
+                        self.g_vars, "Unable to start capture. Check journal."
+                    )
+                finally:
+                    try:
+                        _return_to_menu(self.g_vars)
+                    finally:
+                        self.g_vars.pop("channel_utilization_recovering", None)
                 return
             logging_started = logging
-        elif session.finished and not session.exit_reported:
-            session.exit_reported = True
-            _display_error(self.g_vars, "Capture stopped.\nCheck journal.")
+            new_session = True
+        elif session.finished:
+            session.report_exit()
+            return
         else:
             logging_started = session.set_logging(logging)
 
@@ -267,12 +317,15 @@ class ChannelUtilizationApp:
         self.g_vars["page_up_handler"] = session.navigate_up
         self.g_vars["page_down_handler"] = session.navigate_down
         self.g_vars["page_key1_handler"] = session.ignore_auxiliary_button
-        self.g_vars["page_key2_handler"] = session.ignore_auxiliary_button
+        self.g_vars["page_key2_handler"] = session.rotate_display
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
         if logging_started:
             session.show_logging_status("Logging started")
+        if new_session:
+            # Install page handlers before the worker can observe a fast exit.
+            session.start_display()
 
     def start_logging_only(self, *, band: str, channel: int) -> None:
         display_session = self.g_vars.get("channel_utilization_session")
@@ -400,12 +453,35 @@ class _DisplaySession:
         _logging_status_path().unlink(missing_ok=True)
         self._write_screen_offset()
         self.process = self.popen(self.command)
+
+    def start_display(self) -> None:
         self.thread = threading.Thread(
             target=self._display_frames,
             name="channel-utilization-display",
             daemon=True,
         )
         self.thread.start()
+
+    def report_exit(self) -> None:
+        """Report a dead child once and return through FPMS's native navigation."""
+        with self.frame_lock:
+            if self.exit_reported or self.stop_event.is_set():
+                return
+            self.exit_reported = True
+            self.g_vars["channel_utilization_recovering"] = True
+        returncode = self.process.poll() if self.process is not None else None
+        LOGGER.error("Utilization capture exited with status %s", returncode)
+        try:
+            self.stop()
+            _display_status(
+                self.g_vars,
+                f"Capture stopped ({returncode}). Check journal.",
+            )
+        finally:
+            try:
+                _return_to_menu(self.g_vars)
+            finally:
+                self.g_vars.pop("channel_utilization_recovering", None)
 
     def stop(self) -> None:
         was_logging = self.logging_enabled
@@ -415,7 +491,7 @@ class _DisplaySession:
         if process is not None and process.poll() is None:
             process.send_signal(signal.SIGINT)
             try:
-                process.wait(timeout=5)
+                process.wait(timeout=_capture_stop_timeout(self.command))
             except subprocess.TimeoutExpired:
                 process.terminate()
                 try:
@@ -452,6 +528,22 @@ class _DisplaySession:
 
     def ignore_auxiliary_button(self) -> None:
         """Override an FPMS shortcut button while this page owns the display."""
+
+    def rotate_display(self) -> None:
+        """Use FPMS's persisted orientation and repaint without changing capture."""
+        callback = self.g_vars.get("channel_utilization_toggle_orientation")
+        if not callable(callback):
+            LOGGER.error("FPMS rotation callback is missing; rerun the installer")
+            return
+        with self.frame_lock:
+            self.g_vars["drawing_in_progress"] = True
+            try:
+                callback()
+                _redraw_current_frame(self.g_vars)
+            except OSError:
+                LOGGER.exception("Unable to rotate the Utilization display")
+            finally:
+                self.g_vars["drawing_in_progress"] = False
 
     def show_logging_status(self, message: str) -> None:
         self.show_status(
@@ -533,6 +625,7 @@ class _DisplaySession:
             self._check_logging_status()
 
             if self.process is not None and self.process.poll() is not None:
+                self.report_exit()
                 return
             self.stop_event.wait(0.1)
 
@@ -585,7 +678,7 @@ class _LoggingOnlySession:
         )
 
     def stop(self) -> None:
-        _stop_process(self.process)
+        _stop_process(self.process, timeout_seconds=_capture_stop_timeout(self.command))
 
 
 def _draw_frame(
@@ -835,12 +928,13 @@ def _write_logging_enabled(enabled: bool) -> None:
     )
 
 
-def _stop_process(process: Optional[subprocess.Popen[bytes]]) -> None:
+def _stop_process(process: Optional[subprocess.Popen[bytes]], *,
+                  timeout_seconds: float = CAPTURE_STOP_TIMEOUT_SECONDS) -> None:
     if process is None or process.poll() is not None:
         return
     process.send_signal(signal.SIGINT)
     try:
-        process.wait(timeout=5)
+        process.wait(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         process.terminate()
         try:
@@ -1060,6 +1154,25 @@ def _display_error(g_vars: dict[str, object], message: str) -> None:
     from fpms.modules.pages.alert import Alert
 
     Alert(g_vars).display_alert_error(g_vars, message)
+
+
+def _return_to_menu(g_vars: dict[str, object]) -> None:
+    callback = g_vars.get("channel_utilization_return_to_menu")
+    if callable(callback):
+        # FPMS menu_left redraws this level when exiting a page. A menu state
+        # would move up a level instead. Capture handlers have been removed.
+        g_vars["display_state"] = "page"
+        callback()
+    else:
+        g_vars["display_state"] = "menu"
+
+
+def _redraw_current_frame(g_vars: dict[str, object]) -> None:
+    image = g_vars.get("image")
+    if image is not None:
+        import fpms.modules.wlanpi_oled as oled
+
+        oled.drawImage(image)
 
 
 def _display_logging_status(

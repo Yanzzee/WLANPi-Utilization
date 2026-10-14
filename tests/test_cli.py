@@ -12,6 +12,40 @@ from beacon_live.models import FrameRecord
 from beacon_live.retry_debug import RetryCaptureData
 
 
+def test_live_passes_explicit_interface_and_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr("beacon_live.cli.run_live", lambda **kwargs: (calls.append(kwargs) or 0))
+    assert main(["live", "--iface", "capture0", "--netns", "lab", "--band", "2.4", "--channel", "1"]) == 0
+    assert calls[0]["iface"] == "capture0"
+    assert calls[0]["netns"] == "lab"
+
+
+def test_live_passes_auto_discovery_namespace_constraint(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr("beacon_live.cli.run_live", lambda **kwargs: (calls.append(kwargs) or 0))
+    assert main(["live", "--netns", "lab"]) == 0
+    assert calls[0]["iface"] == "auto"
+    assert calls[0]["netns"] == "lab"
+
+
+def test_live_passes_core_diagnostics_path(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr('beacon_live.cli.run_live', lambda **kwargs: (calls.append(kwargs) or 0))
+    path = tmp_path / 'core.json'
+    assert main(['live', '--capture-backend', 'core', '--core-diagnostics', str(path)]) == 0
+    assert calls[0]['core_diagnostics_path'] == path
+
+
+@pytest.mark.parametrize('encoding,expected', [('hex', 'AB'), ('text', '4142')])
+def test_replay_ssid_format_is_explicit(tmp_path, encoding, expected):
+    source = tmp_path / 'beacons.tsv'
+    source.write_text('1000.25\t4142\t02:00:00:00:00:10\t128\t2\t1000\t-42\n')
+    beacons = tmp_path / 'beacons.jsonl'
+    assert main(['replay', '--input', str(source), '--ssid-encoding', encoding,
+                 '--beacons-jsonl', str(beacons)]) == 0
+    assert json.loads(beacons.read_text())['ssid'] == expected
+
+
 def test_replay_accepts_pi_smoke_files_and_prints_summary(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -276,7 +310,7 @@ def test_live_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert main(["live"]) == 0
     assert calls == [
         {
-            "iface": "wlan0",
+            "iface": "auto",
             "channel": "36",
             "frequency_mhz": None,
             "band": None,
@@ -626,7 +660,7 @@ def test_live_accepts_local_cu(monkeypatch: pytest.MonkeyPatch) -> None:
     assert main(["live", "--local-cu"]) == 0
     assert calls == [
         {
-            "iface": "wlan0",
+            "iface": "auto",
             "channel": "36",
             "frequency_mhz": None,
             "band": None,
@@ -670,7 +704,7 @@ def test_live_accepts_survey_debug(monkeypatch: pytest.MonkeyPatch) -> None:
     assert main(["live", "--survey-debug"]) == 0
     assert calls == [
         {
-            "iface": "wlan0",
+            "iface": "auto",
             "channel": "36",
             "frequency_mhz": None,
             "band": None,

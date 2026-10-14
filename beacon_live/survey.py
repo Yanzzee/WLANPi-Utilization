@@ -12,7 +12,7 @@ from beacon_live.models import SurveySample
 _SURVEY_HEADER_RE = re.compile(r"^\s*Survey data from\b")
 _IN_USE_RE = re.compile(r"^\s*in use\s*$")
 _FREQUENCY_RE = re.compile(
-    r"^\s*(?:frequency:\s*|channel\s+\d+\s+\()(\d+)\s*MHz\b"
+    r"^\s*(?:frequency:\s*|channel\s+\d+\s+\()(\d+)(?:\.0+)?\s*MHz\b"
 )
 _FIELD_PATTERNS = {
     "active_ms": re.compile(r"^\s*(?:channel active time|time):\s*(\d+)\s*ms\b"),
@@ -63,6 +63,8 @@ def parse_survey_dump(
         frequency_match = _FREQUENCY_RE.match(line)
         if frequency_match:
             current["frequency_mhz"] = int(frequency_match.group(1))
+            if "[in use]" in line:
+                current["in_use"] = True
             continue
 
         for field_name, pattern in _FIELD_PATTERNS.items():
@@ -102,7 +104,9 @@ def compute_local_cu_percent(
     active_delta = current.active_ms - previous.active_ms
     busy_delta = current.busy_ms - previous.busy_ms
 
-    if active_delta <= 0 or busy_delta < 0:
+    if previous.frequency_mhz != current.frequency_mhz:
+        return None
+    if active_delta <= 0 or busy_delta < 0 or busy_delta > active_delta:
         return None
 
     return busy_delta / active_delta * 100
@@ -189,10 +193,15 @@ def _paired_samples(
             for current in current_samples
             if current.frequency_mhz in previous_by_frequency
         ]
-        if pairs:
-            return pairs
+        return pairs
 
-    return list(zip(previous_samples, current_samples))
+    # Positional pairing is only meaningful for legacy samples with no channel
+    # identity on either side. Never subtract counters across a channel change.
+    return [
+        (previous, current)
+        for previous, current in zip(previous_samples, current_samples)
+        if previous.frequency_mhz is None and current.frequency_mhz is None
+    ]
 
 
 def _best_valid_result(
@@ -214,7 +223,7 @@ def _best_valid_result(
 
         active_delta = current.active_ms - previous.active_ms
         busy_delta = current.busy_ms - previous.busy_ms
-        if active_delta <= 0 or busy_delta < 0:
+        if active_delta <= 0 or busy_delta < 0 or busy_delta > active_delta:
             continue
 
         result = SurveyCuResult(

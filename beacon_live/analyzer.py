@@ -11,9 +11,10 @@ from dataclasses import replace
 from functools import lru_cache
 from math import ceil
 from math import floor
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 
 from beacon_live.models import BeaconRecord
+from beacon_live.models import BEACON_LOSS_RSSI_THRESHOLD_DBM
 from beacon_live.models import BeaconBssidReception
 from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import BssidState
@@ -24,6 +25,7 @@ from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
 from beacon_live.models import TOP_STATION_SOURCE_MAC
 from beacon_live.models import TOP_STATION_SOURCE_QBSS
+from beacon_live.models import retry_exclusion_reason
 from beacon_live.radio_grouping import estimate_radio_groups
 from beacon_live.radio_grouping import select_strongest_radio
 
@@ -31,9 +33,9 @@ DEFAULT_WINDOW_SECONDS = 120
 DEFAULT_RSSI_HYSTERESIS_DB = 3
 COMPOSITION_ROTATION_SECONDS = 2
 ASSUMED_BEACON_INTERVAL_SECONDS = 0.1024
-# Keep a radio eligible through one completely missed reporting second, plus
+# Keep a BSSID eligible through one completely missed reporting second, plus
 # the normal delayed-beacon allowance. Older rolling-window state remains
-# useful elsewhere, but must not pin Beacon Loss to an inactive radio.
+# useful elsewhere, but must not pin Beacon Loss to an inactive BSSID.
 BEACON_RADIO_MAX_AGE_SECONDS = 1.0 + ASSUMED_BEACON_INTERVAL_SECONDS
 
 
@@ -48,6 +50,50 @@ class _BssidFrameSummary:
     unique_client_macs: set[str] = field(default_factory=set)
 
 
+class _RetainedFrame(NamedTuple):
+    """Compact rolling input needed to rebuild address-based projections.
+
+    Full ``FrameRecord`` objects contain beacon, diagnostic, and PHY fields
+    that the rolling retry/client projection never reads. Keeping only these
+    ordered association inputs prevents the two-minute window from retaining
+    a large Python instance dictionary for every captured MPDU.
+    """
+
+    timestamp: float
+    bssid: Optional[str]
+    frame_type: Optional[int]
+    frame_subtype: Optional[int]
+    retry_flag: Optional[bool]
+    transmitter_address: Optional[str]
+    receiver_address: Optional[str]
+    source_address: Optional[str]
+    destination_address: Optional[str]
+
+    @property
+    def retry_eligible(self) -> bool:
+        return retry_exclusion_reason(
+            frame_type=self.frame_type,
+            frame_subtype=self.frame_subtype,
+            retry_flag=self.retry_flag,
+            receiver_address=self.receiver_address,
+            destination_address=self.destination_address,
+        ) is None
+
+    @property
+    def mac_addresses(self) -> tuple[str, ...]:
+        addresses: list[str] = []
+        for address in (
+            self.bssid,
+            self.transmitter_address,
+            self.receiver_address,
+            self.source_address,
+            self.destination_address,
+        ):
+            if address is not None and address not in addresses:
+                addresses.append(address)
+        return tuple(addresses)
+
+
 @dataclass(frozen=True)
 class _FrameProjection:
     """One-pass derived values for an immutable tuple of frames."""
@@ -58,6 +104,34 @@ class _FrameProjection:
     retry_count: int
     by_bssid: dict[str, _BssidFrameSummary]
     unique_client_macs: frozenset[str]
+
+
+@dataclass
+class _MutableFrameProjection:
+    """Incremental per-second frame state used by the live stream.
+
+    Live capture never needs to revisit an individual MPDU.  All metrics that
+    depend on frames are additive counts, per-BSSID counts, timestamps, or
+    unique-client sets, so they can be accumulated once and the frame can be
+    released immediately.
+    """
+
+    frame_count: int = 0
+    retry_observed_count: int = 0
+    retry_eligible_count: int = 0
+    retry_count: int = 0
+    by_bssid: dict[str, _BssidFrameSummary] = field(default_factory=dict)
+    unique_client_macs: set[str] = field(default_factory=set)
+
+    def freeze(self) -> _FrameProjection:
+        return _FrameProjection(
+            frame_count=self.frame_count,
+            retry_observed_count=self.retry_observed_count,
+            retry_eligible_count=self.retry_eligible_count,
+            retry_count=self.retry_count,
+            by_bssid=self.by_bssid,
+            unique_client_macs=frozenset(self.unique_client_macs),
+        )
 
 
 @dataclass(frozen=True)
@@ -156,6 +230,7 @@ class Analyzer:
         hysteresis_db: int = DEFAULT_RSSI_HYSTERESIS_DB,
         target_primary_frequency_mhz: Optional[int] = None,
         channel_definition_max_age_seconds: float = 10.0,
+        streaming: bool = False,
     ) -> None:
         if window_seconds <= 0:
             raise ValueError("window_seconds must be greater than zero")
@@ -170,10 +245,15 @@ class Analyzer:
         self.hysteresis_db = hysteresis_db
         self.target_primary_frequency_mhz = target_primary_frequency_mhz
         self.channel_definition_max_age_seconds = channel_definition_max_age_seconds
+        self.streaming = streaming
         self._records_by_bssid: dict[
             str, list[tuple[float, int, BeaconRecord]]
         ] = {}
-        self._frames: list[tuple[float, int, FrameRecord]] = []
+        self._known_bssid_addresses: dict[str, str] = {}
+        self._frames_by_second: dict[
+            int, list[tuple[float, int, _RetainedFrame]]
+        ] = {}
+        self._streaming_frames_by_second: dict[int, _MutableFrameProjection] = {}
         self._pending_seconds: set[int] = set()
         self._completed_seconds: set[int] = set()
         self._ready_stats: list[SecondStats] = []
@@ -189,7 +269,6 @@ class Analyzer:
         self._history_retry_bssid: Optional[str] = None
         self._composition_rotation_second: Optional[int] = None
         self._strongest_radio_bssids: tuple[str, ...] = ()
-        self._history_strongest_radio_bssids: tuple[str, ...] = ()
         self._composition_display_bssid: Optional[str] = None
         self._frame_projections_by_second: dict[
             int, tuple[tuple[object, ...], _FrameProjection]
@@ -253,20 +332,26 @@ class Analyzer:
 
         self._sequence += 1
         beacon = record if isinstance(record, BeaconRecord) else record.beacon_record()
-        if isinstance(record, FrameRecord):
-            self._frame_projections_by_second.pop(record_second, None)
-            frame_entry = (record.timestamp, self._sequence, record)
-            if not self._frames or frame_entry[:2] >= self._frames[-1][:2]:
-                self._frames.append(frame_entry)
-            else:
-                insort(self._frames, frame_entry)
         if beacon is not None:
+            canonical_bssid = _canonical_address(beacon.bssid)
+            self._known_bssid_addresses[canonical_bssid] = beacon.bssid
             entries = self._records_by_bssid.setdefault(beacon.bssid, [])
             beacon_entry = (beacon.timestamp, self._sequence, beacon)
             if not entries or beacon_entry[:2] >= entries[-1][:2]:
                 entries.append(beacon_entry)
             else:
                 insort(entries, beacon_entry)
+        if isinstance(record, FrameRecord) and self.streaming:
+            self._accumulate_streaming_frame(record_second, _retain_frame(record))
+        elif isinstance(record, FrameRecord):
+            self._frame_projections_by_second.pop(record_second, None)
+            retained = _retain_frame(record)
+            frame_entry = (record.timestamp, self._sequence, retained)
+            second_frames = self._frames_by_second.setdefault(record_second, [])
+            if not second_frames or frame_entry[:2] >= second_frames[-1][:2]:
+                second_frames.append(frame_entry)
+            else:
+                insort(second_frames, frame_entry)
         if record_second not in self._completed_seconds:
             self._pending_seconds.add(record_second)
 
@@ -442,23 +527,17 @@ class Analyzer:
             states,
             self._history_retry_bssid,
         )
-        strongest_radio = select_strongest_radio(
-            estimate_radio_groups(
-                _recent_radio_states(
-                    states,
-                    reference_timestamp=float(second + 1),
-                )
-            ),
-            self._history_strongest_radio_bssids,
+        beacon_loss_bssids = tuple(
+            state.bssid
+            for state in _beacon_loss_states(
+                states,
+                reference_timestamp=float(second + 1),
+            )
         )
-        strongest_radio_bssids = (
-            strongest_radio.bssids if strongest_radio is not None else ()
-        )
-        self._history_strongest_radio_bssids = strongest_radio_bssids
         beacon_reception = self._beacon_reception_snapshot(
             second=second,
             interval_end=float(second + 1),
-            strongest_radio_bssids=strongest_radio_bssids,
+            beacon_loss_bssids=beacon_loss_bssids,
         )
         self._ready_stats.append(
             _stats_from_states(
@@ -559,32 +638,33 @@ class Analyzer:
                 completed_projection.window_unique_client_mac_count
             )
         else:
-            frames = self._frames_at(
-                reference_timestamp=reference_timestamp,
-                upper_exclusive=upper_exclusive,
-            )
             retry_scope = self._retry_scope_entries()
             states, window_frames = self._states_at(
                 reference_timestamp=reference_timestamp,
                 upper_exclusive=upper_exclusive,
-                frames=frames,
+                frames=(),
+                cache_by_second=True,
                 retry_scope=retry_scope,
             )
-            second_frames = _project_frames(
-                self._frames_between(
-                    float(current_second),
-                    (
-                        upper_exclusive
-                        if upper_exclusive is not None
-                        else float(current_second + 1)
+            second_frames = (
+                self._streaming_projection_for_second(current_second)
+                if self.streaming
+                else _project_frames(
+                    self._frames_between(
+                        float(current_second),
+                        (
+                            upper_exclusive
+                            if upper_exclusive is not None
+                            else float(current_second + 1)
+                        ),
                     ),
-                ),
-                tuple(state.bssid for state in states),
-                retry_scope=retry_scope,
-                target_primary_frequency_mhz=self.target_primary_frequency_mhz,
-                channel_definition_max_age_seconds=(
-                    self.channel_definition_max_age_seconds
-                ),
+                    tuple(state.bssid for state in states),
+                    retry_scope=retry_scope,
+                    target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                    channel_definition_max_age_seconds=(
+                        self.channel_definition_max_age_seconds
+                    ),
+                )
             )
             retry_states = _retry_states_from_projection(second_frames, states)
             window_unique_client_mac_count = len(
@@ -613,15 +693,32 @@ class Analyzer:
             current_second,
             reference_timestamp=interval_end,
         )
+        beacon_loss_states = _beacon_loss_states(
+            states,
+            reference_timestamp=interval_end,
+        )
+        beacon_loss_display = _strongest_latest_rssi_state(beacon_loss_states)
         beacon_reception = self._beacon_reception_snapshot(
             second=current_second,
             interval_end=interval_end,
-            strongest_radio_bssids=(
-                composition.strongest_radio_bssids
+            beacon_loss_bssids=tuple(
+                state.bssid for state in beacon_loss_states
             ),
-            displayed_ssid=composition.displayed_ssid,
-            displayed_bssid=composition.displayed_bssid,
-            displayed_rssi_dbm=composition.displayed_rssi_dbm,
+            displayed_ssid=(
+                beacon_loss_display.ssid
+                if beacon_loss_display is not None
+                else None
+            ),
+            displayed_bssid=(
+                beacon_loss_display.bssid
+                if beacon_loss_display is not None
+                else None
+            ),
+            displayed_rssi_dbm=(
+                beacon_loss_display.latest_rssi_dbm
+                if beacon_loss_display is not None
+                else None
+            ),
         )
         current = _stats_from_states(
             current_second,
@@ -658,13 +755,13 @@ class Analyzer:
         *,
         second: int,
         interval_end: float,
-        strongest_radio_bssids: tuple[str, ...],
+        beacon_loss_bssids: tuple[str, ...],
         displayed_ssid: Optional[str] = None,
         displayed_bssid: Optional[str] = None,
         displayed_rssi_dbm: Optional[int] = None,
     ) -> BeaconReceptionSnapshot:
         members: list[BeaconBssidReception] = []
-        for bssid in strongest_radio_bssids:
+        for bssid in beacon_loss_bssids:
             timestamps = tuple(
                 entry[0]
                 for entry in self._records_by_bssid.get(bssid, ())
@@ -686,7 +783,7 @@ class Analyzer:
         received_count = sum(member.received_count for member in members)
         expected_count = sum(member.expected_count for member in members)
         return BeaconReceptionSnapshot(
-            strongest_radio_bssids=strongest_radio_bssids,
+            strongest_radio_bssids=beacon_loss_bssids,
             bssids=tuple(members),
             received_count=received_count,
             expected_count=expected_count,
@@ -803,7 +900,7 @@ class Analyzer:
         *,
         reference_timestamp: float,
         upper_exclusive: Optional[float],
-        frames: tuple[FrameRecord, ...],
+        frames: tuple[_RetainedFrame, ...],
         cache_by_second: bool = False,
         retry_scope: Optional[dict[str, _RetryScopeTimeline]] = None,
     ) -> tuple[tuple[BssidState, ...], _FrameProjection]:
@@ -824,9 +921,10 @@ class Analyzer:
         if retry_scope is None:
             retry_scope = self._retry_scope_entries()
         frame_projection = (
-            self._rolling_frame_projection(
-                int(reference_timestamp) - 1,
-                known_bssids,
+            self._rolling_frame_projection_at(
+                reference_timestamp=reference_timestamp,
+                upper_exclusive=upper_exclusive,
+                known_bssids=known_bssids,
                 retry_scope=retry_scope,
             )
             if cache_by_second
@@ -919,28 +1017,27 @@ class Analyzer:
             frame_projection,
         )
 
-    def _frames_at(
-        self,
-        *,
-        reference_timestamp: float,
-        upper_exclusive: Optional[float],
-    ) -> tuple[FrameRecord, ...]:
-        cutoff = reference_timestamp - self.window_seconds
-        return self._frames_between(cutoff, upper_exclusive)
-
     def _frames_between(
         self,
         lower_inclusive: float,
         upper_exclusive: Optional[float],
-    ) -> tuple[FrameRecord, ...]:
-        """Slice ordered frame storage without scanning unrelated seconds."""
-        start = bisect_left(self._frames, (lower_inclusive, -1))
-        end = (
-            len(self._frames)
+    ) -> tuple[_RetainedFrame, ...]:
+        """Slice second-bucketed storage without shifting the whole window."""
+        if not self._frames_by_second:
+            return ()
+        first_second = floor(lower_inclusive)
+        last_second = (
+            max(self._frames_by_second)
             if upper_exclusive is None
-            else bisect_left(self._frames, (upper_exclusive, -1))
+            else floor(upper_exclusive)
         )
-        return tuple(entry[2] for entry in self._frames[start:end])
+        return tuple(
+            entry[2]
+            for second in range(first_second, last_second + 1)
+            for entry in self._frames_by_second.get(second, ())
+            if entry[0] >= lower_inclusive
+            and (upper_exclusive is None or entry[0] < upper_exclusive)
+        )
 
     def _frame_projection_for_second(
         self,
@@ -949,6 +1046,8 @@ class Analyzer:
         *,
         retry_scope: Optional[dict[str, _RetryScopeTimeline]] = None,
     ) -> _FrameProjection:
+        if self.streaming:
+            return self._streaming_projection_for_second(second)
         if retry_scope is None:
             retry_scope = self._retry_scope_entries()
         cache_key = self._projection_cache_key(
@@ -975,24 +1074,80 @@ class Analyzer:
         self._frame_projections_by_second[second] = (cache_key, projection)
         return projection
 
-    def _rolling_frame_projection(
+    def _rolling_frame_projection_at(
         self,
-        end_second: int,
-        known_bssids: tuple[str, ...],
         *,
+        reference_timestamp: float,
+        upper_exclusive: Optional[float],
+        known_bssids: tuple[str, ...],
         retry_scope: dict[str, _RetryScopeTimeline],
     ) -> _FrameProjection:
-        first_second = end_second - self.window_seconds + 1
-        return _merge_frame_projections(
-            tuple(
+        """Merge cached whole seconds plus at most two raw boundary slices."""
+        lower = reference_timestamp - self.window_seconds
+        upper = (
+            upper_exclusive
+            if upper_exclusive is not None
+            else reference_timestamp + 1e-9
+        )
+        if upper <= lower:
+            return _project_frames((), known_bssids)
+
+        if self.streaming:
+            # Completed snapshots use integer boundaries, making this exact.
+            # A provisional snapshot may include the whole boundary bucket;
+            # live display publication uses completed wall-clock seconds only.
+            first_second = floor(lower)
+            last_second = max(first_second, ceil(upper) - 1)
+            return _merge_frame_projections(
+                tuple(
+                    self._streaming_projection_for_second(second)
+                    for second in range(first_second, last_second + 1)
+                )
+            )
+
+        projections: list[_FrameProjection] = []
+        first_full_second = ceil(lower)
+        if lower < first_full_second:
+            projections.append(
+                _project_frames(
+                    self._frames_between(
+                        lower,
+                        min(float(first_full_second), upper),
+                    ),
+                    known_bssids,
+                    retry_scope=retry_scope,
+                    target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                    channel_definition_max_age_seconds=(
+                        self.channel_definition_max_age_seconds
+                    ),
+                )
+            )
+
+        last_full_second = floor(upper) - 1
+        if last_full_second >= first_full_second:
+            projections.extend(
                 self._frame_projection_for_second(
                     second,
                     known_bssids,
                     retry_scope=retry_scope,
                 )
-                for second in range(first_second, end_second + 1)
+                for second in range(first_full_second, last_full_second + 1)
             )
-        )
+
+        trailing_start = max(lower, float(last_full_second + 1))
+        if trailing_start < upper:
+            projections.append(
+                _project_frames(
+                    self._frames_between(trailing_start, upper),
+                    known_bssids,
+                    retry_scope=retry_scope,
+                    target_primary_frequency_mhz=self.target_primary_frequency_mhz,
+                    channel_definition_max_age_seconds=(
+                        self.channel_definition_max_age_seconds
+                    ),
+                )
+            )
+        return _merge_frame_projections(tuple(projections))
 
     def _retry_scope_entries(self) -> dict[str, _RetryScopeTimeline]:
         if self.target_primary_frequency_mhz is None:
@@ -1040,14 +1195,20 @@ class Analyzer:
 
     def _expire_records(self, reference_timestamp: float) -> None:
         cutoff = reference_timestamp - self.window_seconds
-        first_retained_frame = 0
-        while (
-            first_retained_frame < len(self._frames)
-            and self._frames[first_retained_frame][0] < cutoff
-        ):
-            first_retained_frame += 1
-        if first_retained_frame:
-            del self._frames[:first_retained_frame]
+        cutoff_second = floor(cutoff)
+        for second in tuple(self._frames_by_second):
+            if second < cutoff_second:
+                del self._frames_by_second[second]
+        for second in tuple(self._streaming_frames_by_second):
+            if second < cutoff_second:
+                del self._streaming_frames_by_second[second]
+        boundary = self._frames_by_second.get(cutoff_second)
+        if boundary is not None:
+            first_retained_frame = bisect_left(boundary, (cutoff, -1))
+            if first_retained_frame:
+                del boundary[:first_retained_frame]
+            if not boundary:
+                del self._frames_by_second[cutoff_second]
 
         earliest_cached_second = floor(cutoff)
         for second in tuple(self._frame_projections_by_second):
@@ -1066,11 +1227,106 @@ class Analyzer:
                 del entries[:first_retained]
             if not entries:
                 del self._records_by_bssid[bssid]
+                self._known_bssid_addresses.pop(_canonical_address(bssid), None)
 
     def _is_expired_late_record(self, timestamp: float) -> bool:
         return (
             self._reference_timestamp is not None
             and timestamp < self._reference_timestamp - self.window_seconds
+        )
+
+    def _streaming_projection_for_second(self, second: int) -> _FrameProjection:
+        projection = self._streaming_frames_by_second.get(second)
+        if projection is None:
+            return _project_frames((), ())
+        return projection.freeze()
+
+    def _accumulate_streaming_frame(
+        self,
+        second: int,
+        frame: _RetainedFrame,
+    ) -> None:
+        """Classify one ordered live frame and immediately discard it."""
+        projection = self._streaming_frames_by_second.setdefault(
+            second,
+            _MutableFrameProjection(),
+        )
+        projection.frame_count += 1
+
+        known_by_address = self._known_bssid_addresses
+        associated_bssid = _associated_bssid(frame, known_by_address)
+        retry_in_scope = (
+            self.target_primary_frequency_mhz is None
+            or self._streaming_frame_matches_primary_scope(
+                frame,
+                associated_bssid,
+            )
+        )
+        retry_observed = retry_in_scope and frame.retry_flag is not None
+        retry_eligible = retry_in_scope and frame.retry_eligible
+        is_retry = retry_eligible and frame.retry_flag is True
+        projection.retry_observed_count += retry_observed
+        projection.retry_eligible_count += retry_eligible
+        projection.retry_count += is_retry
+
+        summary: Optional[_BssidFrameSummary] = None
+        if associated_bssid is not None and retry_in_scope:
+            summary = projection.by_bssid.get(associated_bssid)
+            if summary is None:
+                summary = _BssidFrameSummary()
+                projection.by_bssid[associated_bssid] = summary
+            summary.frame_count += 1
+            summary.retry_observed_count += retry_observed
+            summary.retry_eligible_count += retry_eligible
+            summary.retry_count += is_retry
+            if summary.first_timestamp is None:
+                summary.first_timestamp = frame.timestamp
+            summary.last_timestamp = frame.timestamp
+
+        if frame.frame_type != 2 or not retry_in_scope:
+            return
+        frame_bssid = _known_frame_bssid(frame, known_by_address)
+        if frame_bssid is None:
+            return
+        link_addresses = tuple(
+            _canonical_address(address)
+            for address in (frame.transmitter_address, frame.receiver_address)
+            if address is not None
+        )
+        if frame_bssid not in link_addresses:
+            return
+        for address in link_addresses:
+            if (
+                address != frame_bssid
+                and address not in known_by_address
+                and _is_unicast_mac(address)
+            ):
+                projection.unique_client_macs.add(address)
+                if summary is not None:
+                    summary.unique_client_macs.add(address)
+
+    def _streaming_frame_matches_primary_scope(
+        self,
+        frame: _RetainedFrame,
+        associated_bssid: Optional[str],
+    ) -> bool:
+        if associated_bssid is None:
+            return False
+        entries = self._records_by_bssid.get(associated_bssid)
+        if not entries:
+            return False
+        latest: Optional[BeaconRecord] = None
+        for timestamp, _, candidate in reversed(entries):
+            if timestamp <= frame.timestamp and candidate.channel_definition is not None:
+                latest = candidate
+                break
+        if latest is None or latest.channel_definition is None:
+            return False
+        if frame.timestamp - latest.timestamp > self.channel_definition_max_age_seconds:
+            return False
+        return (
+            latest.channel_definition.primary_frequency_mhz
+            == self.target_primary_frequency_mhz
         )
 
     def _prune_completed_seconds(self, latest_second: int) -> None:
@@ -1337,7 +1593,7 @@ def _merge_frame_projections(
 
 
 def _project_frames(
-    frames: tuple[FrameRecord, ...],
+    frames: tuple[_RetainedFrame, ...],
     known_bssids: tuple[str, ...],
     *,
     retry_scope: Optional[dict[str, _RetryScopeTimeline]] = None,
@@ -1434,7 +1690,7 @@ def _project_frames(
 
 
 def _frame_matches_primary_scope(
-    frame: FrameRecord,
+    frame: _RetainedFrame,
     associated_bssid: Optional[str],
     retry_scope: dict[str, _RetryScopeTimeline],
     target_primary_frequency_mhz: int,
@@ -1460,7 +1716,7 @@ def _frame_matches_primary_scope(
 
 
 def _known_frame_bssid(
-    frame: FrameRecord,
+    frame: Union[FrameRecord, _RetainedFrame],
     known_bssids: set[str],
 ) -> Optional[str]:
     for address in frame.mac_addresses:
@@ -1528,7 +1784,7 @@ def associate_frame_bssid(
 
 
 def _associated_bssid(
-    frame: FrameRecord,
+    frame: Union[FrameRecord, _RetainedFrame],
     known_by_address: dict[str, str],
 ) -> Optional[str]:
     for address in frame.mac_addresses:
@@ -1541,6 +1797,24 @@ def _associated_bssid(
 @lru_cache(maxsize=32_768)
 def _canonical_address(address: str) -> str:
     return address.strip().lower()
+
+
+def _retain_frame(frame: FrameRecord) -> _RetainedFrame:
+    """Copy only rolling-analysis fields and share canonical MAC strings."""
+    def address(value: Optional[str]) -> Optional[str]:
+        return _canonical_address(value) if value is not None else None
+
+    return _RetainedFrame(
+        timestamp=frame.timestamp,
+        bssid=address(frame.bssid),
+        frame_type=frame.frame_type,
+        frame_subtype=frame.frame_subtype,
+        retry_flag=frame.retry_flag,
+        transmitter_address=address(frame.transmitter_address),
+        receiver_address=address(frame.receiver_address),
+        source_address=address(frame.source_address),
+        destination_address=address(frame.destination_address),
+    )
 
 
 def _percentage(numerator: int, denominator: int) -> Optional[float]:
@@ -1572,6 +1846,42 @@ def _recent_radio_states(
         for state in states
         if state.latest_beacon_ts >= cutoff - tolerance
         and state.latest_beacon_ts <= reference_timestamp + tolerance
+    )
+
+
+def _beacon_loss_states(
+    states: tuple[BssidState, ...],
+    *,
+    reference_timestamp: float,
+) -> tuple[BssidState, ...]:
+    """Return recently heard BSSIDs above the Beacon Loss RSSI threshold."""
+    return tuple(
+        state
+        for state in _recent_radio_states(
+            states,
+            reference_timestamp=reference_timestamp,
+        )
+        if state.latest_rssi_dbm is not None
+        and state.latest_rssi_dbm > BEACON_LOSS_RSSI_THRESHOLD_DBM
+    )
+
+
+def _strongest_latest_rssi_state(
+    states: tuple[BssidState, ...],
+) -> Optional[BssidState]:
+    """Choose a deterministic identity for the shared Beacon Loss metric."""
+    if not states:
+        return None
+    return min(
+        states,
+        key=lambda state: (
+            -(
+                state.latest_rssi_dbm
+                if state.latest_rssi_dbm is not None
+                else -200
+            ),
+            state.bssid,
+        ),
     )
 
 

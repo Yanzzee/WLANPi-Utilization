@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import socket
 import subprocess
 from dataclasses import replace
 from datetime import datetime
@@ -11,8 +12,12 @@ from typing import Optional
 
 import pytest
 
+from beacon_live.analyzer import Analyzer
+from beacon_live.capture_target import CaptureTarget
+from beacon_live import live
 from beacon_live.live import LiveCommandError
 from beacon_live.live import LiveStartupFilter
+from beacon_live.live import BoundedStderrCollector
 from beacon_live.live import TsharkLineReader
 from beacon_live.live import _read_survey_samples_safely
 from beacon_live.live import _format_survey_debug_line
@@ -21,10 +26,13 @@ from beacon_live.live import build_monitor_setup_commands
 from beacon_live.live import build_survey_command
 from beacon_live.live import build_tshark_command
 from beacon_live.live import _write_raw_capture_metadata
+from beacon_live.live import _start_live_aggregation_process
+from beacon_live.live import _wall_clock_snapshot
 from beacon_live.live import channel_to_frequency_mhz
 from beacon_live.live import configure_monitor_interface
 from beacon_live.live import default_channel_definition
 from beacon_live.live import frequency_to_band
+from beacon_live.live import prune_fixed_capture_coverage
 from beacon_live.live import resolve_survey_target_frequency_mhz
 from beacon_live.live import run_live
 from beacon_live.live import select_tshark_frame_fields
@@ -33,10 +41,177 @@ from beacon_live.channel import ChannelDefinition
 from beacon_live.channel import ChannelWidth
 from beacon_live.channel import RadioCapabilities
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
+from beacon_live.models import MetricsSnapshot
+from beacon_live.models import FrameRecord
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
 from beacon_live.survey import SurveyCuResult
 from beacon_live.channel import CoverageDecision
+
+
+@pytest.fixture(autouse=True)
+def hardware_free_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset(TSHARK_FRAME_FIELD_NAMES))
+    monkeypatch.setattr(
+        "beacon_live.live.discover_capture_target",
+        lambda frequency, *, namespace=None: CaptureTarget("wlan0", namespace),
+    )
+    class IdleRadio:
+        original_mode = "managed"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def prepare(self):
+            pass
+
+    monkeypatch.setattr(live, "RadioSession", lambda *args, **kwargs: IdleRadio())
+
+
+def test_namespace_routes_every_monitor_setup_command() -> None:
+    target = CaptureTarget("renamed", "lab")
+    definition = ChannelDefinition(5180, ChannelWidth.MHZ80, 5210)
+    commands = build_monitor_setup_commands(target, "36", channel_definition=definition)
+    assert commands == [
+        ["ip", "netns", "exec", "lab", "ip", "link", "set", "renamed", "down"],
+        ["ip", "netns", "exec", "lab", "iw", "dev", "renamed", "set", "type", "monitor"],
+        ["ip", "netns", "exec", "lab", "ip", "link", "set", "renamed", "up"],
+        ["ip", "netns", "exec", "lab", "iw", "dev", "renamed", "set", "freq", "5180", "80", "5210"],
+    ]
+
+
+def test_namespace_routes_tshark_and_preserves_capture_options(tmp_path: Path) -> None:
+    target = CaptureTarget("capture0", "lab")
+    raw = tmp_path / "all.pcapng"
+    root_command = build_tshark_command("capture0", raw_capture_path=raw)
+    assert build_tshark_command(target, raw_capture_path=raw) == [
+        "ip", "netns", "exec", "lab", *root_command,
+    ]
+    assert build_survey_command(target) == [
+        "ip", "netns", "exec", "lab", "iw", "dev", "capture0", "survey", "dump",
+    ]
+
+
+def test_namespace_routes_capabilities_actual_channel_and_survey(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = CaptureTarget("capture0", "lab")
+    outputs = iter([
+        "Interface capture0\n wiphy 7\n",
+        "Supported interface modes:\n * monitor\n * 2412.0 MHz [1] (20 dBm)\n",
+        "Interface capture0\n wiphy 7\n type monitor\n channel 1 (2412 MHz), width: 20 MHz, center1: 2412 MHz\n",
+        "",
+    ])
+    commands = []
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=next(outputs), stderr="")
+    monkeypatch.setattr(live.subprocess, "run", run)
+    caps = live.read_radio_capabilities(target)
+    assert caps.supported_frequencies_mhz == frozenset({2412})
+    assert live.read_actual_channel_definition(target).primary_frequency_mhz == 2412
+    assert live.read_survey_samples(target) == []
+    assert commands == [
+        target.command(["iw", "dev", "capture0", "info"]),
+        target.command(["iw", "phy", "phy7", "info"]),
+        target.command(["iw", "dev", "capture0", "info"]),
+        target.command(["iw", "dev", "capture0", "survey", "dump"]),
+    ]
+
+
+def test_namespaced_live_uses_one_target_and_one_capture_and_records_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    target = CaptureTarget("sniffer", "lab")
+    monkeypatch.setattr(live, "discover_capture_target", lambda frequency, **kwargs: target)
+    operations = []
+    monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda iface: (
+        operations.append(("capabilities", iface)) or RadioCapabilities.ht20_only()
+    ))
+    monkeypatch.setattr(live, "configure_monitor_interface", lambda iface, *args, **kwargs: operations.append(("configure", iface)))
+    monkeypatch.setattr(live, "_read_actual_channel_safely", lambda iface, requested: (
+        operations.append(("verify", iface)) or (requested, True)
+    ))
+    monkeypatch.setattr(live, "_read_survey_samples_safely", lambda iface: (
+        operations.append(("survey", iface)) or []
+    ))
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset(TSHARK_FRAME_FIELD_NAMES))
+    def start(iface, **kwargs):
+        operations.append(("capture", iface))
+        return _FakeTsharkProcess()
+    monkeypatch.setattr(live, "start_tshark_process", start)
+    stats = tmp_path / "stats.csv"
+    beacons = tmp_path / "beacons.jsonl"
+    raw = tmp_path / "raw.pcapng"
+    assert run_live(
+        local_cu=True, interval_seconds=0.1, stats_csv=stats, beacons_jsonl=beacons,
+        raw_capture_path=raw, min_free_bytes=0,
+    ) == 0
+    assert all(iface == target for _, iface in operations)
+    assert [stage for stage, _ in operations].count("capture") == 1
+    assert {stage for stage, _ in operations} == {"capabilities", "configure", "verify", "survey", "capture"}
+    rows = list(csv.DictReader(stats.open()))
+    assert rows and all(row["interface"] == "sniffer" and row["network_namespace"] == "lab" for row in rows)
+    beacon_rows = [json.loads(line) for line in beacons.read_text().splitlines()]
+    assert beacon_rows and all(row["network_namespace"] == "lab" for row in beacon_rows)
+    metadata = json.loads(raw.with_suffix(".pcapng.json").read_text())
+    assert metadata["interface"] == "sniffer"
+    assert metadata["network_namespace"] == "lab"
+
+
+def test_non_monitor_radio_is_rejected_before_interface_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda iface: RadioCapabilities(
+        frozenset({ChannelWidth.MHZ20}), frozenset({2412}), supports_monitor=False,
+        source_complete=True,
+    ))
+    monkeypatch.setattr(live, "configure_monitor_interface", lambda *args, **kwargs: pytest.fail("must not change radio"))
+    with pytest.raises(ValueError, match="root:wlan0 does not support monitor mode"):
+        run_live(iface="wlan0", band="2.4", channel="1")
+
+
+@pytest.mark.parametrize("failure_stage", [None, "configure", "capture", "selector"])
+def test_radio_session_restores_after_live_exit_and_startup_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure_stage,
+) -> None:
+    from test_radio_session import RadioHardware
+
+    _prepare_one_interval_live_run(monkeypatch)
+    hardware = RadioHardware(mode="managed", up=False)
+    target = CaptureTarget("capture0")
+    monkeypatch.setattr(live, "discover_capture_target", lambda *args, **kwargs: target)
+    monkeypatch.setattr(live, "RadioSession", lambda *args, **kwargs: hardware.session(tmp_path))
+    monkeypatch.setattr(live.subprocess, "run", hardware.run)
+    monkeypatch.setattr(live, "_read_radio_capabilities_safely", lambda *args: RadioCapabilities.ht20_only())
+    monkeypatch.setattr(live, "_read_actual_channel_safely", lambda iface, requested: (requested, True))
+    monkeypatch.setattr(live, "available_tshark_fields", lambda: frozenset(TSHARK_FRAME_FIELD_NAMES))
+    def configure(iface, channel, **kwargs):
+        configure_monitor_interface(iface, channel, **kwargs)
+        if failure_stage == "configure":
+            raise RuntimeError("configure failed")
+    monkeypatch.setattr(live, "configure_monitor_interface", configure)
+    stopped = []
+    monkeypatch.setattr(live, "terminate_tshark_process", lambda process: stopped.append(process))
+    if failure_stage == "capture":
+        def fail_capture(*args, **kwargs):
+            raise RuntimeError("capture failed")
+        monkeypatch.setattr(live, "start_tshark_process", fail_capture)
+    if failure_stage == "selector":
+        def fail_selector():
+            raise RuntimeError("selector failed")
+        monkeypatch.setattr(live.selectors, "DefaultSelector", fail_selector)
+    if failure_stage:
+        with pytest.raises(RuntimeError, match=failure_stage):
+            run_live(band="2.4", channel="6")
+    else:
+        assert run_live(band="2.4", channel="6") == 0
+    assert hardware.interfaces["capture0"]["mode"] == "managed"
+    assert not hardware.interfaces["capture0"]["up"]
+    assert hardware.interfaces["wifi1"]["up"]
+    assert len(stopped) == (1 if failure_stage in {None, "selector"} else 0)
 
 
 def test_build_monitor_setup_commands_uses_ht20_channel() -> None:
@@ -212,7 +387,7 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
 
 def test_live_field_selection_keeps_retry_and_frequency_fallbacks() -> None:
     fields = select_tshark_frame_fields(
-        frozenset(
+        frozenset(TSHARK_FRAME_FIELD_NAMES) | frozenset(
             {
                 "wlan.fc",
                 "wlan_radio.frequency",
@@ -588,6 +763,90 @@ def test_live_collecting_state_and_input_polling_are_not_frame_rate_bound(
     assert input_polls == 1
 
 
+def test_live_paints_collecting_before_radio_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    events: list[str] = []
+    capabilities = RadioCapabilities(
+        frozenset({ChannelWidth.MHZ20, ChannelWidth.MHZ40, ChannelWidth.MHZ80}),
+        frozenset({5180, 5200, 5220, 5240}),
+        supports_monitor=True,
+        source_complete=True,
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_radio_capabilities_safely",
+        lambda iface: (events.append("capabilities") or capabilities),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live.configure_monitor_interface",
+        lambda *args, **kwargs: events.append("tune"),
+    )
+    monkeypatch.setattr(
+        "beacon_live.live._read_actual_channel_safely",
+        lambda iface, requested: (
+            events.append("verify") or (requested, True)
+        ),
+    )
+
+    class Dashboard:
+        poll_interval_seconds = 100.0
+
+        def set_collecting(self, collecting: bool) -> None:
+            events.append(f"collecting:{collecting}")
+
+        def set_capture_width(self, width: str) -> None:
+            events.append(f"width:{width}")
+
+        def refresh(self, snapshot: object = None) -> None:
+            events.append("frame")
+
+        def poll_input(self) -> bool:
+            return False
+
+    assert run_live(interval_seconds=0.1, _dashboard=Dashboard()) == 0
+
+    assert events[:3] == ["collecting:True", "frame", "capabilities"]
+    assert events.index("frame") < events.index("tune")
+    assert events.index("frame") < events.index("verify")
+
+
+def test_inline_fallback_refreshes_only_on_the_display_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_one_interval_live_run(monkeypatch)
+    refresh_calls = 0
+    snapshots: list[object] = []
+
+    from beacon_live.analyzer import Analyzer
+
+    original_refresh = Analyzer.refresh_current
+
+    def counted_refresh(self: Analyzer, value: Optional[float] = None) -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        original_refresh(self, value)
+
+    monkeypatch.setattr(Analyzer, "refresh_current", counted_refresh)
+
+    class Dashboard:
+        poll_interval_seconds = 100.0
+
+        def refresh(self, snapshot: object = None) -> None:
+            snapshots.append(snapshot)
+
+        def poll_input(self) -> bool:
+            return False
+
+    assert run_live(interval_seconds=0.1, _dashboard=Dashboard()) == 0
+
+    # StringIO test captures use the inline fallback. Its analyzer refreshes
+    # only from the independent display deadline while capture continues.
+    assert refresh_calls >= 2
+    # Initial and terminal paints are the only non-interval publications.
+    assert len(snapshots) <= refresh_calls + 2
+
+
 def test_logging_only_never_starts_the_curses_dashboard(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -839,6 +1098,188 @@ def test_tshark_line_reader_drains_every_buffered_pipe_row() -> None:
             "three",
         ]
         assert reader.exhausted is True
+
+
+def test_tshark_line_reader_limits_each_ready_batch() -> None:
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb", buffering=0) as read_stream:
+        os.write(write_fd, b"one\ntwo\nthree\n")
+        os.close(write_fd)
+        reader = TsharkLineReader(read_stream)
+
+        reader.read_ready(byte_budget=len(b"one\ntwo\n"))
+        assert [reader.pop_line(), reader.pop_line()] == ["one", "two"]
+        assert reader.pop_line() is None
+        assert reader.exhausted is False
+
+        reader.read_ready()
+        assert reader.pop_line() == "three"
+        assert reader.exhausted is True
+
+
+def test_tshark_stderr_is_drained_into_a_bounded_tail() -> None:
+    collector = BoundedStderrCollector(
+        io.BytesIO(b"discard-this-prefix\nimportant-tail\n"),
+        max_bytes=len(b"important-tail\n"),
+    )
+    collector.start()
+
+    assert collector.finish() == "important-tail"
+
+
+def test_wall_clock_snapshot_uses_fixed_slots_and_does_not_scroll_stale_data() -> None:
+    empty = MetricsSnapshot.empty(window_seconds=3)
+    captured = replace(empty.current, second=1_700_000_000, retry_percent=25.0)
+    snapshot = replace(
+        empty,
+        generated_at=1_700_000_001.0,
+        current=captured,
+        history=(captured,),
+    )
+
+    aligned = _wall_clock_snapshot(snapshot, 1_700_000_003.2)
+
+    assert [row.second for row in aligned.history] == [
+        1_700_000_000,
+        1_700_000_001,
+        1_700_000_002,
+    ]
+    assert aligned.history[0].retry_percent == 25.0
+    assert aligned.history[-1].retry_percent is None
+    assert aligned.history[-1].sample_available is False
+    assert aligned.current is aligned.history[0]
+
+
+def test_wall_clock_snapshot_keeps_latest_actual_state_across_right_edge_gaps() -> None:
+    bssid = "02:00:00:00:00:01"
+    analyzer = Analyzer(window_seconds=3)
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1_700_000_000.1,
+            bssid=bssid,
+            ssid="Alpha",
+            rssi_dbm=-35,
+            frame_type=0,
+            frame_subtype=8,
+            retry_flag=False,
+            beacon_interval_tu=100,
+            qbss_cu_raw=64,
+            qbss_cu_percent=64 / 255 * 100,
+            qbss_station_count=7,
+            qbss_admission_capacity=10_000,
+        )
+    )
+    analyzer.ingest(
+        FrameRecord(
+            timestamp=1_700_000_000.2,
+            bssid=bssid,
+            frame_type=2,
+            frame_subtype=0,
+            retry_flag=True,
+            receiver_address=bssid,
+        )
+    )
+    analyzer.flush()
+    snapshot = analyzer.snapshot
+
+    aligned = _wall_clock_snapshot(snapshot, 1_700_000_003.2)
+
+    assert aligned.current.second == 1_700_000_000
+    assert aligned.current.sample_available is True
+    assert aligned.current.selected_qbss_bssid == bssid
+    assert aligned.selected_bssid == snapshot.selected_bssid
+    assert aligned.top_station_bssid == snapshot.top_station_bssid
+    assert aligned.top_retry_bssid == snapshot.top_retry_bssid
+    assert aligned.bssids == snapshot.bssids
+    assert aligned.retry_bssids == snapshot.retry_bssids
+    assert aligned.composition == snapshot.composition
+    assert aligned.beacons == snapshot.beacons
+    assert [row.sample_available for row in aligned.history] == [True, False, False]
+
+
+def test_wall_clock_snapshot_clears_state_only_after_all_samples_age_out() -> None:
+    empty = MetricsSnapshot.empty(window_seconds=3)
+    captured = replace(empty.current, second=1_700_000_000)
+    snapshot = replace(
+        empty,
+        generated_at=1_700_000_001.0,
+        current=captured,
+        history=(captured,),
+        selected_bssid="stale",
+        top_station_bssid="stale",
+        top_station_count=9,
+        top_retry_bssid="stale",
+        window_unique_client_mac_count=4,
+    )
+
+    aligned = _wall_clock_snapshot(snapshot, 1_700_000_005.2)
+
+    assert not any(row.sample_available for row in aligned.history)
+    assert aligned.current.sample_available is False
+    assert aligned.bssids == ()
+    assert aligned.selected_bssid is None
+    assert aligned.top_station_bssid is None
+    assert aligned.top_retry_bssid is None
+    assert aligned.window_unique_client_mac_count == 0
+
+
+def test_real_pipe_uses_separate_streaming_aggregation_process() -> None:
+    reader_socket, writer_socket = socket.socketpair()
+    stream = reader_socket.makefile("rb", buffering=0)
+    writer_socket.sendall(_FakeTsharkProcess().stdout.getvalue().encode())
+    writer_socket.shutdown(socket.SHUT_WR)
+    started = _start_live_aggregation_process(
+        stream,
+        field_names=TSHARK_FRAME_FIELD_NAMES,
+        band="5",
+        target_primary_frequency_mhz=5180,
+        actual_definition=ChannelDefinition(5180, ChannelWidth.MHZ20, 5180),
+        capabilities=RadioCapabilities.ht20_only(),
+    )
+    assert started is not None
+    connection, worker = started
+    messages = []
+    try:
+        while True:
+            assert connection.poll(5.0)
+            message = connection.recv()
+            messages.append(message)
+            if message.eof:
+                break
+        worker.join(timeout=5.0)
+        assert worker.exitcode == 0
+    finally:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=1.0)
+        connection.close()
+        stream.close()
+        reader_socket.close()
+        writer_socket.close()
+
+    published = [stats for message in messages for stats in message.stats]
+    assert [stats.second for stats in published] == [1001]
+    assert published[0].retry_eligible_frame_count == 2
+    assert published[0].retry_frame_count == 1
+    assert sum(len(message.beacons) for message in messages) == 2
+
+
+def test_coverage_pruning_forgets_bssids_outside_the_window() -> None:
+    requested = ChannelDefinition(5180, ChannelWidth.MHZ80, 5210)
+    coverage = CoverageDecision(
+        requested,
+        ("active", "expired"),
+        ("partial-expired",),
+        "partial",
+        "partial coverage",
+    )
+
+    assert prune_fixed_capture_coverage(
+        coverage,
+        active_bssids={"active"},
+        fallback_reason=None,
+        actual_verified=True,
+    ) == CoverageDecision(requested, ("active",), (), "complete", None)
 
 
 def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state(

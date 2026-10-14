@@ -6,22 +6,47 @@ application behavior.
 
 ## Local setup
 
-WLANPi Beacon Live supports Python 3.9 or newer and has no third-party runtime
-Python dependencies.
+WLANPi Beacon Live requires Python 3.13 or newer; the tested Trixie target is
+Python 3.13. Direct capture/replay use the standard library; Core capture adds
+the pinned `websockets==15.0.1` client through the `core` extra.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
 python -m pip install -e '.[dev]'
 python -m pytest
 ```
 
-The development extra installs `pytest>=7.4,<9`. Build requirements are
-`setuptools>=64` and `wheel`.
+The development extra installs `pytest>=8.3.5,<9`. Build requirements are
+`setuptools>=75.3` and `wheel`.
+For Core transport development/tests, install `python -m pip install -e '.[dev,core]'`.
 
-On a Pi, `scripts/pi_setup.sh` checks system commands, installs the local
-package into the active environment, and runs the test suite. It prints package
-suggestions but does not run `apt install` itself.
+On a Pi, `scripts/pi_setup.sh` requires an activated, genuine venv without
+system site-packages. It verifies the interpreter/version before running pip,
+checks system commands, installs the package in editable mode, exercises both
+CLI entrypoints and hardware-free replay, and runs the test suite. Missing pip
+can be repaired with ensurepip inside that venv. Failed installs stop without
+falling back to system Python or a non-editable installation. It prints package
+suggestions but does not run `apt install` itself. Run it without `sudo`.
+
+Create a fresh Python 3.13 venv when replacing an older development environment.
+The production FPMS installer retains `/opt/wlanpi-beacon-live`, uses its
+interpreter for application installation, and verifies genuine venv isolation
+and Python 3.13+ before package writes. FPMS keeps its separate package-managed
+Python environment; development setup does not install into either production
+environment.
+
+The FPMS installer installs Core runtime wheels in the app venv without building
+the application package; `--wheel-dir` supports offline runtime installation.
+Copied CLI entrypoints have a main guard so Core's spawn worker can import them
+without relaunching capture. The FPMS backend choice is independent of the
+standard CLI's direct default; see [Core installed-path testing](core-capture-evaluation.md#test-the-installed-core-path).
+Direct capture remains the recommended CLI/FPMS default. Core is an optional
+integration path, and passing its tests does not schedule a default migration.
+Use Core's device information/control APIs where they simplify integration;
+subscription and broader Core acceptance are separate follow-ups. See
+[the backend decision](core-capture-evaluation.md).
 
 ## Repository map
 
@@ -39,6 +64,8 @@ suggestions but does not run `apt install` itself.
 | `beacon_live/lcd_dashboard.py` | PPM/JSON LCD artifact rendering. |
 | `beacon_live/live.py` | Live hardware boundary and runtime loop. |
 | `beacon_live/channel.py` | Pure channel-operation parsing, capability, and coverage policy. |
+| `beacon_live/capture_target.py` | Read-only interface discovery and namespace context for hardware commands. |
+| `beacon_live/radio_session.py` | Radio locking, active-user checks, saved interface state, and restoration. |
 | `beacon_live/log_writer.py` | Log formats, logging service, disk safety, rollover. |
 | `beacon_live/survey.py` | Optional local survey parsing/calculation. |
 | `beacon_live/retry_debug.py` | Offline retry audit. |
@@ -124,13 +151,16 @@ The most common helpers are:
 
 ```bash
 ./scripts/pi_setup.sh
-./scripts/pi_smoke.sh wlan0 5180
-./scripts/pi_collect_debug.sh
+./scripts/pi_smoke.sh wlanpi0 5180
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
 sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-The smoke script attempts to restore the interface's original type. The normal
-live runtime currently leaves its selected interface in monitor mode.
+The legacy smoke script is only for an idle test adapter: it does not use the
+radio ownership guard and attempts to restore only the interface's original
+type. Prefer an application-owned PCAPNG for Trixie testing. The normal live runtime uses a radio session that restores saved modes, up/down flags,
+and known monitor tuning after capture stops, including startup failures.
+See [the radio acceptance checks](pi_testing.md#radio-ownership-and-restoration-acceptance).
 
 ## Adding or changing a screen
 

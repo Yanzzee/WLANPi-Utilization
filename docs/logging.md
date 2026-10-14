@@ -34,7 +34,7 @@ Choose one or both live formats:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --stats-csv \
   --beacons-jsonl \
@@ -46,7 +46,7 @@ write both formats together:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --log \
   --log-dir logs
@@ -62,7 +62,7 @@ formats:
 
 ```bash
 sudo wlanpi-beacon-live \
-  --iface wlan0 \
+  --iface auto \
   --channel 36 \
   --logging-only \
   --log-dir logs
@@ -105,7 +105,7 @@ recursively. Live format flags do not accept custom filenames.
 
 The stats file contains one row for each emitted capture second. Columns cover:
 
-- local timestamp, interface, channel, resolved frequency, and band;
+- local timestamp, interface, network namespace, channel, resolved frequency, and band;
 - retained BSSID count, summed latest QBSS station counts, and the unique
   eligible client-MAC count detected during that one-second period;
 - the rolling highest per-BSSID station count, its QBSS or MAC source, and its
@@ -113,7 +113,7 @@ The stats file contains one row for each emitted capture second. Columns cover:
 - selected QBSS utilization and source identity/RSSI;
 - received, Retry-bit-readable, retry-eligible, and retry-frame counts;
 - retry percentage, selected beacon-rate percentage, and retry footer BSSID;
-- strongest-radio beacon received/expected counts and beacon-loss percentage;
+- RSSI-qualified beacon received/expected counts and beacon-loss percentage;
 - optional local survey utilization.
 
 Rows use local ISO-8601 timestamps with offsets. The logging worker flushes
@@ -129,6 +129,7 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | --- | --- |
 | `local_time` | Local ISO-8601 timestamp, including UTC offset, for the emitted capture second. |
 | `interface` | Monitor-mode interface configured for the run. |
+| `network_namespace` | Named network namespace used for capture; blank for the root namespace. |
 | `channel` | Channel value configured for the run. |
 | `frequency_mhz` | Resolved tuned center frequency in MHz, when it can be determined. |
 | `band` | Resolved `2.4`, `5`, or `6` GHz band, when it can be determined. |
@@ -158,8 +159,8 @@ percent values without a `%` suffix; unavailable optional values are empty.
 | `retry_frame_count` | Retry-eligible frames whose Retry bit was set; repeated retry transmissions are each counted. |
 | `retry_percent` | `retry_frame_count / retry_eligible_frame_count × 100` for the second. |
 | `selected_beacon_rate_percent` | Selected BSSID's rolling-window received-beacon rate relative to the rate expected from its advertised beacon interval, capped at 100%. |
-| `beacon_received_count` | Phase-matched beacons received during the second, summed across BSSIDs in the strongest estimated radio. |
-| `beacon_expected_count` | Beacon transmission slots expected during the second across those strongest-radio BSSIDs. |
+| `beacon_received_count` | Phase-matched beacons received during the second, summed across recently heard BSSIDs above -75 dBm. |
+| `beacon_expected_count` | Beacon transmission slots expected during the second across those RSSI-qualified BSSIDs. |
 | `beacon_loss_percent` | `(beacon_expected_count - beacon_received_count) / beacon_expected_count × 100`. |
 | `top_retry_bssid` | Automatically selected retry identity: highest one-second retry percentage, previous identity on a tie, or strongest beacon RSSI when no retries occurred. |
 | `local_cu_percent` | Optional local survey utilization from `iw`; separate from AP-advertised QBSS utilization. |
@@ -171,17 +172,26 @@ logging is active. Objects contain local time, run metadata, SSID/BSSID, QBSS
 values, RSSI, beacon interval, AP-name/vendor clues, and the other normalized
 beacon fields available to the parser.
 
-The logging worker flushes each line as it writes it. Normal beacon objects do
-not include a `record_type` field; the low-disk marker described below does.
+SSID values use the same normalization as the displays: UTF-8 names are stored
+as text, empty/missing/all-zero names are null in JSONL (empty in CSV), and
+non-text or control bytes use a lossless `hex:…` label. Saved PCAPNG data retains
+the original bytes. Replay defaults to TShark's hex-byte format; select
+`--ssid-encoding text` for TSVs with already decoded names.
+
+The logging worker writes small ordered batches and flushes once per batch
+(normally within 50 ms). Direct `CaptureLogWriter` callers still receive an
+immediate flush. Normal beacon objects do not include a `record_type` field;
+the low-disk marker described below does.
 
 ## Capture-path isolation
 
 Beacon and completed-second records are handed to one bounded FIFO logging
-queue. A dedicated logging thread serializes and flushes them in capture order,
-so normal filesystem latency does not stall TShark stdout draining or analyzer
-publication. Stop, rollover, and low-disk transitions drain and join the worker
-before files are closed. If the queue fills during a sustained disk slowdown,
-the producer waits rather than dropping output.
+queue. A dedicated logging thread serializes and flushes batches in capture
+order, so normal filesystem latency does not stall TShark stdout draining or
+analyzer publication. Stop, rollover, and low-disk transitions drain and join
+the worker before files are closed. If the queue fills during a sustained disk
+slowdown, new log records are sampled rather than blocking capture or display;
+the dashboard reports the cumulative skipped-record count.
 
 ## Disk-space safety
 

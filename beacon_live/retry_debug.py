@@ -176,7 +176,7 @@ def read_retry_debug_capture(
         malformed_row_count = 0
         for row in process.stdout:
             tshark_row_count += 1
-            parsed = parse_tshark_capture_record(row, field_names=field_names)
+            parsed = parse_tshark_capture_record(row, field_names=field_names, ssid_encoding="hex")
             if not parsed:
                 malformed_row_count += 1
             else:

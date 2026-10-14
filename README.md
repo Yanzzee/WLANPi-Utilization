@@ -20,12 +20,13 @@ the band and channel, not an SSID or BSSID.
 
 ## Requirements
 
-The primary target is a WLAN Pi R4 running WLAN Pi OS with:
+The primary target is a WLAN Pi R4 running WLAN Pi OS 26.10 DeadEye
+(Debian 13 Trixie) with:
 
-- WLAN Pi FPMS 2.x and its supported 128×128 display/control stick;
-- Python 3.9 or newer;
-- a monitor-mode-capable Wi-Fi interface named `wlan0`;
-- `git`, `ip`, `iw`, and `tshark`; and
+- WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
+- Python 3.13 or newer (the Trixie target is Python 3.13);
+- a monitor-mode-capable Wi-Fi interface supporting the selected frequency;
+- `git`, `ip`, `iw`, and TShark 4.4 (verified with 4.4.19); and
 - root access through `sudo`.
 
 The adapter, driver, and regulatory domain must permit the selected channel
@@ -61,9 +62,73 @@ in `/usr/local/bin` that run the existing executables in the isolated app
 environment; the installer does not copy the application into the system
 Python environment.
 
+It also installs the pinned Core WebSocket client (`websockets 15.0.1`) into
+the app environment. This downloads a runtime wheel on first installation;
+for an offline Pi, pass `--wheel-dir DIRECTORY` containing a compatible wheel.
+
+**Direct capture is the recommended default** for the standalone CLI and FPMS
+application. Core is an optional backend for remote integration and future
+compatible stream sharing; passing Core tests does not schedule a default
+change. The current Core backend is owner-only and still uses local radio safety
+and restoration. See [the backend decision](docs/core-capture-evaluation.md).
+To opt FPMS into Core capture:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-backend core
+```
+
+This saves `capture_backend` in `/etc/wlanpi-beacon-live/fpms.json`. Reinstalling
+without that option preserves the choice. Use `--fpms-backend direct` to switch
+FPMS back. A service environment override, `WLANPI_UTILIZATION_CAPTURE_BACKEND`,
+takes precedence over the file. Invalid settings fail instead of selecting
+direct capture. The standard CLI does not read this FPMS setting; select Core
+explicitly with `--capture-backend core`:
+
+```bash
+sudo wlanpi-beacon-live --capture-backend core --iface wlanpi0 \
+  --band 2.4 --channel 1 --channel-width 20
+```
+
+Core starts log `Capture backend: core` to stderr/the FPMS journal. The owner
+backend still requires an existing `wlanpiN` monitor and supports verified
+20/80 MHz configurations; see [Core acceptance](docs/core-capture-evaluation.md).
+
 Rerun the installer after updating this repository or upgrading FPMS. It
 safely refreshes its managed CLI launchers as well as the application and FPMS
-integration.
+integration. It locates FPMS through its launcher's Python environment and
+prints the resolved package path before patching.
+
+The front panel and live CLI discover interfaces in the root and named network
+namespaces. They prefer an existing monitor interface supporting the selected
+frequency, such as WLAN Pi Core's `wlanpi0`. Multiple equally suitable candidates
+require an explicit choice. Configure `WLANPI_UTILIZATION_IFACE` and, when needed,
+`WLANPI_UTILIZATION_NETNS` in the FPMS service environment as described in
+[Troubleshooting](docs/troubleshooting.md#the-wi-fi-interface-is-missing).
+
+Live capture temporarily uses the entire selected physical radio. It refuses
+an existing capture, active connection, or controller on that radio, and restores
+saved interface modes, up/down states, and known monitor tuning when closed.
+Existing WLAN Pi monitor interfaces are preserved. With one shared radio, stop
+the other tool's radio use before starting Utilization and keep it stopped until
+Utilization exits. See [radio ownership and restoration](docs/troubleshooting.md#the-radio-is-busy).
+
+After installation, check TShark decoding without opening a radio:
+
+```bash
+/opt/wlanpi-beacon-live/bin/python scripts/check_tshark.py
+```
+
+For installation or capture failures, collect a diagnostic bundle from this
+checkout with `sudo ./scripts/pi_collect_debug.sh`. See the
+[Trixie release checks](docs/trixie-release.md) for tested behavior, remaining
+hardware validation, and known follow-ups.
+
+SSID bytes from TShark are decoded once before analysis. Printable UTF-8 names
+appear as text in the displays and logs; empty or hidden names use the existing
+hidden label. Non-text or control bytes retain a lossless `hex:…` representation.
+For replay TSVs that already contain decoded names, use `--ssid-encoding text`
+to preserve names that themselves look like hex. Raw TShark TSV replay defaults
+to `--ssid-encoding hex`.
 
 ## Use the FPMS front panel
 
@@ -90,7 +155,9 @@ While a display is open:
 
 - move up or down to cycle through the six screens;
 - press left to stop capture and return to the menu;
-- the first two auxiliary buttons are disabled; and
+- the first auxiliary button is disabled;
+- the second auxiliary button rotates the display 180 degrees while capture
+  continues; and
 - the third auxiliary button saves the current screen as a timestamped PNG in
   `/var/log/wlanpi-beacon-live`, then briefly confirms the folder without
   changing the active screen.
@@ -111,29 +178,32 @@ the examples below obtain with `sudo`.
 
 ```bash
 # Live terminal display on channel 36
-sudo wlanpi-beacon-live --iface wlan0 --channel 36
+sudo wlanpi-beacon-live --band 5 --channel 36
 
 # Logging-only capture (both CSV and JSONL, with no display rendering)
-sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
+sudo wlanpi-beacon-live --band 5 --channel 36 \
   --logging-only --log-dir /var/log/wlanpi-beacon-live
 
 # Interactive display plus both log formats
-sudo wlanpi-beacon-live --iface wlan0 --channel 36 \
+sudo wlanpi-beacon-live --band 5 --channel 36 \
   --log --log-dir /var/log/wlanpi-beacon-live
 
 # Hardware-free replay of the included sample (run from the repository)
 beacon-live replay --input samples/tshark_qbss_sample.tsv
 
 # Explicit 6 GHz center frequency instead of band/channel mapping
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5975
+sudo wlanpi-beacon-live --frequency-mhz 5975
 
 # Explicit 160 MHz override: primary 5180 MHz, center 5250 MHz
-sudo wlanpi-beacon-live --iface wlan0 --frequency-mhz 5180 \
+sudo wlanpi-beacon-live --frequency-mhz 5180 \
   --channel-width 160 --center-frequency1-mhz 5250
 
 # Save full packets from the exact live-analysis process and a JSON sidecar
-sudo wlanpi-beacon-live --iface wlan0 --band 5 --channel 36 \
+sudo wlanpi-beacon-live --band 5 --channel 36 \
   --raw-pcapng /tmp/beacon-live-channel36.pcapng
+
+# Explicit interface in an existing named network namespace
+sudo wlanpi-beacon-live --iface capture1 --netns capture-lab --band 2.4 --channel 1
 
 # General and workflow-specific help
 wlanpi-beacon-live --help
@@ -254,7 +324,7 @@ Scrolling table columns:
 | `RET_ELIG` | Primary-scoped unicast data and retry-capable unicast management frames eligible for the retry denominator. |
 | `RETRY%` | Eligible frames with the Retry bit set divided by `RET_ELIG`. |
 | `TOP_RETRY_BSSID` | BSSID selected for the one-second retry result: highest retry percentage, retained selection on a tie, or strongest beacon RSSI when no retries occurred. |
-| `BCN_EXP` | Phase-matched beacon transmission slots expected during the second across the strongest estimated radio's BSSIDs. |
+| `BCN_EXP` | Phase-matched beacon transmission slots expected during the second across recently heard BSSIDs above -75 dBm. |
 | `LOSS%` | Percentage of `BCN_EXP` slots for which no matching beacon was received. |
 
 If the command is piped, redirected, run without a TTY, or Python lacks
@@ -288,7 +358,7 @@ launcher while diagnosing an installation with, for example,
 | Admission | The selected BSSID's advertised admission capacity as a percentage. |
 | Stations | AP-advertised QBSS station counts plus unique client MACs observed in BSSID-linked data frames. |
 | Retries | The one-second retry percentage for eligible frames heard on the channel and the BSSID with the most retries. |
-| Beacon Loss | Percentage of phase-aware expected beacons not received across all BSSIDs on the strongest estimated radio. |
+| Beacon Loss | Percentage of phase-aware expected beacons not received across all recently heard BSSIDs above -75 dBm. |
 | Composition | BSSID and QBSS counts plus best-effort physical-radio, `AP` (vendor AP-name), and vendor information. |
 
 Graphs retain the latest 120 seconds. Missing or unavailable measurements are
@@ -325,13 +395,23 @@ FPMS and the system-wide commands.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
 python -m pip install -e '.[dev]'
 .venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
 .venv/bin/python -m pytest -q
 ```
 
+On the Pi, run `./scripts/pi_setup.sh` after activating this environment. It
+requires a genuine venv without system site-packages, validates Python 3.13+,
+and runs CLI/replay checks and pytest. Run development setup without `sudo`.
+An older development environment should be replaced with a fresh Python 3.13
+venv. The production installer verifies the same Python/venv requirements
+before copying the application into `/opt/wlanpi-beacon-live`.
+
 ## Documentation
 
+- [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones
+  and acceptance checks for WLAN Pi OS 26.10 DeadEye.
 - [Architecture](docs/architecture.md) — design rules, pipeline, data flow, and
   Phase 1–5 history.
 - [Screen reference](docs/screens.md) — screen metrics, navigation, BSSID

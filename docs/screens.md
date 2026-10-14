@@ -18,13 +18,44 @@ All screens render from the same immutable analyzer snapshot and the same
 - Missing values appear as `--`, an unavailable message, or a graph gap.
 - Footer identities are selected automatically. Users never choose an SSID or
   BSSID.
-- The first two auxiliary buttons are disabled while a display is active. The
-  third saves a PNG of the current screen and briefly confirms the destination
-  folder without changing the active screen or navigation offset.
+- The graph always contains 120 wall-clock slots ending with the preceding
+  second. If capture analysis has not published a slot yet, that slot is a gap,
+  not a zero and not a reason to shift older data to the right.
+- `CU`, `ADC`, `SUM`, `RET`, and `BL` describe the newest available completed
+  sample in those 120 slots. They remain on that sample while newer slots are
+  temporarily unavailable, so a producer backlog cannot replace valid values
+  with `--`.
+- `AVG`, `MIN`, and `MAX` use only available graph samples. Missing slots never
+  participate in these calculations.
+- BSSID/SSID footers, `TOP`, rolling `MAC`, Composition, and beacon identity
+  remain from the newest published analyzer state while at least one completed
+  sample remains in the displayed window. They clear only after the entire
+  displayed window contains no actual samples.
+- The display is republished once per configured refresh interval. Capture
+  events update analyzer state but do not cause extra paints between timer
+  deadlines.
+- The first auxiliary button is disabled while a display is active. The second
+  toggles the display orientation by 180 degrees using FPMS's saved setting and
+  redraws the current frame immediately. Rotation preserves the capture process,
+  active screen, logging state, and graph history. The third saves a PNG of the
+  current screen and briefly confirms the destination folder without changing
+  the active screen or navigation offset.
+  FPMS remaps physical buttons before calling the app: in flipped orientation,
+  up/down, left/right, and Key 1/Key 3 swap. Key 2 and center remain unchanged.
+  Physical Key 1 therefore saves screenshots when flipped, and physical Key 3
+  is disabled.
 
 The first two rows show the tuned frequency/screen name and a metric summary.
 Graph screens use the middle 120×64 region. The bottom rows show the selected
 SSID/RSSI and BSSID/channel. Long SSIDs are truncated; BSSIDs are retained.
+
+At startup, the application renders `Collecting` immediately. It omits the
+partial wall-clock second in which capture began, then publishes the first full
+one-second sample after the 102.4 ms late-beacon allowance. Depending on where
+capture begins within a second, the first completed sample becomes available
+about 1.1 to 2.1 seconds later and appears on the next configured display
+refresh. This is an accuracy requirement, not an additional GUI warm-up timer;
+removing it would label a partial interval as a full one-second RET/BL sample.
 
 ## 1. Utilization
 
@@ -35,7 +66,7 @@ automatically selected QBSS BSSID.
 
 Summary fields:
 
-- `CU`: current advertised utilization percentage;
+- `CU`: newest available completed-second advertised utilization percentage;
 - `AVG`: average of available samples in the rolling history;
 - `MAX`: maximum available sample in the rolling history.
 
@@ -55,7 +86,8 @@ its latest advertised admission capacity.
 
 Summary fields:
 
-- `ADC`: current admission capacity as a percentage of 31,250;
+- `ADC`: newest available completed-second admission capacity as a percentage
+  of 31,250;
 - `AVG`: average available percentage in the rolling history;
 - `MIN`: minimum available percentage in the rolling history.
 
@@ -73,7 +105,8 @@ the MAC count is locally observed.
 
 Summary fields:
 
-- `SUM`: current sum of latest advertised station counts;
+- `SUM`: sum of latest advertised station counts in the newest available
+  completed sample;
 - `MAC`: unique client MAC addresses detected anywhere on the channel during
   the current 120-second window;
 - `TOP`: highest per-BSSID count found either in the latest advertised QBSS
@@ -120,7 +153,7 @@ frames with Retry bit set / retry-eligible frames × 100
 
 Summary fields:
 
-- `RET`: current one-second channel retry percentage;
+- `RET`: newest available completed one-second channel retry percentage;
 - `AVG`: average of available one-second samples in the rolling history;
 - `MAX`: maximum available one-second sample.
 
@@ -146,9 +179,20 @@ Exclude:
 Every retry transmission is counted. Multiple retries of one original frame
 are not deduplicated.
 
+Live frames are classified into these counters as they arrive and discarded
+immediately. The analyzer retains compact per-second counts and client sets,
+not individual MPDUs. This produces the same numerator and denominator without
+making memory consumption proportional to frames per second over 120 seconds.
+
 The live analyzer completes a second only after a later capture timestamp is
 ingested. This avoids finalizing a bucket while TShark still has older rows
 buffered on stdout.
+
+`RET` and `BL` show the newest completed values already present in their
+graphs. If the producer is behind, newer wall-clock slots remain gaps and the
+headline stays on that newest actual sample. They do not display provisional
+active-second values. Pixels are published only once per configured refresh
+interval.
 
 ### Retry footer
 
@@ -160,22 +204,22 @@ beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 ## 5. Beacon Loss
 
 Beacon Loss graphs the percentage of expected beacons not received during each
-completed capture second for the strongest estimated radio.
+completed capture second across all recently heard BSSIDs above -75 dBm.
 
 ![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
 
 Summary fields:
 
-- `BL`: aggregate loss percentage;
+- `BL`: aggregate loss percentage in the newest available completed sample;
 - `AVG`: average available beacon-loss percentage in the 120-second history;
   and
 - `MAX`: maximum available beacon-loss percentage in that history.
 
-The analyzer applies the existing best-effort radio grouping to every retained
-BSSID, including hidden-SSID BSSIDs and BSSIDs without QBSS information. It
-sums `REC` and `EXP` for all BSSIDs in the strongest group and calculates
-`BL = (EXP - REC) / EXP × 100`. The footer uses the same two-second member
-rotation as Composition.
+The analyzer considers every retained BSSID, including hidden-SSID BSSIDs and
+BSSIDs without QBSS information. It includes BSSIDs whose latest RSSI is
+strictly greater than -75 dBm, sums their `REC` and `EXP`, and calculates
+`BL = (EXP - REC) / EXP × 100`. The footer identifies the strongest included
+BSSID using its latest RSSI.
 
 Expected timing assumes a 102.4 ms interval for every BSSID. Retained capture
 timestamps establish the latest schedule phase consistent with no more than
@@ -185,12 +229,11 @@ received beacon. Gaps in the inferred schedule increase `EXP` without
 increasing `REC`; capture jitter cannot make the displayed percentage exceed
 100%.
 
-`REC` and `EXP` apply only to the BSSIDs grouped with the selected strongest
-radio, not every beacon on the channel. A BSSID remains eligible for that
-selection for one reporting second plus the 102.4 ms delayed-beacon allowance.
-This permits a complete missed second to register as loss, but prevents a stale
-high-RSSI BSSID retained elsewhere in the rolling window from producing a
-continuous `REC 0` while another radio is actively beaconing.
+`REC` and `EXP` apply only to recently heard BSSIDs above -75 dBm, not every
+beacon on the channel. A qualifying BSSID remains eligible for one reporting
+second plus the 102.4 ms delayed-beacon allowance. This permits a complete
+missed second to register as loss, but prevents a stale high-RSSI BSSID retained
+elsewhere in the rolling window from producing a continuous `REC 0`.
 
 A completed second remains open for one additional 102.4 ms of ordered capture
 time. The analyzer matches each received beacon to at most one inferred
@@ -202,6 +245,9 @@ does not fill the earlier slot.
 ## 6. Composition
 
 Composition is a text screen describing the channel rather than a graph.
+It is refreshed on the same timer as every graph screen and reflects the newest
+published analyzer state; a temporarily missing right-edge graph slot does not
+erase it.
 
 ![WLANPi Beacon Live composition screen](docs/images/composition_screen.png)
 
