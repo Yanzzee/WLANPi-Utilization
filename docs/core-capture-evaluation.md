@@ -285,7 +285,7 @@ its new runtime wheel installation requires an index connection unless
 First confirm the installed CLI, independently of the FPMS backend setting:
 
 ```bash
-sudo wlanpi-beacon-live --capture-backend core --iface wlanpi0 \
+sudo wlanpi-utilization --capture-backend core --iface wlanpi0 \
   --band 2.4 --channel 1 --channel-width 20 \
   --log --log-dir /tmp/utilization-core-installed \
   --raw-pcapng /tmp/utilization-core-installed/channel1.pcapng \

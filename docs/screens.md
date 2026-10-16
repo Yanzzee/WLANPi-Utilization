@@ -1,6 +1,6 @@
 # Screen Reference
 
-This document explains the six WLANPi Beacon Live screens and their metric
+This document explains the six Utilization screens and their metric
 selection rules. For a short operational overview, start with the
 [README](../README.md). For analyzer invariants, see
 [architecture.md](architecture.md).
@@ -62,7 +62,7 @@ removing it would label a partial interval as a full one-second RET/BL sample.
 The Utilization screen graphs AP-advertised QBSS channel utilization for the
 automatically selected QBSS BSSID.
 
-![WLANPi Beacon Live utilization screen](docs/images/channel-utilization_screen.png)
+![Utilization utilization screen](docs/images/channel-utilization_screen.png)
 
 Summary fields:
 
@@ -82,7 +82,7 @@ currently retained BSSID advertises usable QBSS information.
 The Admission screen uses the same selected QBSS BSSID as Utilization and shows
 its latest advertised admission capacity.
 
-![WLANPi Beacon Live admission capacity screen](docs/images/admission-capacity_screen.png)
+![Utilization admission capacity screen](docs/images/admission-capacity_screen.png)
 
 Summary fields:
 
@@ -101,7 +101,7 @@ It also reports unique client MAC addresses observed in eligible data frames.
 These remain separate metrics: the displayed QBSS sum is AP-advertised, while
 the MAC count is locally observed.
 
-![WLANPi Beacon Live station count screen](docs/images/total-station-count_screen.png)
+![Utilization station count screen](docs/images/total-station-count_screen.png)
 
 Summary fields:
 
@@ -145,7 +145,7 @@ The analyzer excludes:
 
 Retries graphs one independent percentage for each completed capture second:
 
-![WLANPi Beacon Live retry screen](docs/images/retry-percentage_screen.png)
+![Utilization retry screen](docs/images/retry-percentage_screen.png)
 
 ```text
 frames with Retry bit set / retry-eligible frames × 100
@@ -206,7 +206,7 @@ beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 Beacon Loss graphs the percentage of expected beacons not received during each
 completed capture second across all recently heard BSSIDs above -75 dBm.
 
-![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
+![Utilization beacon loss screen](docs/images/beacon-loss_screen.png)
 
 Summary fields:
 
@@ -249,7 +249,7 @@ It is refreshed on the same timer as every graph screen and reflects the newest
 published analyzer state; a temporarily missing right-edge graph slot does not
 erase it.
 
-![WLANPi Beacon Live composition screen](docs/images/composition_screen.png)
+![Utilization composition screen](docs/images/composition_screen.png)
 
 It shows:
 

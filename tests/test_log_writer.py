@@ -37,10 +37,10 @@ def test_live_log_paths_use_generated_timestamped_filenames() -> None:
     )
 
     assert paths.stats_csv == (
-        log_dir / "beacon_live_20260710T123045123456-0600_stats.csv"
+        log_dir / "utilization_20260710T123045123456-0600_stats.csv"
     )
     assert paths.beacons_jsonl == (
-        log_dir / "beacon_live_20260710T123045123456-0600_beacons.jsonl"
+        log_dir / "utilization_20260710T123045123456-0600_beacons.jsonl"
     )
 
 

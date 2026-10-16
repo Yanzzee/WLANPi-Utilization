@@ -18,7 +18,66 @@ from integration.wlanpi_fpms import channel_utilization
 @pytest.fixture(autouse=True)
 def isolated_backend_settings(monkeypatch, tmp_path):
     monkeypatch.delenv('WLANPI_UTILIZATION_CAPTURE_BACKEND', raising=False)
+    monkeypatch.delenv('WLANPI_UTILIZATION_RUNTIME_MODE', raising=False)
     monkeypatch.setattr(channel_utilization, 'BACKEND_CONFIG', tmp_path / 'fpms.json')
+
+
+def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    command = channel_utilization.build_launch_command(band="2.4", channel=1, logging=False)
+    assert command[0].endswith("/wlanpi-utilization")
+    assert "--managed" in command
+    menu = channel_utilization.build_channel_utilization_menu({})
+    assert menu["name"] == "Utilization"
+    assert menu["action"][0]["action"][0]["action"][-1]["name"] == "Stop Capture"
+
+
+def test_managed_fpms_exit_detaches_without_disabling_shared_logging(monkeypatch, tmp_path):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    processes = []
+
+    def popen(command, **kwargs):
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    state = {}
+    app = channel_utilization.ChannelUtilizationApp(state, popen=popen)
+    app.launch(band="2.4", channel=1, logging=True)
+    before = channel_utilization._logging_control_path().read_bytes()
+    state["page_exit_handler"]()
+    assert processes[0].signal_received == signal.SIGINT
+    assert channel_utilization._logging_control_path().read_bytes() == before
+
+
+def test_managed_fpms_display_can_join_logging_only_session(monkeypatch, tmp_path):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    processes = []
+
+    def popen(command, **kwargs):
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+
+    state = {}
+    app = channel_utilization.ChannelUtilizationApp(state, popen=popen)
+    app.start_logging_only(band="2.4", channel=1)
+    app.launch(band="2.4", channel=1, logging=False)
+    assert len(processes) == 2
+    assert all("--managed" in process.command for process in processes)
+    state["page_exit_handler"]()
+    # These are renderer proxies; ending the display does not signal the
+    # logging proxy or disable logging in the capture owner.
+    assert processes[0].signal_received is None
+
+
+@pytest.mark.parametrize("mode", [None, [], "invalid"])
+def test_invalid_fpms_runtime_mode_fails_before_capture(mode):
+    channel_utilization.BACKEND_CONFIG.write_text(json.dumps({"runtime_mode": mode}))
+    command = channel_utilization.build_launch_command(band="2.4", channel=1, logging=False)
+    assert "--invalid-runtime-mode" in command
 
 
 @pytest.mark.parametrize('logging,logging_only', [(False, False), (True, False), (True, True)])
@@ -26,7 +85,7 @@ def test_fpms_core_setting_applies_to_every_launch_mode(logging, logging_only):
     channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"core"}')
     command = channel_utilization.build_launch_command(band='2.4', channel=1,
         logging=logging, logging_only=logging_only)
-    assert command[0] == '/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live'
+    assert command[0] == '/opt/wlanpi-beacon-live/bin/wlanpi-utilization'
     assert command[command.index('--capture-backend') + 1] == 'core'
 
 
@@ -101,7 +160,7 @@ def test_fpms_launch_command_enables_both_logs_together() -> None:
     )
 
     assert display_only[:9] == [
-        "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live",
+        "/opt/wlanpi-beacon-live/bin/wlanpi-utilization",
         "--iface",
         "auto",
         "--band",

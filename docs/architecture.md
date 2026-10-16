@@ -1,7 +1,7 @@
 # Architecture
 
-This document is the technical source of truth for WLANPi Beacon Live. It
-describes the current Phase 1–5 architecture and the constraints future work
+This document is the technical source of truth for Utilization. It
+describes the current architecture and the constraints future work
 must preserve.
 
 User operation belongs in the [README](../README.md). Detailed display and log
@@ -420,6 +420,30 @@ See [logging.md](logging.md) for formats and policy.
 
 ## Runtime modes
 
+The v2.1.0 development foundation in `beacon_live/runtime.py` wraps `run_live`
+with explicit ownership, lifecycle state, session IDs, and immutable
+publications. `ManagedRuntime.run` blocks on the capture owner's main thread;
+read-only consumers can read or wait from other threads. Each consumer sees
+the same latest publication without a frame queue or analyzer. Revision gaps
+indicate skipped publications, rather than dropped analyzer input.
+
+Snapshots follow the existing display cadence; completed statistics arrive
+from the existing capture-watermark publication path. Their delivery cadences
+are independent. The runtime retains original completed rows for up to 120
+capture seconds and never creates completed rows from wall-clock gaps. Stop is
+cooperative: a startup stop request stays pending until the live loop can poll
+it, and no replacement session starts before cleanup returns. Final published
+state remains readable until an explicit new session.
+
+`service.py` now hosts an opt-in broker with a private local Unix socket and
+one isolated capture owner process. `service_client.py` attaches terminal/LCD
+renderers to the owner's typed JSON publications. Start/join, explicit stop,
+and logging controls share this boundary. Renderer exit detaches and preserves
+the owner; incompatible sources fail until it stops. The normal CLI and initial
+FPMS setting retain standalone foreground behavior pending managed device
+acceptance. See [managed service operation](managed-service.md) and the
+[managed runtime roadmap](managed-runtime-roadmap.md).
+
 - **FPMS display:** live capture plus LCD artifacts and screen navigation.
 - **FPMS display and log:** the same runtime with logging active.
 - **FPMS logging-only:** the same capture/analyzer with rendering disabled.
@@ -442,6 +466,9 @@ sessions so the device never starts two capture pipelines for one app session.
 | Screens and UI state | `beacon_live/screens.py`, `beacon_live/screen_manager.py` |
 | Terminal/LCD rendering | `beacon_live/dashboard.py`, `beacon_live/lcd_dashboard.py` |
 | Live hardware boundary | `beacon_live/live.py`, `beacon_live/survey.py` |
+| Managed ownership and consumer publications | `beacon_live/runtime.py` |
+| Local owner service and typed IPC | `beacon_live/service.py`, `beacon_live/ipc.py` |
+| Shared renderer attachment and controls | `beacon_live/service_client.py` |
 | Logging | `beacon_live/log_writer.py` |
 | CLI/device entrypoints | `beacon_live/cli.py`, `beacon_live/device.py` |
 | FPMS integration | `integration/wlanpi_fpms/channel_utilization.py` |

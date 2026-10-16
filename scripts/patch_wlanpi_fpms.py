@@ -39,6 +39,7 @@ def main() -> int:
     parser.add_argument("--adapter", required=True, type=Path)
     parser.add_argument("--restart-service", action="store_true")
     parser.add_argument("--capture-backend", choices=("direct", "core"))
+    parser.add_argument("--runtime-mode", choices=("standalone", "managed"))
     parser.add_argument("--backend-config", type=Path, default=Path("/etc/wlanpi-beacon-live/fpms.json"))
     args = parser.parse_args()
 
@@ -46,7 +47,8 @@ def main() -> int:
         package = args.fpms_package or _find_fpms_package()
         print(f"Resolved FPMS Python package: {package}", flush=True)
         install_fpms(package, args.adapter, restart_service=args.restart_service,
-                     capture_backend=args.capture_backend, backend_config=args.backend_config)
+                     capture_backend=args.capture_backend, backend_config=args.backend_config,
+                     runtime_mode=args.runtime_mode)
     except (FPMSInstallError, OSError, SyntaxError, UnicodeError) as error:
         raise SystemExit(f"Utilization FPMS installation failed: {error}") from error
     print(f"Installed Utilization FPMS adapter in {package}")
@@ -61,6 +63,7 @@ def install_fpms(
     command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     sleep: Callable[[float], None] = time.sleep,
     capture_backend: str | None = None,
+    runtime_mode: str | None = None,
     backend_config: Path = Path("/etc/wlanpi-beacon-live/fpms.json"),
 ) -> None:
     """Validate first, then install and recover the pre-install files on failure."""
@@ -92,9 +95,11 @@ def install_fpms(
     for path, content in replacements.items():
         compile(content, str(path), "exec")
 
-    if capture_backend is not None:
-        if capture_backend not in {"direct", "core"}:
+    if capture_backend is not None or runtime_mode is not None:
+        if capture_backend is not None and capture_backend not in {"direct", "core"}:
             raise FPMSInstallError("Capture backend must be direct or core")
+        if runtime_mode is not None and runtime_mode not in {"standalone", "managed"}:
+            raise FPMSInstallError("Runtime mode must be standalone or managed")
         original = FileState.read(backend_config)
         try:
             settings = json.loads(original.content) if original.content is not None else {}
@@ -102,7 +107,10 @@ def install_fpms(
                 raise ValueError("expected a JSON object")
         except ValueError as error:
             raise FPMSInstallError(f"Invalid backend configuration {backend_config}: {error}") from error
-        settings["capture_backend"] = capture_backend
+        if capture_backend is not None:
+            settings["capture_backend"] = capture_backend
+        if runtime_mode is not None:
+            settings["runtime_mode"] = runtime_mode
         originals[backend_config] = original
         replacements[backend_config] = (json.dumps(settings, indent=2) + "\n").encode()
 

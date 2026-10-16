@@ -102,7 +102,7 @@ echo
 echo "For replay without sudo, use:"
 echo "  ${PYTHON_BIN} -m beacon_live.cli replay --input samples/tshark_qbss_sample.tsv"
 echo
-LIVE_LAUNCHER="${VIRTUAL_ENV}/bin/wlanpi-beacon-live"
+LIVE_LAUNCHER="${VIRTUAL_ENV}/bin/wlanpi-utilization"
 
 echo "For the recommended on-device foreground launcher, use:"
 echo "  sudo ${LIVE_LAUNCHER} --band 5 --channel 36"

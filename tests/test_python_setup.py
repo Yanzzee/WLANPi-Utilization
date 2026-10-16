@@ -209,7 +209,7 @@ def test_fresh_production_install_launchers_replay_and_repeat_install(tmp_path, 
     command = [str(isolated_env / "bin/python"), str(INSTALL), "--source-root", str(ROOT)]
     installed = subprocess.run(command, cwd=tmp_path, env=variables, capture_output=True, text=True)
     assert installed.returncode == 0, installed.stderr
-    for launcher in ("beacon-live", "wlanpi-beacon-live"):
+    for launcher in ("utilization", "wlanpi-utilization", "beacon-live", "wlanpi-beacon-live"):
         help_result = subprocess.run(
             [str(isolated_env / "bin" / launcher), "--help"], cwd=tmp_path,
             env=variables, capture_output=True, text=True,

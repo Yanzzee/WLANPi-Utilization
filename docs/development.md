@@ -1,12 +1,38 @@
 # Development Guide
 
+The next phase targets v2.1.0; package metadata uses `2.1.0.dev0` until release
+acceptance. Follow the [managed runtime roadmap](managed-runtime-roadmap.md)
+for milestone scope and release gates.
+
 This guide is for contributors and future Codex runs. Read
 [AGENTS.md](../AGENTS.md) and [architecture.md](architecture.md) before changing
 application behavior.
 
+## Managed runtime foundation
+
+`ManagedRuntime` is the Python ownership API for the managed service. Construct
+one instance in the capture owner process and call
+`runtime.run(LiveSessionConfig(band="5", channel="36"))` on its main thread.
+It blocks until the live loop exits and resources are cleaned up. The default
+runner rejects other threads before capture starts, preserving signal handling
+and avoiding the existing Linux analyzer fork from a threaded web worker.
+Injected hardware-free runners support concurrent lifecycle tests.
+
+Consumers call `runtime.subscribe()`, then `consumer.read()` or
+`consumer.wait(after_revision, timeout=...)`. Pass `publication.snapshot` to an
+existing renderer; use `publication.completed_stats` as already completed rows.
+Do not reconstruct retry buckets in a consumer. Close the consumer to detach.
+An explicit owner control calls `runtime.stop(publication.session_id)`; a stale
+ID returns false. Stop requests during startup wait for the live loop to poll.
+This API does not install a daemon, expose HTTP, or change CLI/FPMS launchers.
+The opt-in service and renderer attachment are separate modules described in
+[managed service operation](managed-service.md). Test its process/socket
+boundary with `python -m pytest -q tests/test_service.py`; these tests need
+permission to bind a temporary private Unix socket, but need no radio hardware.
+
 ## Local setup
 
-WLANPi Beacon Live requires Python 3.13 or newer; the tested Trixie target is
+Utilization requires Python 3.13 or newer; the tested Trixie target is
 Python 3.13. Direct capture/replay use the standard library; Core capture adds
 the pinned `websockets==15.0.1` client through the `core` extra.
 
@@ -120,14 +146,14 @@ hardware.
 Replay the included sample:
 
 ```bash
-.venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
+.venv/bin/utilization replay --input samples/tshark_qbss_sample.tsv
 ```
 
 Replay can combine copied smoke-test beacon data with before/after survey
 dumps:
 
 ```bash
-.venv/bin/beacon-live replay \
+.venv/bin/utilization replay \
   --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
   --survey-before samples/pi_survey_before.txt \
   --survey-after samples/pi_survey_after.txt

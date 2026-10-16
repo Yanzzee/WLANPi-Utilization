@@ -1610,6 +1610,9 @@ def run_live(
                         _print_logging_started(logging_service)
             if process.stdout is None:
                 raise LiveCommandError(build_tshark_command(hardware_iface), stderr="missing stdout")
+            capture_started = getattr(dashboard, "set_capture_started", None)
+            if callable(capture_started):
+                capture_started()
             line_reader = (
                 None
                 if aggregation_connection is not None
@@ -1643,6 +1646,7 @@ def run_live(
                         _set_dashboard_collecting(dashboard, False)
                     _publish_live_stats(
                         visible_stats,
+                        dashboard=dashboard,
                         stats_writer=(
                             logging_service.write_stats
                             if logging_service is not None
@@ -1750,6 +1754,7 @@ def run_live(
                                 _set_dashboard_collecting(dashboard, False)
                                 _publish_live_stats(
                                     patched_stats,
+                                    dashboard=dashboard,
                                     stats_writer=(
                                         logging_service.write_stats
                                         if logging_service is not None
@@ -2030,6 +2035,7 @@ def run_live(
                                 _set_dashboard_collecting(dashboard, False)
                             _publish_live_stats(
                                 visible_stats,
+                                dashboard=dashboard,
                                 stats_writer=(
                                     logging_service.write_stats
                                     if logging_service is not None
@@ -2217,12 +2223,19 @@ def run_live(
                 _set_dashboard_collecting(dashboard, False)
             _publish_live_stats(
                 visible_stats,
+                dashboard=dashboard,
                 stats_writer=(
                     logging_service.write_stats
                     if logging_service is not None
                     else _discard_stats
                 ),
             )
+            final_publisher = getattr(dashboard, "publish_final_snapshot", None)
+            if callable(final_publisher):
+                final_publisher(_wall_clock_snapshot(
+                    analyzer.snapshot if aggregation_connection is None else worker_snapshot,
+                    time.time(),
+                ))
             return 0
         finally:
             if survey_executor is not None:
@@ -2390,11 +2403,15 @@ def _publish_live_stats(
     stats_rows: list[SecondStats],
     *,
     stats_writer: Callable[[SecondStats], None],
+    dashboard: Optional[LiveDashboard] = None,
 ) -> None:
     if not stats_rows:
         return
     for stats in stats_rows:
         stats_writer(stats)
+    publisher = getattr(dashboard, "publish_stats", None)
+    if callable(publisher):
+        publisher(tuple(stats_rows))
 
 
 def _empty_second_stats(second: int) -> SecondStats:

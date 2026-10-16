@@ -733,7 +733,7 @@ def test_non_tty_live_mode_keeps_plain_renderer_fallback(
     )
 
     assert run_live(interval_seconds=0.1) == 0
-    assert "WLANPi Beacon Live" in capsys.readouterr().out
+    assert "Utilization" in capsys.readouterr().out
 
 
 def test_live_collecting_state_and_input_polling_are_not_frame_rate_bound(
@@ -998,6 +998,100 @@ def test_live_ctrl_c_exits_cleanly_and_terminates_tshark(
     assert run_live(local_cu=False) == 0
     assert terminated_processes == [process]
     assert "Stopping live capture" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("use_worker", [False, True])
+def test_managed_runtime_uses_one_live_capture_and_original_completed_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    use_worker: bool,
+) -> None:
+    from beacon_live.runtime import LiveSessionConfig, ManagedRuntime, SessionPhase
+
+    original_selector = live.selectors.DefaultSelector
+    original_monotonic = live.time.monotonic
+    _prepare_one_interval_live_run(monkeypatch)
+    runtime = ManagedRuntime()
+    consumers = [runtime.subscribe() for _ in range(3)]
+    starts, terminated, completed = [], [], []
+    real_publisher = live._publish_live_stats
+    process = _FakeTsharkProcess()
+    if use_worker:
+        reader_socket, writer_socket = socket.socketpair()
+        writer_socket.sendall(process.stdout.getvalue().encode())
+        writer_socket.shutdown(socket.SHUT_WR)
+        process.stdout = reader_socket.makefile("rb", buffering=0)
+        monkeypatch.setattr(live.selectors, "DefaultSelector", original_selector)
+        monkeypatch.setattr(live.time, "monotonic", original_monotonic)
+
+    def start(iface, **kwargs):
+        assert runtime.read().phase is SessionPhase.STARTING
+        starts.append(iface)
+        return process
+
+    def publish(rows, **kwargs):
+        completed.extend(rows)
+        real_publisher(rows, **kwargs)
+
+    monkeypatch.setattr(live, "start_tshark_process", start)
+    monkeypatch.setattr(live, "terminate_tshark_process", terminated.append)
+    monkeypatch.setattr(live, "_publish_live_stats", publish)
+    try:
+        assert runtime.run(LiveSessionConfig(interval_seconds=0.1)) == 0
+    finally:
+        if use_worker:
+            process.stdout.close()
+            reader_socket.close()
+            writer_socket.close()
+    publication = consumers[0].read()
+    assert all(consumer.read() is publication for consumer in consumers)
+    assert starts == ["wlan0"]
+    assert len(terminated) == 1
+    assert publication.phase is SessionPhase.STOPPED
+    assert publication.collecting is False
+    assert [row.second for row in publication.completed_stats] == [1001]
+    assert publication.completed_stats[0] is completed[0]
+    assert publication.completed_stats[0].retry_frame_count == 1
+    assert publication.completed_stats[0].retry_eligible_frame_count == 2
+    assert publication.completed_stats[0].retry_percent == 50.0
+    assert publication.completed_stats[0].local_cu_percent is None
+    assert publication.snapshot.current == publication.completed_stats[-1]
+    assert len(publication.snapshot.history) == 120
+    assert publication.snapshot.history[-1].second == 1001
+    assert publication.snapshot.history[0].sample_available is False
+    for consumer in consumers:
+        consumer.close()
+    assert runtime.read() is publication
+
+
+def test_managed_stop_uses_live_cleanup_and_publishes_final_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from beacon_live.runtime import LiveSessionConfig, ManagedRuntime, SessionPhase
+
+    _prepare_one_interval_live_run(monkeypatch)
+    runtime = ManagedRuntime()
+    terminated = []
+
+    class StopAfterBeacons(_FakeSelector):
+        reads = 0
+
+        def select(self, timeout):
+            self.reads += 1
+            if self.reads == 3:
+                assert runtime.read().phase is SessionPhase.RUNNING
+                assert runtime.stop(runtime.read().session_id)
+                return []
+            return super().select(timeout)
+
+    monkeypatch.setattr(live.selectors, "DefaultSelector", StopAfterBeacons)
+    monkeypatch.setattr(live, "terminate_tshark_process", terminated.append)
+    assert runtime.run(LiveSessionConfig(interval_seconds=0.1)) == 0
+    publication = runtime.read()
+    assert publication.phase is SessionPhase.STOPPED
+    assert len(terminated) == 1
+    assert [row.second for row in publication.completed_stats] == [1001]
+    assert publication.snapshot.current == publication.completed_stats[-1]
+    assert publication.snapshot.current.retry_percent is None
 
 
 def test_low_disk_stops_display_logging_but_capture_continues(

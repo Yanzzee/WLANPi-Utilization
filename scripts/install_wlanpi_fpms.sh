@@ -3,14 +3,23 @@ set -euo pipefail
 
 FPMS_OPTIONS=()
 CLIENT_OPTIONS=(--with-core)
+FPMS_RUNTIME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --fpms-runtime)
+      if [[ $# -lt 2 || ( "$2" != "standalone" && "$2" != "managed" ) ]]; then
+        echo "--fpms-runtime requires standalone or managed" >&2
+        exit 2
+      fi
+      FPMS_RUNTIME="$2"
+      shift 2
+      ;;
     --fpms-backend)
       if [[ $# -lt 2 || ( "$2" != "direct" && "$2" != "core" ) ]]; then
         echo "--fpms-backend requires direct or core" >&2
         exit 2
       fi
-      FPMS_OPTIONS=(--capture-backend "$2")
+      FPMS_OPTIONS+=(--capture-backend "$2")
       shift 2
       ;;
     --wheel-dir)
@@ -22,7 +31,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      echo "Usage: sudo $0 [--fpms-backend direct|core] [--wheel-dir DIRECTORY]"
+      echo "Usage: sudo $0 [--fpms-backend direct|core] [--fpms-runtime standalone|managed] [--wheel-dir DIRECTORY]"
       echo "Without --fpms-backend, the saved FPMS choice is preserved (initial default: direct)."
       exit 0
       ;;
@@ -59,12 +68,18 @@ python3 -m venv "${APP_VENV}"
   --app-bin "${APP_VENV}/bin" \
   --launcher-dir /usr/local/bin
 mkdir -p /run/wlanpi-beacon-live /var/log/wlanpi-beacon-live
+if [[ -n "${FPMS_RUNTIME}" ]]; then
+  FPMS_OPTIONS+=(--runtime-mode "${FPMS_RUNTIME}")
+fi
+if [[ "${FPMS_RUNTIME}" == "managed" ]]; then
+  bash "${SCRIPT_DIR}/install_utilization_service.sh"
+fi
 "${APP_VENV}/bin/python" "${SCRIPT_DIR}/patch_wlanpi_fpms.py" \
   --adapter "${ADAPTER}" \
   --restart-service "${FPMS_OPTIONS[@]}"
 
 echo "Utilization is installed under FPMS Apps."
-echo "CLI commands installed: wlanpi-beacon-live and beacon-live"
+echo "CLI commands installed: wlanpi-utilization and utilization (legacy aliases retained)."
 echo "Standard CLI default: direct; select --capture-backend core explicitly."
 echo "FPMS backend configuration: /etc/wlanpi-beacon-live/fpms.json (absent means direct)."
 echo "Select a band, channel, then Display or Display + Log."

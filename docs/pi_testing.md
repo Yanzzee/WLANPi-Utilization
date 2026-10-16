@@ -1,6 +1,6 @@
 # Raspberry Pi / WLAN Pi Testing
 
-This is the hardware verification playbook for WLANPi Beacon Live. Normal users
+This is the hardware verification playbook for Utilization. Normal users
 should start with the [README](../README.md). Contributors should also read
 [development.md](development.md) and [architecture.md](architecture.md).
 
@@ -73,8 +73,8 @@ suggestions for missing commands but does not run `apt install`.
    ```bash
    sudo ./scripts/install_wlanpi_fpms.sh
    /opt/wlanpi-beacon-live/bin/python -c 'import sys; print(sys.version); print(sys.prefix); print(sys.base_prefix)'
-   wlanpi-beacon-live --help
-   beacon-live replay --input samples/tshark_qbss_sample.tsv
+   wlanpi-utilization --help
+   utilization replay --input samples/tshark_qbss_sample.tsv
    ```
 
    Confirm the production prefix is `/opt/wlanpi-beacon-live`, not the development
@@ -120,7 +120,7 @@ workflow below with `--iface auto`. Collect one 60-second run per supported
 band. For example, start with 2.4 GHz:
 
 ```bash
-sudo /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live \
+sudo /opt/wlanpi-beacon-live/bin/wlanpi-utilization \
   --iface auto --band 2.4 --channel 1 --channel-width 20 \
   --local-cu --survey-debug --log --log-dir /tmp/utilization-item7-24 \
   --raw-pcapng /tmp/utilization-item7-24/channel1.pcapng
@@ -191,7 +191,7 @@ advertise QBSS Load elements.
 On the Pi or after copying the files to another machine:
 
 ```bash
-.venv/bin/beacon-live replay \
+.venv/bin/utilization replay \
   --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
   --survey-before samples/pi_survey_before.txt \
   --survey-after samples/pi_survey_after.txt
@@ -200,7 +200,7 @@ On the Pi or after copying the files to another machine:
 To verify replay output formats:
 
 ```bash
-.venv/bin/beacon-live replay \
+.venv/bin/utilization replay \
   --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
   --survey-before samples/pi_survey_before.txt \
   --survey-after samples/pi_survey_after.txt \
@@ -216,7 +216,7 @@ Use one application-owned PCAPNG for both live analysis and the independent
 comparison. This avoids a second capture process competing for the adapter:
 
 ```bash
-sudo .venv/bin/wlanpi-beacon-live \
+sudo .venv/bin/wlanpi-utilization \
   --iface auto --band 5 --channel 36 \
   --log --log-dir /tmp/beacon-live-validation \
   --raw-pcapng /tmp/beacon-live-validation/channel36.pcapng
@@ -239,7 +239,7 @@ truncated.
 Run the application audit, explicitly naming the selected primary frequency:
 
 ```bash
-.venv/bin/beacon-live retry-debug \
+.venv/bin/utilization retry-debug \
   --input /tmp/beacon-live-validation/channel36.pcapng \
   --target-frequency-mhz 5180 \
   --output-csv /tmp/beacon-live-validation/retry-seconds.csv \
@@ -399,7 +399,7 @@ and launcher/package versions for diagnosis. Record the device results in
 
 For roadmap item 3, rerun the installer from the updated checkout, open Display,
 and allow history to accumulate. Record the capture/TShark PIDs with
-`pgrep -af 'wlanpi-beacon-live|tshark'` before and after testing Key 2.
+`pgrep -af 'wlanpi-utilization|tshark'` before and after testing Key 2.
 
 1. Confirm Key 1 does nothing during the display session.
 2. Press Key 2. Confirm the display rotates 180 degrees immediately, stays on
@@ -449,12 +449,12 @@ ip netns list
    identify the resolved interface. `network_namespace` is blank in CSV and
    null in JSON for root capture. Repeat with logging-only mode, then stop it.
 3. After stopping the front-panel capture, test an explicit root interface:
-   `sudo wlanpi-beacon-live --iface wlanpi0 --band 2.4 --channel 1 --local-cu`.
+   `sudo wlanpi-utilization --iface wlanpi0 --band 2.4 --channel 1 --local-cu`.
    Confirm capture and survey updates; stop with Ctrl+C.
 4. If an available test radio already resides in a named namespace, inspect it
    with `sudo ip netns exec NAME iw dev` and
    `sudo ip netns exec NAME iw phy`. Run
-   `sudo wlanpi-beacon-live --iface IFACE --netns NAME --band 2.4 --channel 1 --local-cu --log`.
+   `sudo wlanpi-utilization --iface IFACE --netns NAME --band 2.4 --channel 1 --local-cu --log`.
    Replace NAME and IFACE with its actual identifiers. Verify capture, channel
    read-back, survey updates when supported, and namespace metadata. Repeat
    with `--netns NAME` alone to check discovery restricted to that namespace.
@@ -508,7 +508,7 @@ or other capture still must, including one on that same managed interface.
    the phy lock was released and the shared analysis/history still behaves as
    before.
 3. With front-panel capture stopped, run
-   `sudo wlanpi-beacon-live --iface wlanpi0 --band 2.4 --channel 6 --local-cu`.
+   `sudo wlanpi-utilization --iface wlanpi0 --band 2.4 --channel 6 --local-cu`.
    Stop with Ctrl+C and compare the baseline. Repeat and send SIGTERM to the
    application PID from a second terminal; compare again. Normal foreground
    capture handles SIGTERM through graceful cleanup.
@@ -567,7 +567,7 @@ journaled; it is not the graceful-exit acceptance case.
 11. Confirm no unexpected capture child remains:
 
    ```bash
-   pgrep -af 'wlanpi-beacon-live|tshark'
+   pgrep -af 'wlanpi-utilization|tshark'
    ```
 
 12. Inspect FPMS service output for errors:
@@ -582,7 +582,7 @@ Use a temporary CLI log directory and set the minimum above current free space
 to force the safety path without filling a disk:
 
 ```bash
-sudo wlanpi-beacon-live \
+sudo wlanpi-utilization \
   --iface auto \
   --channel 36 \
   --logging-only \
@@ -598,25 +598,25 @@ low-disk marker described in [logging.md](logging.md#low-disk-markers).
 Basic channel capture:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --channel 36
+sudo wlanpi-utilization --iface auto --channel 36
 ```
 
 Explicit 6 GHz frequency:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --frequency-mhz 5975
+sudo wlanpi-utilization --iface auto --frequency-mhz 5975
 ```
 
 Band-qualified 6 GHz channel:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --band 6 --channel 5
+sudo wlanpi-utilization --iface auto --band 6 --channel 5
 ```
 
 Optional local survey diagnostics:
 
 ```bash
-sudo wlanpi-beacon-live \
+sudo wlanpi-utilization \
   --iface auto --band 5 --channel 36 --local-cu --survey-debug
 ```
 

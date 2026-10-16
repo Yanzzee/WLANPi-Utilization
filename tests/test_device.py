@@ -95,8 +95,8 @@ def test_device_launcher_exposes_live_help(
 
     assert exc_info.value.code == 0
     help_output = capsys.readouterr().out
-    assert "usage: wlanpi-beacon-live" in help_output
-    assert "wlanpi-beacon-live live" not in help_output
+    assert "usage: wlanpi-utilization" in help_output
+    assert "wlanpi-utilization live" not in help_output
     assert "--iface" in help_output
     assert "--local-cu" in help_output
     assert "--stats-csv" in help_output
@@ -113,4 +113,4 @@ def test_device_launcher_exits_cleanly_if_setup_is_interrupted(
     monkeypatch.setattr("beacon_live.device.live_main", interrupted_cli)
 
     assert main(["--iface", "wlan0"]) == 130
-    assert "Stopping WLANPi beacon capture" in capsys.readouterr().err
+    assert "Stopping Utilization" in capsys.readouterr().err

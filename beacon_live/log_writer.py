@@ -134,7 +134,7 @@ def build_live_log_paths(
     else:
         capture_time = timestamp
     stamp = capture_time.strftime("%Y%m%dT%H%M%S%f%z")
-    basename = f"beacon_live_{stamp}"
+    basename = f"utilization_{stamp}"
     if part_number is not None:
         basename = f"{basename}_part{part_number:04d}"
     return LiveLogPaths(

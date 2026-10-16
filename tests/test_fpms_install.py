@@ -88,6 +88,16 @@ def test_backend_selection_is_persistent_and_preserves_other_configuration(packa
     assert json.loads(config.read_text())['capture_backend'] == 'direct'
 
 
+def test_managed_runtime_selection_preserves_backend_and_survives_reinstall(package, tmp_path):
+    config = tmp_path / "fpms.json"
+    config.write_text('{"capture_backend":"core","other_setting":42}')
+    patcher.install_fpms(package, ADAPTER, runtime_mode="managed", backend_config=config)
+    expected = {"runtime_mode": "managed", "capture_backend": "core", "other_setting": 42}
+    assert json.loads(config.read_text()) == expected
+    patcher.install_fpms(package, ADAPTER, backend_config=config)
+    assert json.loads(config.read_text()) == expected
+
+
 @pytest.mark.parametrize('previous', [None, b'{"capture_backend":"direct"}\n'])
 def test_service_failure_rolls_back_backend_selection_and_menu(package, tmp_path, previous):
     before = snapshot(package)

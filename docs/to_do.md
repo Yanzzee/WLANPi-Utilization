@@ -47,7 +47,7 @@ Features & changes
         scan beacons for those radios
         record and show analytics from the study
         alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
-14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
+14. DONE        return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. DONE    optimize code for processor utilization and/or use multithreading for multiple cores
         there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
 16. DONE    change the channel screen label to "Utilization"

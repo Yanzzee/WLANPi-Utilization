@@ -39,6 +39,8 @@ def main() -> int:
     )
 
     bin_dir = Path(sys.executable).parent
+    _write_entrypoint(bin_dir / "wlanpi-utilization", "beacon_live.device")
+    _write_entrypoint(bin_dir / "utilization", "beacon_live.cli")
     _write_entrypoint(bin_dir / "wlanpi-beacon-live", "beacon_live.device")
     _write_entrypoint(bin_dir / "beacon-live", "beacon_live.cli")
     print(f"Installed beacon_live in {site_packages}")

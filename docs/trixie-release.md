@@ -101,7 +101,7 @@ documented follow-ups. Tagging/publishing a release remains a separate step.
    alongside the bundle:
 
    ```bash
-   sudo wlanpi-beacon-live --iface utilization-missing --band 2.4 --channel 1 \
+   sudo wlanpi-utilization --iface utilization-missing --band 2.4 --channel 1 \
      > /tmp/utilization-startup-failure.txt 2>&1
    sudo ./scripts/pi_collect_debug.sh --since "5 minutes ago"
    ```

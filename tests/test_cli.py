@@ -354,9 +354,9 @@ def test_live_generates_log_filenames_in_configured_directory(
     assert isinstance(beacons_jsonl, Path)
     assert stats_csv.parent == log_dir
     assert beacons_jsonl.parent == log_dir
-    assert stats_csv.name.startswith("beacon_live_")
+    assert stats_csv.name.startswith("utilization_")
     assert stats_csv.name.endswith("_stats.csv")
-    assert beacons_jsonl.name.startswith("beacon_live_")
+    assert beacons_jsonl.name.startswith("utilization_")
     assert beacons_jsonl.name.endswith("_beacons.jsonl")
     assert stats_csv.name.removesuffix("_stats.csv") == (
         beacons_jsonl.name.removesuffix("_beacons.jsonl")

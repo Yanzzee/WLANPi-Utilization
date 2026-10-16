@@ -225,13 +225,13 @@ class TerminalDashboard:
             and self.channel is None
             and self.capture_width is None
         ):
-            return "WLANPi Beacon Live"
+            return "Utilization"
         return (
             f"{_format_frequency(self.frequency_mhz)} | "
             f"Band {_format_band(self.band)} | "
             f"Channel {self.channel or '--'} | "
             f"Width {_format_capture_width(self.capture_width)} | "
-            "WLANPi Beacon Live"
+            "Utilization"
         )
 
     def refresh(

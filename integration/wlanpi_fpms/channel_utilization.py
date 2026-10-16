@@ -1,4 +1,4 @@
-"""Thin WLAN Pi FPMS adapter for the beacon-live foreground command.
+"""Thin WLAN Pi FPMS adapter for the Utilization command.
 
 This module deliberately contains launch, display, and menu wiring only. QBSS
 capture, selection, aggregation, summaries, logging, and frame rendering remain
@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live"
+EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-utilization"
 FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "auto")
@@ -100,6 +100,18 @@ def _capture_stop_timeout(command: list[str]) -> int:
     return CAPTURE_STOP_TIMEOUT_SECONDS
 
 
+def configured_runtime_mode() -> str:
+    mode = os.environ.get("WLANPI_UTILIZATION_RUNTIME_MODE")
+    if mode is None:
+        try:
+            mode = json.loads(BACKEND_CONFIG.read_text()).get("runtime_mode", "standalone")
+        except FileNotFoundError:
+            mode = "standalone"
+        except (OSError, ValueError, AttributeError):
+            return "invalid"
+    return mode if isinstance(mode, str) and mode in {"standalone", "managed"} else "invalid"
+
+
 def build_launch_command(
     *,
     band: str,
@@ -137,6 +149,11 @@ def build_launch_command(
     if NETWORK_NAMESPACE is not None:
         command.extend(["--netns", NETWORK_NAMESPACE])
     command.extend(["--capture-backend", configured_capture_backend()])
+    mode = configured_runtime_mode()
+    if mode == "managed":
+        command.append("--managed")
+    elif mode == "invalid":
+        command.append("--invalid-runtime-mode")  # Reject before touching a radio.
     return command
 
 
@@ -195,6 +212,8 @@ def _band_menu(
                 ],
             }
         )
+        if configured_runtime_mode() == "managed":
+            actions[-1]["action"].append({"name": "Stop Capture", "action": app.stop_capture})
     return {"name": name, "action": actions}
 
 
@@ -239,7 +258,7 @@ def _frequency_mhz(band: str, channel: int) -> int:
 
 
 class ChannelUtilizationApp:
-    """Own one child capture process and mirror its frames onto the FPMS LCD."""
+    """Launch a standalone owner or managed renderer and mirror its FPMS frames."""
 
     def __init__(
         self,
@@ -262,18 +281,20 @@ class ChannelUtilizationApp:
         )
         if isinstance(logging_only_session, _LoggingOnlySession):
             if not logging_only_session.finished:
-                _display_error(
-                    self.g_vars,
-                    "Logging-only capture is active.\nStop logging first.",
-                )
-                return
-            self.g_vars.pop("channel_utilization_logging_session", None)
+                if "--managed" not in logging_only_session.command:
+                    _display_error(
+                        self.g_vars,
+                        "Logging-only capture is active.\nStop logging first.",
+                    )
+                    return
+            else:
+                self.g_vars.pop("channel_utilization_logging_session", None)
 
         session = self.g_vars.get("channel_utilization_session")
         logging_started = False
         new_session = False
         if not isinstance(session, _DisplaySession):
-            _write_logging_enabled(logging)
+            _write_logging_enabled(logging, apply_managed=False)
             session = _DisplaySession(
                 self.g_vars,
                 build_launch_command(
@@ -344,7 +365,7 @@ class ChannelUtilizationApp:
             )
             return
 
-        _write_logging_enabled(True)
+        _write_logging_enabled(True, apply_managed=False)
         session = _LoggingOnlySession(
             self.g_vars,
             build_launch_command(
@@ -372,8 +393,34 @@ class ChannelUtilizationApp:
             channel=channel,
         )
 
+    def stop_capture(self) -> None:
+        try:
+            result = subprocess.run([EXECUTABLE, "session", "status", "--summary"],
+                                    capture_output=True, text=True, timeout=6)
+            if result.returncode != 0:
+                raise OSError(result.stderr)
+            state = json.loads(result.stdout)
+            if state.get("phase") not in {"starting", "running", "stopping"}:
+                _display_status(self.g_vars, "Capture already stopped")
+                return
+            result = subprocess.run(
+                [EXECUTABLE, "session", "stop", "--session-id", state["session_id"], "--summary"],
+                capture_output=True, text=True, timeout=6,
+            )
+            if result.returncode != 0:
+                raise OSError(result.stderr)
+            _display_status(self.g_vars, "Capture stopping")
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization stop control failed")
+            _display_error(self.g_vars, "Stop failed. Check journal.")
+
     def stop_logging(self) -> None:
-        _write_logging_enabled(False)
+        try:
+            _write_logging_enabled(False)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization logging control failed")
+            _display_error(self.g_vars, "Logging control failed. Check journal.")
+            return
         stopped_channel: Optional[tuple[str, int]] = None
         stopped_display_session: Optional[_DisplaySession] = None
         display_session = self.g_vars.get("channel_utilization_session")
@@ -485,7 +532,8 @@ class _DisplaySession:
 
     def stop(self) -> None:
         was_logging = self.logging_enabled
-        self.set_logging(False)
+        if "--managed" not in self.command:
+            self.set_logging(False)
         self.stop_event.set()
         process = self.process
         if process is not None and process.poll() is None:
@@ -501,7 +549,7 @@ class _DisplaySession:
                     process.wait(timeout=2)
         if self.thread is not None and self.thread is not threading.current_thread():
             self.thread.join(timeout=2)
-        if was_logging:
+        if was_logging and "--managed" not in self.command:
             self.show_logging_status("Logging stopped")
         self.g_vars.pop("channel_utilization_session", None)
         self.g_vars.pop("page_exit_handler", None)
@@ -516,7 +564,12 @@ class _DisplaySession:
             return False
         if enabled == self.logging_enabled:
             return False
-        _write_logging_enabled(enabled)
+        try:
+            _write_logging_enabled(enabled)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization logging control failed")
+            self.show_status("Logging control failed. Check journal.")
+            return False
         self.logging_enabled = enabled
         return True
 
@@ -640,6 +693,8 @@ class _DisplaySession:
             return
         if not isinstance(payload, dict):
             return
+        if type(payload.get("logging_enabled")) is bool:
+            self.logging_enabled = payload["logging_enabled"]
         if payload.get("reason") != LOW_DISK_STATUS_REASON:
             return
         self.low_disk_stopped = True
@@ -921,7 +976,23 @@ def _logging_status_path() -> Path:
     return FRAME_PATH.with_name("logging.status.json")
 
 
-def _write_logging_enabled(enabled: bool) -> None:
+def _write_logging_enabled(enabled: bool, *, apply_managed: bool = True) -> None:
+    if apply_managed and configured_runtime_mode() == "managed":
+        # FPMS has its own interpreter. Use the isolated app's local controls
+        # rather than importing analysis code into the hardware UI process.
+        status = subprocess.run([EXECUTABLE, "session", "status", "--summary"],
+                                capture_output=True, text=True, timeout=6)
+        if status.returncode != 0:
+            raise OSError(status.stderr.strip() or "Utilization service unavailable")
+        state = json.loads(status.stdout)
+        if state.get("phase") in {"starting", "running"}:
+            result = subprocess.run(
+                [EXECUTABLE, "session", "logging", "--session-id", state["session_id"],
+                 "--enabled", "yes" if enabled else "no", "--summary"],
+                capture_output=True, text=True, timeout=6,
+            )
+            if result.returncode != 0:
+                raise OSError(result.stderr.strip() or "Utilization logging control failed")
     _atomic_write_text(
         _logging_control_path(),
         json.dumps({"logging_enabled": enabled}, separators=(",", ":")),

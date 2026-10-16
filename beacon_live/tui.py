@@ -457,7 +457,7 @@ class CursesDashboard:
         )
         title = (
             f" {tuning} "
-            "| WLANPi Beacon Live "
+            "| Utilization "
             f"| {self.snapshot.window_seconds}s history "
             f"| rows {len(self.snapshot.history)} "
             f"| {_format_dashboard_state(self.display_paused, self.viewport)} "
@@ -483,7 +483,7 @@ class CursesDashboard:
         self._window.refresh()
 
     def _draw_too_small(self, layout: DashboardLayout) -> None:
-        self._add(0, 0, "WLANPi Beacon Live", layout.width, self._attr("A_BOLD"))
+        self._add(0, 0, "Utilization", layout.width, self._attr("A_BOLD"))
         if layout.height > 1:
             message = (
                 f"Terminal too small: {layout.width}x{layout.height}; "

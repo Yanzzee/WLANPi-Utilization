@@ -69,8 +69,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 def live_main(argv: Optional[Sequence[str]] = None) -> int:
     """Run only the live CLI, for the dedicated on-device entrypoint."""
     parser = argparse.ArgumentParser(
-        prog="wlanpi-beacon-live",
-        description="Run foreground WLANPi beacon analysis.",
+        prog="wlanpi-utilization",
+        description="Run Utilization with standalone capture or a shared managed session.",
+        epilog="Other commands: serve, session status|stop|logging, replay, retry-debug.",
     )
     _add_live_arguments(parser)
     return _run_live_command(parser.parse_args(argv), parser)
@@ -80,7 +81,9 @@ def _run_live_command(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
 ) -> int:
-    command_prefix = "live " if parser.prog == "beacon-live" else ""
+    command_prefix = "live " if hasattr(args, "command") else ""
+    if args.start_only and not args.managed:
+        parser.error("--start-only requires --managed")
     if args.interval_seconds <= 0:
         parser.error(
             f"{command_prefix}--interval-seconds must be greater than zero"
@@ -113,8 +116,8 @@ def _run_live_command(
     )
     log_paths = build_live_log_paths(
         args.log_dir,
-        write_stats_csv=write_stats_csv,
-        write_beacons_jsonl=write_beacons_jsonl,
+        write_stats_csv=write_stats_csv or args.managed,
+        write_beacons_jsonl=write_beacons_jsonl or args.managed,
     )
     try:
         live_options = dict(
@@ -161,6 +164,20 @@ def _run_live_command(
             live_options["disk_check_interval_seconds"] = args.disk_check_seconds
         if args.rotation_seconds != DEFAULT_ROTATION_INTERVAL_SECONDS:
             live_options["rotation_interval_seconds"] = args.rotation_seconds
+        if args.managed or args.attach:
+            from beacon_live.service_client import ServiceError, managed_live
+
+            if args.managed:
+                for key in ("stats_csv", "beacons_jsonl", "raw_capture_path", "core_diagnostics_path"):
+                    if live_options.get(key) is not None:
+                        live_options[key] = live_options[key].absolute()
+                live_options.setdefault("initial_logging_enabled", write_stats_csv or write_beacons_jsonl)
+            try:
+                return managed_live(live_options, socket_path=args.service_socket,
+                                    attach_only=args.attach, start_only=args.start_only)
+            except ServiceError as error:
+                print(str(error), file=sys.stderr)
+                return 1
         return run_live(**live_options)
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
@@ -175,7 +192,7 @@ def _run_live_command(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="beacon-live",
+        prog="utilization",
         description="Analyze WLAN beacon QBSS samples from replay or live capture.",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -278,6 +295,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
+    from beacon_live.ipc import DEFAULT_SOCKET
+
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--managed", action="store_true",
+                      help="Start or join a compatible shared session; exit detaches the display.")
+    mode.add_argument("--attach", action="store_true",
+                      help="Display the current service session without starting or configuring capture.")
+    parser.add_argument("--start-only", action="store_true",
+                        help="With --managed, start/join the session and return without a display.")
+    parser.add_argument("--service-socket", type=Path, default=DEFAULT_SOCKET,
+                        help="Local Utilization service socket.")
     parser.add_argument(
         "--capture-backend", choices=("direct", "core"), default="direct",
         help="Capture provider. Core is an explicit owner prototype; default: direct.",

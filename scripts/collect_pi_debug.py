@@ -135,27 +135,31 @@ def collect_deployment(bundle: Collector, package: Path | None, app_python: Path
     status = ('mismatch' if any(f.get('matches_checkout') is False for f in files)
               else 'unavailable' if any('error' in f for f in files) else 'ok')
     bundle.record('deployment.json', json.dumps(files, indent=2) + '\n', status=status)
-    for index, path in enumerate((Path('/usr/local/bin/wlanpi-beacon-live'), Path('/usr/local/bin/beacon-live'))):
+    for index, path in enumerate((Path('/usr/local/bin/wlanpi-utilization'), Path('/usr/local/bin/utilization'),
+                                 Path('/usr/local/bin/wlanpi-beacon-live'), Path('/usr/local/bin/beacon-live'))):
         bundle.read(f'cli_launcher_{index}.txt', path)
     bundle.command('core_client.txt', [str(app_python), '-I', '-c',
         "import websockets; print(websockets.__version__); print(websockets.__file__)"])
 
 
 def collect_backend_config(bundle: Collector, path=Path('/etc/wlanpi-beacon-live/fpms.json')):
-    report = {'path': str(path), 'capture_backend': 'direct', 'source': 'default'}
+    report = {'path': str(path), 'capture_backend': 'direct', 'runtime_mode': 'standalone', 'source': 'default'}
     status = 'ok'
     try:
         settings = json.loads(path.read_text())
         backend = settings.get('capture_backend', 'direct')
         if not isinstance(backend, str) or backend not in {'direct', 'core'}:
             raise ValueError('invalid capture_backend')
-        report.update(capture_backend=backend, source='file')
+        runtime_mode = settings.get('runtime_mode', 'standalone')
+        if not isinstance(runtime_mode, str) or runtime_mode not in {'standalone', 'managed'}:
+            raise ValueError('invalid runtime_mode')
+        report.update(capture_backend=backend, runtime_mode=runtime_mode, source='file')
     except FileNotFoundError:
         pass
     except (OSError, ValueError, AttributeError) as error:
         report.update(capture_backend=None, error=str(error))
         status = 'failed'
-    # Retain just the backend selection, not arbitrary configuration values.
+    # Retain only backend/runtime selections, not arbitrary configuration values.
     bundle.record('fpms_backend.json', json.dumps(report, indent=2) + '\n', status=status)
 
 

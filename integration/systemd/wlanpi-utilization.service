@@ -1,0 +1,18 @@
+[Unit]
+Description=Utilization managed capture service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+RuntimeDirectory=wlanpi-utilization
+RuntimeDirectoryMode=0700
+UMask=0077
+ExecStart=/opt/wlanpi-beacon-live/bin/wlanpi-utilization serve
+Restart=on-failure
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=105
+
+[Install]
+WantedBy=multi-user.target
