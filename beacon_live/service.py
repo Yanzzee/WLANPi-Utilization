@@ -7,6 +7,7 @@ and polls nonblocking IPC; slow renderers cannot hold up decoder input.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import fcntl
 import os
 import selectors
@@ -84,6 +85,7 @@ class ServiceBroker:
         self.process = None
         self.owner = None
         self.control_path = None
+        self.catalog = {}
 
     def _update(self, **changes):
         self.publication = replace(
@@ -95,6 +97,14 @@ class ServiceBroker:
             raise ValueError("Unsupported Utilization IPC protocol version")
         self.poll_owner()
         op = request.get("op")
+        if op == "files":
+            active = set(self.publication.logging.paths) if self.publication.logging.active else set()
+            if self.publication.phase is SessionPhase.STARTING:
+                active.update(path for path in (
+                    self.publication.config.stats_csv, self.publication.config.beacons_jsonl,
+                ) if path is not None)
+            files = [item for item in self.catalog.values() if Path(item["path"]) not in active]
+            return {"version": PROTOCOL_VERSION, "ok": True, "files": files}
         if op == "read":
             pass
         elif op in {"start", "ensure"}:
@@ -194,6 +204,13 @@ class ServiceBroker:
                 self.publication = replace(
                     publication, phase=phase, revision=self.publication.revision + 1,
                 )
+                for log in publication.closed_logs:
+                    key = hashlib.sha256(
+                        f"{publication.session_id}:{log.path}:{log.inode}:{log.closed_at}".encode()
+                    ).hexdigest()[:32]
+                    self.catalog[key] = dict(to_wire(log), id=key, session_id=publication.session_id)
+                while len(self.catalog) > 256:
+                    del self.catalog[next(iter(self.catalog))]
         except (EOFError, OSError, ValueError, TypeError) as error:
             self._update(error=f"Owner publication failed: {error}")
             if self.process.poll() is None:

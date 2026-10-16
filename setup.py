@@ -15,8 +15,9 @@ setup(
     long_description_content_type="text/markdown",
     python_requires=">=3.13",
     packages=find_packages(include=["beacon_live", "beacon_live.*"]),
+    package_data={"beacon_live": ["templates/*.html", "web_static/*.css", "web_static/*.js"]},
     install_requires=[],
-    extras_require={"core": ["websockets==15.0.1"], "dev": ["pytest>=8.3.5,<9"]},
+    extras_require={"core": ["websockets==15.0.1"], "web": ["Flask>=3.1.3,<4", "waitress>=3.0.2,<4"], "dev": ["pytest>=8.3.5,<9"]},
     entry_points={
         "console_scripts": [
             "wlanpi-utilization=beacon_live.device:main",

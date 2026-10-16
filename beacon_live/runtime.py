@@ -20,7 +20,7 @@ from beacon_live.log_writer import (
     DEFAULT_MIN_FREE_BYTES,
     DEFAULT_ROTATION_INTERVAL_SECONDS,
 )
-from beacon_live.models import MetricsSnapshot, SecondStats
+from beacon_live.models import ClosedLog, MetricsSnapshot, SecondStats
 
 
 class SessionPhase(str, Enum):
@@ -86,6 +86,7 @@ class RuntimePublication:
     notice: str | None = None
     exit_code: int | None = None
     error: str | None = None
+    closed_logs: tuple[ClosedLog, ...] = ()
 
 
 class SessionConflictError(RuntimeError):
@@ -288,6 +289,10 @@ class _RuntimeDashboard:
 
     def publish_stats(self, rows: tuple[SecondStats, ...]) -> None:
         self._runtime._publish_stats(self._session_id, rows)
+
+    def set_closed_logs(self, logs: tuple[ClosedLog, ...]) -> None:
+        if logs != self._runtime.read().closed_logs:
+            self._runtime._publish(self._session_id, closed_logs=logs)
 
     def set_capture_started(self) -> None:
         self._runtime._capture_started(self._session_id)

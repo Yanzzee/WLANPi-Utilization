@@ -71,7 +71,7 @@ def live_main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="wlanpi-utilization",
         description="Run Utilization with standalone capture or a shared managed session.",
-        epilog="Other commands: serve, session status|stop|logging, replay, retry-debug.",
+        epilog="Other commands: web, serve, session status|stop|logging, replay, retry-debug.",
     )
     _add_live_arguments(parser)
     return _run_live_command(parser.parse_args(argv), parser)

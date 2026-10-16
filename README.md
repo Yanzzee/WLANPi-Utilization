@@ -166,7 +166,7 @@ Changing screens never restarts capture or clears graph history.
 
 ## Use the command line
 
-The app name is **Utilization** in FPMS, terminal views, and the planned web
+The app name is **Utilization** in FPMS, terminal views, and the web
 application at `/utilization/`. The preferred commands are
 `wlanpi-utilization` and `utilization`. `wlanpi-beacon-live` and `beacon-live`
 remain compatibility aliases. The Python package and existing `/opt`, `/etc`,
@@ -190,17 +190,43 @@ The service starts idle; an explicit managed request starts capture. Compatible
 CLI and FPMS requests join that session. A request for another source/channel
 fails until the owner is explicitly stopped. Closing a managed display or
 leaving FPMS detaches the renderer and retains capture, logging, and history.
-Use the current session ID printed by status for controls:
+Controls require the actual `session_id` from status. The commands below read
+it automatically; rerun the assignment after starting a new session. The word
+`SESSION_ID` alone is not a valid session ID.
 
 ```bash
-sudo wlanpi-utilization session logging --session-id SESSION_ID --enabled yes --summary
-sudo wlanpi-utilization session stop --session-id SESSION_ID --summary
+UTILIZATION_SESSION_ID="$(sudo wlanpi-utilization session status --summary \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["session_id"] or "")')"
+sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" --enabled yes --summary
+sudo wlanpi-utilization session stop --session-id "$UTILIZATION_SESSION_ID" --summary
 ```
 
 Standalone mode remains available through the normal live command without
 `--managed`. To restore standalone FPMS behavior, reinstall with
 `--fpms-runtime standalone`. See [managed service operation](docs/managed-service.md)
 for permissions, shutdown, failure behavior, and device checks.
+
+### Web interface
+
+Install the optional web dependencies alongside the managed service:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web
+sudo wlanpi-utilization web
+```
+
+From your laptop, open an SSH tunnel and visit
+`http://127.0.0.1:8765/utilization/`:
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
+```
+
+The responsive page provides metrics, shared history graphs, a BSSID table,
+session/logging controls, and closed CSV/JSONL downloads. Opening, refreshing,
+or closing it leaves capture running. The server currently listens on loopback;
+WLAN Pi launcher/login integration is the next milestone. See
+[web operation and Pi acceptance](docs/web-interface.md).
 
 ### Standalone commands
 
@@ -451,6 +477,8 @@ before copying the application into `/opt/wlanpi-beacon-live`.
 - [Managed runtime roadmap](docs/managed-runtime-roadmap.md) — v2.1.0 plan for
   shared web/CLI/FPMS sessions and beacon pcapng export; current development
   metadata is 2.1.0.dev0.
+- [Web interface](docs/web-interface.md) — installation, shared-session controls,
+  closed log downloads, and browser acceptance checks.
 - [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones
   and acceptance checks for WLAN Pi OS 26.10 DeadEye.
 - [Architecture](docs/architecture.md) — design rules, pipeline, data flow, and

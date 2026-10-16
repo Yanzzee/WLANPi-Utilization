@@ -1,0 +1,142 @@
+# Utilization web interface
+
+The v2.1.0 development web consumer uses the managed session at
+`/utilization/`. It provides current metrics, six shared-history graphs,
+a sortable BSSID table, explicit session/logging controls, and closed
+CSV/JSONL downloads. Direct capture remains the default; Core is optional.
+
+## Install and open on a Pi
+
+Update the checkout, then install the service and optional web dependencies:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web
+sudo wlanpi-utilization web
+```
+
+Reinstallation updates/restarts the managed service. Stop an existing capture
+first if you need to preserve its normal shutdown evidence. Both the broker
+and web process need the updated code for the closed-file inventory.
+The installer copies local HTML/CSS/JavaScript assets and installs Flask and
+Waitress in the application's isolated venv. `--wheel-dir DIRECTORY` also
+supports offline installation when that directory contains all required Core
+and web dependency wheels. The command above selects managed FPMS attachment;
+normal CLI capture stays standalone unless `--managed` or `--attach` is used.
+
+The web server stays in the foreground and binds `127.0.0.1:8765`. From a
+laptop, leave this SSH tunnel running:
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
+```
+
+Open `http://127.0.0.1:8765/utilization/` on that laptop. Replace the hostname
+with your Pi. A browser running on the Pi can open the same URL directly.
+`--port`, `--socket`, `--log-dir`, and `--url-prefix /example/` are available;
+use the same log root as the managed capture if you need downloads.
+
+The privileged Unix broker socket remains private. The current `sudo` web
+command accesses it as root; no socket permissions are widened. The HTTP CLI
+accepts only IPv4 loopback or localhost. It uses Waitress without a development
+reloader, local assets, host/origin checks, a per-process CSRF token for controls,
+and no response caching. Restarting this web process invalidates tokens;
+reload open pages before sending another control.
+
+Platform launcher/login integration is milestone 4. This milestone uses local
+access or an authenticated SSH tunnel. It does not supply a WLAN Pi login
+adapter, a remote HTTP listener, or an automatically enabled web systemd unit.
+The later adapter must protect page, status, controls, and downloads together.
+
+## Use the shared session
+
+Opening a page reads the service; an idle service stays idle. Choose **Start
+session** explicitly, or start through managed CLI/FPMS and open the page later.
+Band/channel/width apply only to a new session. Advanced source fields offer
+the existing automatic interface/namespace discovery and optional Core backend.
+There is no SSID/BSSID selector.
+
+Overview shows AP QBSS and local survey utilization separately, retries,
+admission capacity, advertised station sum, observed clients, BSSIDs, beacon
+loss, and rolling composition. Desktop displays all six graphs. Small screens
+keep the same metric cards and offer a graph selector. The BSSID table uses
+latest snapshot beacon values and explicitly labels rolling observations.
+Sorting changes table presentation only.
+
+Null fields display an em dash; real zeros remain zero. Unavailable graph
+samples break the line. Nonzero retries below 1% display as `<1%`. Local survey
+remains unavailable when disabled or when no sample is available. Capture width,
+collecting state, partial-coverage notices, errors, and logging/disk warnings
+come from the owner publication. The browser does not close analyzer buckets
+or advance capture history using its clock. A stopped session retains its final
+values until an explicit new session.
+
+All HTTP threads share a one-second read cache. Tabs, graph selection, sorting,
+reloads, disconnects, and extra browsers never start capture or reset history.
+A failed read keeps the last values visible, marks the connection disconnected,
+disables controls, and retries with bounded backoff. The displayed receive time
+means a successful service response; the completed sample time identifies the
+data. Delayed/stalled capture can therefore retain an older sample time.
+
+**Stop logging** closes CSV/JSONL while analysis continues. **Stop capture**
+requests the owner's normal cleanup and radio restoration. Controls carry the
+current session ID; a stale page cannot stop a replacement session. A new start
+can briefly be rejected while the previous owner process finishes cleanup;
+wait for shutdown to finish and retry. Controls are never retried automatically.
+Sessions created without configured logging formats have logging disabled in
+the page; web-created sessions configure both formats for later toggling.
+
+## Download contract
+
+Only successfully closed CSV/JSONL segments registered by the logging service
+are offered. Hourly rollover, explicit logging stop, capture stop, and normal
+low-disk close register completed files. Active segments remain excluded;
+stop logging to download them while capture/history continue.
+
+The logging owner records device/inode, size, and modification time from the
+original open descriptor after flushing. A bounded broker catalog keeps the
+latest 256 registered records across capture sessions for that broker lifetime.
+Each publication carries at most 128 recent closed records. Restarting the
+broker clears the catalog; the UI does not scan historical directories. The
+files themselves remain on disk under the existing logging policy.
+
+Downloads use opaque file IDs and only files under the configured log root.
+The web process refuses symlinks, traversal, changed/replaced files, and active
+paths. Removed or changed records show **Unavailable** and return 404. A
+download whose descriptor is already open can finish if its name is later
+removed by retention. File reads/HTTP backpressure stay in the web process,
+independent of capture and ordered analysis. Beacon-only pcapng export and its
+size/retention budgets remain milestone 5.
+
+## Pi browser acceptance
+
+Record revision, image/Python/browser versions, adapter, backend, band/width,
+namespace, and diagnostic bundle. These checks complement the existing
+[managed service acceptance](managed-service.md#web-boundary-and-device-acceptance).
+
+1. Reinstall with `--with-web`, run the web command, and open the local URL
+   through SSH. An idle service must stay idle until an explicit start.
+2. Start direct capture through the page. Attach CLI and FPMS on the same
+   source. Record one owner/TShark/analyzer and matching session ID, metrics,
+   history, width/coverage notices, and logging status.
+3. Check a desktop browser and phone-sized viewport, keyboard navigation,
+   scrolling, dialog validation, graph selection, table sorting, and long or
+   hidden SSIDs. Inspect real missing QBSS/survey fields, true zero, `<1%`
+   retries, and graph gaps when those conditions occur.
+4. Open another tab/browser; reload, switch views, close every browser, and
+   reconnect. Capture/logging must continue with the same ID and history.
+   Compare CPU/RAM and publication lag with CLI/FPMS-only operation.
+5. Toggle logging off without stopping capture. Download CSV/JSONL, parse them,
+   and compare completed values with the session. Verify new segments after
+   toggling on/rollover, and explicit unavailable status for removed files.
+6. Interrupt the web process or SSH tunnel, then reconnect. Confirm the broker
+   retains capture/history. Restart the web process and reload to renew its
+   CSRF token. Test missing socket, service failure, and slow downloads without
+   retuning or capture restart.
+7. Stop through the page, verify normal owner cleanup and physical radio
+   restoration, then start a new session and check the new ID. Verify stale-ID
+   controls are rejected and earlier registered downloads remain available.
+
+Automated tests cover the API, real broker with synthetic owner, original
+snapshot/completed statistics, read-only consumers, closed-file identity and
+download races, and optional-dependency installation. Actual responsive browser
+rendering and these Pi hardware/performance checks remain acceptance gates.

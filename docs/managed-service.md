@@ -37,14 +37,23 @@ configuration without requesting a start or reconfiguration.
 Exiting a managed CLI view with Q/Ctrl+C or leaving the FPMS display detaches
 that renderer. Capture and active logging continue with zero renderers. FPMS
 managed mode adds **Stop Capture** to each channel menu. **Stop Logging**
-disables logging without ending capture. CLI controls require the current
-session ID from status:
+disables logging without ending capture. CLI controls require the actual
+`session_id` value from status, not the literal placeholder `SESSION_ID`.
+While a session is active, read its ID automatically before using the desired
+control below. Repeat the assignment after a new session starts.
 
 ```bash
-sudo wlanpi-utilization session logging --session-id SESSION_ID --enabled yes --summary
-sudo wlanpi-utilization session logging --session-id SESSION_ID --enabled no --summary
-sudo wlanpi-utilization session stop --session-id SESSION_ID --summary
+UTILIZATION_SESSION_ID="$(sudo wlanpi-utilization session status --summary \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["session_id"] or "")')"
+sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" --enabled yes --summary
+sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" --enabled no --summary
+sudo wlanpi-utilization session stop --session-id "$UTILIZATION_SESSION_ID" --summary
 ```
+
+`Stale Utilization session ID` means the supplied value does not match the
+current owner. This check prevents an old command from stopping a newer
+capture. Read status again and use its current ID; no reinstall is needed to
+correct a placeholder.
 
 Stopping is asynchronous. Poll status until stopped/failed before starting
 another owner. The final publication can precede process reaping by a short
@@ -116,24 +125,21 @@ is still running. Broker restart creates a fresh idle state. Loss of the broker
 connection causes the owner to exit through its normal cleanup when it next
 polls, rather than leaving an unattended capture. Logging-control errors are
 reported without replacing the analyzer. Low-disk/rotation behavior remains
-the existing shared logging policy. File export and download inventory are
-later milestones.
+the existing shared logging policy. Closed CSV/JSONL segments now enter a
+bounded download catalog; beacon pcapng export remains a later milestone.
 
 ## Web boundary and device acceptance
 
-The next renderer will use **Utilization** at `/utilization/`. Use a separate
-Flask backend with locally served assets and one-second JSON polling initially;
-every handler calls this local service instead of constructing an analyzer.
-Flask matches the existing WLAN Pi WebUI stack. Its
-[production deployment guidance](https://flask.palletsprojects.com/en/stable/deploying/)
-requires a dedicated server even for local production use. Capture remains in
-the owner service, consistent with Flask's
-[background task guidance](https://flask.palletsprojects.com/en/stable/async-await/#background-tasks).
-SSE can follow if measured
-polling overhead or update needs justify it. Browser startup, reconnect, and
-navigation will have no implicit start/stop behavior. The backend's access to
-the root-owned socket and the platform login adapter need a concrete
-deployment decision before remote controls are exposed.
+The web renderer now uses **Utilization** at `/utilization/`, with a separate
+Flask/Waitress backend, local assets, and one-second JSON polling shared across
+HTTP threads. Read handlers consume this local service; explicit controls use
+the broker. Browser startup, reconnect, and navigation have no implicit
+start/stop behavior. `sudo wlanpi-utilization web` accesses the private broker
+as root and listens on loopback, suitable for a local browser or SSH tunnel.
+See [web installation and browser checks](web-interface.md). SSE remains
+optional if measured polling overhead justifies it. The platform login adapter
+and least-privilege proxy/backend deployment remain milestone 4, before remote
+controls are exposed.
 
 On the target Pi, record image/package versions, adapter, source namespace,
 backend, band/width, revision, and diagnostic bundle. Check:

@@ -2154,6 +2154,9 @@ def run_live(
                         if not _set_dashboard_notice(dashboard, message):
                             print(f"Warning: {message}", file=sys.stderr, flush=True)
 
+                if logging_service is not None:
+                    _publish_closed_logs(dashboard, logging_service)
+
                 if survey_future is not None and survey_future.done():
                     try:
                         current_survey_samples = survey_future.result()
@@ -2242,6 +2245,7 @@ def run_live(
                 survey_executor.shutdown(wait=True, cancel_futures=True)
             if logging_service is not None:
                 logging_service.stop()
+                _publish_closed_logs(dashboard, logging_service)
             selector.close()
             capture_resources.close()
             if capture_backend == "core":
@@ -2508,6 +2512,12 @@ def _set_dashboard_collecting(
     setter = getattr(dashboard, "set_collecting", None)
     if callable(setter):
         setter(collecting)
+
+
+def _publish_closed_logs(dashboard: LiveDashboard, service: LoggingService) -> None:
+    setter = getattr(dashboard, "set_closed_logs", None)
+    if callable(setter):
+        setter(service.closed_logs)
 
 
 def _set_dashboard_logging_status(

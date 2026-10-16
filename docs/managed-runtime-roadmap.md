@@ -161,12 +161,17 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   standalone compatibility. Test simultaneous consumers against one capture,
   logging toggles, service restart/failure, radio restoration, and overload.
   Choose web framework, IPC permissions, transport, service policy, and limits.
-  **Implementation and local regression coverage complete; Pi acceptance
-  pending.** See milestone 2 evidence below and [service checks](managed-service.md).
+  **Implementation and local regression coverage complete; initial Pi results
+  reported October 16, including successful CLI stop and correct TUI display.
+  Broader device/release coverage remains pending.** See milestone
+  2 evidence below and [service checks](managed-service.md).
 - [ ] **3. Responsive web consumer.** Deliver current metrics, desktop
   graphs/table, controls, logging status, and CSV/JSONL downloads. Verify phone
   and desktop layouts, null/zero/gap semantics, `<1%`, delayed publications,
   reconnect/navigation, multiple tabs, and local-browser operation.
+  **Implementation and local automated coverage complete October 16;
+  visual browser and Pi acceptance remain pending.** See milestone 3 evidence
+  below and [web operation/checks](web-interface.md).
 - [ ] **4. Launcher and authentication.** Implement the verified platform
   launcher and protected route without merging the Utilization backend into
   Core. Test login/logout/expiry, controls/stream/download authorization,
@@ -295,11 +300,110 @@ requiring `websockets`. CLI help for live/service/session commands, hardware-fre
 replay, Python compilation, installer shell syntax, metadata/entrypoint
 consistency, and `git diff --check` also pass. Unix-listener process tests ran
 outside the filesystem sandbox because it prohibits binding a local listener;
-they use private temporary sockets and no Wi-Fi hardware. No Pi installation,
-systemd deployment, web exposure, or release publication was performed.
+they use private temporary sockets and no Wi-Fi hardware. These local checks
+did not perform Pi installation, systemd deployment, web exposure, or release
+publication; subsequent Pi reports are recorded below.
 
-**Next bounded milestone:** the responsive web consumer at `/utilization/`,
-using this service boundary. Remaining decisions are verified platform
-authentication/launcher hooks and backend socket access; export source
-plumbing and timestamp/block support; rotation/retention/disk budgets; download
-behavior for active files; and the offline-analysis revision/contextual fixture.
+At milestone 2 completion, the next bounded work was the responsive web
+consumer at `/utilization/` using this service boundary. Its implementation is
+recorded below. Platform authentication/launcher hooks, export source plumbing,
+timestamp/block support, export disk budgets, and the offline-analysis
+revision/contextual fixture remain later decisions.
+
+**Pi report October 16, 2026:** the user reports that everything appears to
+work except the CLI stop example. The supplied transcript from `wlanpi-bd2`
+shows idle state followed by a running managed session with CSV/JSONL logging
+active. The session ID and active logging remain unchanged after CLI attach
+returns. A request for channel 6 is rejected as a source conflict. The
+diagnostic collector reports 43 checks with zero failed, unavailable, or timed
+out; the archive and service/FPMS journal were generated but have not been
+reviewed here.
+
+The stop attempt supplied the literal `SESSION_ID` placeholder. Its stale-ID
+rejection is expected and does not establish a stop implementation failure.
+README/service examples now retrieve the actual ID automatically. In a
+follow-up on October 16, the user confirmed that stop worked with the actual
+ID and that the TUI display looked correct. This accepts the reported stop
+operation and TUI behavior for progressing to the web consumer. Physical
+radio-state restoration, reboot/reinstallation, exact band/width coverage, and
+high-utilization measurements were not detailed and remain release coverage.
+
+## Milestone 3 implementation and evidence — October 16, 2026
+
+Implemented the separate optional web consumer in `beacon_live/web.py`, with
+local HTML/CSS/JavaScript assets at `/utilization/`. Flask/Waitress serves a
+loopback-only interface; HTTP threads share a one-second publication read cache.
+`wlanpi-utilization web` never creates a capture owner or analyzer. Page loads,
+navigation, sorting, reconnects, and additional clients perform read operations.
+Explicit start/stop/logging controls use the existing service and session IDs.
+Direct capture remains the form default; Core remains optional. CLI/FPMS
+standalone and managed attachment behavior are preserved.
+
+The page displays eight current metric cards, rolling composition, six desktop
+graphs, a phone graph selector, a sortable BSSID table, capture/collecting and
+logging status, notices, and closed-file downloads. Metric values come from
+`MetricsSnapshot` and existing screen projections. Original completed
+`SecondStats` remain in the status response. Null/zero/gap semantics and `<1%`
+retry presentation are preserved; no browser clock closes analyzer buckets or
+slides history. Disconnection retains the last values with explicit status and
+disabled controls. No BSSID/SSID selection or metric aggregation was added.
+
+The download decision is **closed registered CSV/JSONL segments only**. The
+logging worker records original descriptor identities after flushing/closing;
+the broker keeps a bounded catalog across sessions. HTTP downloads verify
+root containment, no symlinks, identity, size, and modification time, then
+stream from the opened descriptor independently of capture. Active, replaced,
+truncated, missing, and out-of-root files are excluded or unavailable. An open
+download survives unlink. Catalog limits and restart behavior are documented
+in [web operation](web-interface.md); no historical-directory scan was added.
+Beacon pcapng export, export retention, and offline analysis remain later work.
+
+Added the optional `web` dependency extra and `--with-web` Pi installer flag.
+Web assets are included in both production copies and package wheels. The
+initial deployment uses the existing private root-owned broker through
+`sudo wlanpi-utilization web`, with local access or SSH tunneling. Socket
+permissions remain private. Origin/host/CSRF checks and local-only assets are
+implemented; the platform login/launcher adapter and remote deployment remain
+milestone 4. This milestone does not enable a web systemd service or modify
+WLAN Pi's Nginx/authentication configuration.
+
+Evidence on Python 3.13.3:
+
+- Full regression: **678 passed, one skipped in 16.97 seconds**. The skip is
+  the optional Core transport integration requiring `websockets`. The web,
+  service, logging, and installer group separately passed 54 tests.
+- The real Unix broker/synthetic owner test covers idle page load, explicit
+  web start, multiple clients on one ID/snapshot, active-file exclusion,
+  logging stop and actual CSV/JSONL downloads, unchanged analysis/history,
+  explicit stop/restart, and retained files with their original session IDs.
+- API tests cover original null/zero/gap/completed values, stale controls,
+  missing service/reconnect, origin/CSRF/host/body limits, URL prefixes, and
+  registered download traversal/symlink/replacement/truncation/unlink races.
+  Logging tests verify rollover/low-disk inventory and original descriptor
+  identity even when the path is replaced before close. Installer tests cover
+  isolated web dependencies, failure preserving an installed app, copied
+  assets, and web help without installed optional dependencies.
+- JavaScript syntax and a synthetic-DOM execution check passed for six graphs,
+  three BSSIDs, gap paths, `<1%`, zero versus null, read-only navigation/sorting,
+  graph selection, disconnect/reconnect, retained values, idle state, and
+  control capabilities. This is a logic check, not browser rendering evidence.
+- Package wheel build and asset/optional-dependency metadata checks passed.
+  CLI help/replay, Python compilation, installer shell syntax, and
+  `git diff --check` passed. Local-listener regression tests ran outside the
+  filesystem sandbox, with temporary private sockets and no radio hardware.
+
+Visual browser verification was attempted with the hardware-free
+`tests/fixtures/web_preview.py` fixture. Native Chrome and Brave control timed
+out in this environment, so there is **no claimed desktop/phone visual pass**.
+The responsive rules are implemented; actual browser rendering, accessibility
+interaction, local on-device browser operation, Pi radio restoration, and
+performance are still acceptance gates. The fixture and concrete Pi checks are
+documented in [development](development.md) and [web acceptance](web-interface.md#pi-browser-acceptance).
+
+**Next bounded work:** run those browser/Pi checks and implement milestone 4's
+verified launcher/authentication adapter. Resolve platform session validation,
+logout/expiry, same-origin route and trusted proxy handling, and least-privilege
+backend access against the installed WLAN Pi image before exposing remote
+controls. Keep the backend separate and retain this frontend for future local
+browser use. Grafana and touchscreen hardware integration remain deferred;
+the release version stays `2.1.0.dev0` pending later milestones and acceptance.

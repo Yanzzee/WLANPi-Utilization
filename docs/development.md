@@ -47,6 +47,15 @@ python -m pytest
 The development extra installs `pytest>=8.3.5,<9`. Build requirements are
 `setuptools>=75.3` and `wheel`.
 For Core transport development/tests, install `python -m pip install -e '.[dev,core]'`.
+For the web consumer, install `python -m pip install -e '.[dev,web]'`.
+Run `python -m pytest -q tests/test_web.py tests/test_service.py` for web/API and
+real broker integration coverage. The latter uses a synthetic capture owner.
+For browser QA without hardware, run
+`python tests/fixtures/web_preview.py --port 8765`, then open
+`http://127.0.0.1:8765/utilization/`. This preview uses synthetic analyzer data;
+its controls affect only the preview. It starts with a populated 120-second
+history, explicit gaps, missing QBSS fields, and a retry percentage below 1%.
+Stop it with Ctrl-C after QA. See [web acceptance](web-interface.md).
 
 On a Pi, `scripts/pi_setup.sh` requires an activated, genuine venv without
 system site-packages. It verifies the interpreter/version before running pip,

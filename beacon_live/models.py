@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Optional
+from pathlib import Path
 
 from beacon_live.channel import ChannelDefinition
 
@@ -12,6 +13,18 @@ QBSS_ADMISSION_CAPACITY_MAX = 31_250
 BEACON_LOSS_RSSI_THRESHOLD_DBM = -75
 TOP_STATION_SOURCE_QBSS = "qbss"
 TOP_STATION_SOURCE_MAC = "mac"
+
+
+@dataclass(frozen=True)
+class ClosedLog:
+    """Identity of a flushed, closed log, captured from its original descriptor."""
+
+    path: Path
+    device: int
+    inode: int
+    size_bytes: int
+    mtime_ns: int
+    closed_at: float
 
 
 @dataclass(frozen=True)

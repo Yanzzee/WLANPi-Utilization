@@ -21,7 +21,7 @@ class ServiceClient:
     def __init__(self, socket_path: Path = DEFAULT_SOCKET, *, timeout=5.0):
         self.socket_path, self.timeout = socket_path, timeout
 
-    def request(self, op, **values) -> RuntimePublication:
+    def _exchange(self, op, **values) -> dict:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(self.timeout)
             try:
@@ -34,6 +34,10 @@ class ServiceClient:
             raise ServiceError("Unsupported Utilization service protocol")
         if response.get("ok") is not True:
             raise ServiceError(response.get("error", "Utilization service request failed"))
+        return response
+
+    def request(self, op, **values) -> RuntimePublication:
+        response = self._exchange(op, **values)
         try:
             return from_wire(RuntimePublication, response.get("publication"))
         except (ValueError, TypeError) as error:
@@ -41,6 +45,9 @@ class ServiceClient:
 
     def read(self):
         return self.request("read")
+
+    def files(self):
+        return self._exchange("files")["files"]
 
     def ensure(self, config):
         return self.request("ensure", config=config)

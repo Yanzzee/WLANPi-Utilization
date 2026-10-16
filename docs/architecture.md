@@ -444,6 +444,18 @@ FPMS setting retain standalone foreground behavior pending managed device
 acceptance. See [managed service operation](managed-service.md) and the
 [managed runtime roadmap](managed-runtime-roadmap.md).
 
+`web.py` provides a separate Flask/Waitress consumer at `/utilization/`.
+HTTP threads share a one-second publication cache and render the existing
+snapshot/screen views; controls use the same broker as CLI and FPMS. Browser
+lifetimes do not own capture. Local assets support compact phone views and
+expanded desktop graphs/table without an additional analysis pipeline.
+
+The logging worker records closed-file descriptor identities after flushing
+and closing each CSV/JSONL segment. The broker retains a bounded session-owned
+catalog across capture sessions. The web process opens registered files under
+its log root, verifies their identity, and streams downloads independently of
+capture. Active files are excluded. See [web operation](web-interface.md).
+
 - **FPMS display:** live capture plus LCD artifacts and screen navigation.
 - **FPMS display and log:** the same runtime with logging active.
 - **FPMS logging-only:** the same capture/analyzer with rendering disabled.
@@ -469,6 +481,7 @@ sessions so the device never starts two capture pipelines for one app session.
 | Managed ownership and consumer publications | `beacon_live/runtime.py` |
 | Local owner service and typed IPC | `beacon_live/service.py`, `beacon_live/ipc.py` |
 | Shared renderer attachment and controls | `beacon_live/service_client.py` |
+| Web API and responsive renderer | `beacon_live/web.py`, `beacon_live/templates/`, `beacon_live/web_static/` |
 | Logging | `beacon_live/log_writer.py` |
 | CLI/device entrypoints | `beacon_live/cli.py`, `beacon_live/device.py` |
 | FPMS integration | `integration/wlanpi_fpms/channel_utilization.py` |

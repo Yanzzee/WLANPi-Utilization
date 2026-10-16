@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from beacon_live.analyzer import Analyzer
 from beacon_live.channel import ChannelDefinition
 from beacon_live.models import FrameRecord
+from beacon_live.log_writer import LiveLogPaths, LoggingService, LogMetadata
 from beacon_live.service import run_owner, serve
 
 
@@ -50,14 +51,42 @@ def runner(**options):
     dashboard.set_capture_width("20 MHz")
     dashboard.refresh(analyzer.snapshot)
     last_enabled = None
+    logging = LoggingService(
+        metadata=LogMetadata(interface="fixture", channel="1", band="2.4", frequency_mhz=2412),
+        log_dir=path.parent, write_stats_csv=True, write_beacons_jsonl=options.get("beacons_jsonl") is not None,
+        initial_paths=LiveLogPaths(path, options.get("beacons_jsonl")),
+        min_free_bytes=options["min_free_bytes"], rotation_interval_seconds=options["rotation_interval_seconds"],
+    )
     try:
         while not dashboard.poll_input():
             enabled = json.loads(options["logging_control_path"].read_text())["logging_enabled"]
             if enabled != last_enabled:
-                dashboard.set_logging_status(active=enabled, paths=(path,) if path else ())
+                if enabled:
+                    logging.start()
+                    for row in completed:
+                        logging.write_stats(row)
+                    for frame in frames:
+                        beacon = frame.beacon_record()
+                        if beacon is not None:
+                            logging.write_beacon(beacon)
+                else:
+                    logging.stop()
                 last_enabled = enabled
+                dashboard.set_logging_status(active=logging.active, paths=tuple(
+                    item for item in (logging.current_paths.stats_csv, logging.current_paths.beacons_jsonl)
+                    if item is not None
+                ) if logging.current_paths else ())
+            event = logging.maintain()
+            if event:
+                dashboard.set_logging_status(active=logging.active, paths=tuple(
+                    item for item in (logging.current_paths.stats_csv, logging.current_paths.beacons_jsonl)
+                    if item is not None
+                ))
+            dashboard.set_closed_logs(logging.closed_logs)
             time.sleep(0.01)
     finally:
+        logging.stop()
+        dashboard.set_closed_logs(logging.closed_logs)
         if path:
             path.with_suffix(".restored").write_text("fixture cleanup completed")
     return 0

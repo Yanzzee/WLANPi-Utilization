@@ -6,6 +6,10 @@ CLIENT_OPTIONS=(--with-core)
 FPMS_RUNTIME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --with-web)
+      CLIENT_OPTIONS+=(--with-web)
+      shift
+      ;;
     --fpms-runtime)
       if [[ $# -lt 2 || ( "$2" != "standalone" && "$2" != "managed" ) ]]; then
         echo "--fpms-runtime requires standalone or managed" >&2
@@ -31,7 +35,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help|-h)
-      echo "Usage: sudo $0 [--fpms-backend direct|core] [--fpms-runtime standalone|managed] [--wheel-dir DIRECTORY]"
+      echo "Usage: sudo $0 [--fpms-backend direct|core] [--fpms-runtime standalone|managed] [--with-web] [--wheel-dir DIRECTORY]"
       echo "Without --fpms-backend, the saved FPMS choice is preserved (initial default: direct)."
       exit 0
       ;;

@@ -292,3 +292,56 @@ def test_large_partial_write_retains_only_one_pending_latest_publication():
     finally:
         sender.close()
         receiver.close()
+
+
+def test_web_clients_share_real_service_and_download_closed_logs(service, tmp_path):
+    pytest.importorskip("flask", reason="Install the optional web extra")
+    import re
+    from beacon_live.web import create_app
+
+    owner, _ = service
+    app = create_app(client=owner, log_directory=tmp_path)
+    first, second = app.test_client(), app.test_client()
+    page = first.get("/utilization/")
+    token = re.search(r'name="utilization-csrf" content="([^"]+)"', page.text)[1]
+    headers = {"X-Utilization-CSRF": token, "Origin": "http://localhost"}
+    assert owner.read().phase is SessionPhase.IDLE
+    result = first.post("/utilization/api/session/start", json={"band": "2.4", "channel": "1", "logging_enabled": True}, headers=headers)
+    assert result.status_code == 202, result.json
+    identifier = result.json["session_id"]
+    initial = until(owner, lambda pub: pub.logging.active and bool(pub.completed_stats))
+    for client in (first, second, app.test_client()):
+        assert client.get("/utilization/").status_code == 200
+        assert client.get("/utilization/api/status").json["publication"]["session_id"] == identifier
+    assert owner.files() == []
+    assert first.post("/utilization/api/logging", json={"session_id": identifier, "enabled": False}, headers=headers).status_code == 202
+    until(owner, lambda pub: not pub.logging.active and bool(pub.closed_logs))
+    inventory = first.get("/utilization/api/files").json["files"]
+    assert len(inventory) == 2
+    assert all(item["available"] for item in inventory)
+    csv = next(item for item in inventory if item["name"].endswith(".csv"))
+    response = second.get("/utilization/api/files/" + csv["id"])
+    assert response.status_code == 200
+    assert b"retry_percent" in response.data and b"50.00" in response.data
+    response.close()
+    assert owner.read().phase is SessionPhase.RUNNING
+    assert owner.read().snapshot == initial.snapshot
+    assert first.post("/utilization/api/session/stop", json={"session_id": identifier}, headers=headers).status_code == 202
+    until(owner, lambda pub: pub.phase is SessionPhase.STOPPED)
+    # Closed segments survive an explicit new session without exposing its
+    # currently written files or assigning the old files to the new session.
+    deadline = time.monotonic() + 5
+    while True:
+        restarted = first.post("/utilization/api/session/start", json={"band": "2.4", "channel": "1"}, headers=headers)
+        if restarted.status_code != 409:
+            break
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+    assert restarted.status_code == 202
+    next_identifier = restarted.json["session_id"]
+    assert next_identifier != identifier
+    until(owner, lambda pub: pub.phase is SessionPhase.RUNNING)
+    retained = second.get("/utilization/api/files").json["files"]
+    assert {item["id"] for item in retained} == {item["id"] for item in inventory}
+    assert all(item["session_id"] == identifier for item in retained)
+    owner.stop(next_identifier)
