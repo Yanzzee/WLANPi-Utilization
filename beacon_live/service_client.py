@@ -176,7 +176,7 @@ def main(argv=None):
     parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
     parser.add_argument("--session-id", help="Required for mutating controls; obtain it from status.")
     parser.add_argument("--enabled", choices=("yes", "no"))
-    parser.add_argument("--summary", action="store_true", help="Print only session and logging state.")
+    parser.add_argument("--summary", action="store_true", help="Print session, logging and capture-quality state.")
     args = parser.parse_args(argv)
     if args.operation != "status" and not args.session_id:
         parser.error("--session-id is required for stop/logging")
@@ -192,7 +192,7 @@ def main(argv=None):
             publication = client.set_logging(args.session_id, args.enabled == "yes")
         value = to_wire(publication)
         if args.summary:
-            value = {key: value[key] for key in ("session_id", "phase", "logging", "error", "exit_code")}
+            value = {key: value[key] for key in ("session_id", "phase", "logging", "capture_health", "error", "exit_code")}
         print(json.dumps(value, indent=2))
         return 0
     except ServiceError as error:

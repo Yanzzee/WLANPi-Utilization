@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, Optional
 
+# Normal 20 MHz primary-channel grids. Availability still depends on the
+# adapter and regulatory domain; center-channel numbers are not primaries.
+PRIMARY_CHANNELS = {
+    "2.4": tuple(range(1, 15)),
+    "5": tuple(range(36, 65, 4)) + tuple(range(100, 145, 4)) + tuple(range(149, 178, 4)),
+    "6": tuple(range(1, 234, 4)),
+}
 
 class ChannelWidth(str, Enum):
     MHZ20 = "20"

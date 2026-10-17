@@ -358,7 +358,7 @@ def test_build_tshark_command_uses_line_buffered_all_frame_fields() -> None:
         command[index + 1]
         for index, value in enumerate(command)
         if value == "-o"
-    ] == ["wlan.defragment:FALSE", "wlan.enable_decryption:FALSE"]
+    ] == ["wlan.defragment:FALSE", "wlan.enable_decryption:FALSE", "wlan.check_checksum:TRUE"]
     assert command[command.index("-N") + 1] == "m"
     assert command[command.index("-Y") + 1] == "wlan"
     assert _field_args(command) == [
@@ -1058,6 +1058,10 @@ def test_managed_runtime_uses_one_live_capture_and_original_completed_rows(
     assert len(publication.snapshot.history) == 120
     assert publication.snapshot.history[-1].second == 1001
     assert publication.snapshot.history[0].sample_available is False
+    assert publication.capture_health.capture_records == 5
+    assert publication.capture_health.decoded_frames == 5
+    assert publication.capture_health.bad_fcs_frames == 0
+    assert publication.capture_health.latest_timestamp == 1002.1
     for consumer in consumers:
         consumer.close()
     assert runtime.read() is publication
@@ -1356,6 +1360,8 @@ def test_real_pipe_uses_separate_streaming_aggregation_process() -> None:
     assert published[0].retry_eligible_frame_count == 2
     assert published[0].retry_frame_count == 1
     assert sum(len(message.beacons) for message in messages) == 2
+    assert messages[-1].capture_record_count == 5
+    assert messages[-1].latest_capture_timestamp == 1002.1
 
 
 def test_coverage_pruning_forgets_bssids_outside_the_window() -> None:

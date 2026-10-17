@@ -228,7 +228,13 @@
   $("logging-toggle").addEventListener("click", async () => {if (publication?.session_id) {await control("logging", {session_id: publication.session_id, enabled: !publication.logging.active}); filesAt = 0;}});
   $("new-session").addEventListener("click", () => {message("form-error", null); $("start-dialog").showModal();});
   ["cancel-start", "cancel-bottom"].forEach(id => $(id).addEventListener("click", () => $("start-dialog").close()));
-  $("band").addEventListener("change", () => {$("channel").value = {"2.4": "1", "5": "36", "6": "5"}[$("band").value];});
+  const channelChoices = JSON.parse($("channel").dataset.channels);
+  $("band").addEventListener("change", () => {
+    $("channel").replaceChildren(...channelChoices[$("band").value].map(channel => {
+      const option = node("option", "", String(channel)); option.value = String(channel); return option;
+    }));
+    $("channel").value = {"2.4": "1", "5": "36", "6": "5"}[$("band").value];
+  });
   $("channel-width").addEventListener("change", () => {
     const width = $("channel-width").value; $("centers").hidden = !width || width === "20"; $("center-two").hidden = width !== "80+80";
     document.querySelector('[name="center_frequency1_mhz"]').required = !$("centers").hidden;
@@ -257,6 +263,11 @@
     loggingAvailable = value.logging_available;
     admissionMaximum = value.units?.admission_capacity_max || admissionMaximum;
     connection(true);
+    const health = publication.capture_health;
+    if (health) {
+      const age = health.latest_timestamp == null ? null : Math.max(0, value.server_time - health.latest_timestamp);
+      $("capture-health").textContent = `Capture quality · ${number(health.decoded_frames)} decoded frames · ${number(health.bad_fcs_frames)} bad FCS · ${number(health.rejected_records)} rejected rows · ${age == null ? "Waiting for capture timestamps" : `Latest capture ${number(age)}s ago`}${health.fcs_metadata_available ? "" : " · FCS metadata unavailable"}${age > 3 && publication.phase === "running" ? " · Quiet traffic, buffering or capture loss can leave gaps" : ""}`;
+    }
     if (changed) {renderSession(); renderMetrics(); renderTable(); $("graphs").replaceChildren(...graphDefinitions.map(drawGraph));}
     if (!$("logs").hidden && Date.now() - filesAt > 5000) files();
     if (!failures) return;

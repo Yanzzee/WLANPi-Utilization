@@ -79,6 +79,36 @@ def test_page_tabs_assets_and_multiple_clients_are_read_only(web):
     assert service.publication.session_id == SESSION
 
 
+def test_channel_choices_and_server_validation_use_primary_band_grid(web):
+    from html import unescape
+    import json
+    from beacon_live.channel import PRIMARY_CHANNELS
+    service, _, client, headers = web
+    page = client.get("/utilization/").text
+    choices = json.loads(unescape(re.search(r"data-channels='([^']+)'", page)[1]))
+    assert choices == {band: list(channels) for band, channels in PRIMARY_CHANNELS.items()}
+    assert 'id="channel" data-channels=' in page and 'type="number" min="1" max="233"' not in page
+    for band, channel in (("2.4", "15"), ("5", "37"), ("5", "42"), ("6", "2"), ("6", "234")):
+        response = client.post("/utilization/api/session/start", json={"band": band, "channel": channel}, headers=headers)
+        assert response.status_code == 400
+    assert not service.controls
+    for band, channel in (("2.4", "14"), ("5", "177"), ("6", "233")):
+        assert client.post("/utilization/api/session/start", json={"band": band, "channel": channel}, headers=headers).status_code == 202
+
+
+def test_capture_quality_preserves_owner_counts_and_reports_server_time(web):
+    from beacon_live.models import CaptureHealth
+    service, _, client, _ = web
+    service.publication = replace(service.publication,
+        capture_health=CaptureHealth(2000, 1900, 100, 300, 1000.25, True))
+    response = client.get("/utilization/api/status").json
+    assert response['publication']['capture_health'] == {
+        'capture_records': 2000, 'decoded_frames': 1900, 'rejected_records': 100,
+        'bad_fcs_frames': 300, 'latest_timestamp': 1000.25, 'fcs_metadata_available': True,
+    }
+    assert response['server_time'] > 1000.25
+
+
 def test_status_preserves_null_zero_gap_and_sub_one_retry_percent(web):
     service, _, client, _ = web
     base = service.publication.snapshot

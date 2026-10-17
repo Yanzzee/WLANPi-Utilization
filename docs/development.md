@@ -56,6 +56,9 @@ For browser QA without hardware, run
 its controls affect only the preview. It starts with a populated 120-second
 history, explicit gaps, missing QBSS fields, and a retry percentage below 1%.
 Stop it with Ctrl-C after QA. See [web acceptance](web-interface.md).
+The hardware-free `scripts/benchmark_live_replay.py` checks busy-channel
+parser/analyzer throughput and exact metrics; see
+[benchmark scope and Pi retest](busy-channel-validation.md).
 
 On a Pi, `scripts/pi_setup.sh` requires an activated, genuine venv without
 system site-packages. It verifies the interpreter/version before running pip,

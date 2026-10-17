@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES, TSHARK_OPTIONAL_FRAME_FIELD_NAMES, TSHARK_REQUIRED_FRAME_FIELD_NAMES
 from scripts.patch_wlanpi_fpms import FPMSInstallError, _find_fpms_package
+from scripts.pi_web_preflight import inspect as inspect_web_integration
 
 
 class Collector:
@@ -253,18 +254,25 @@ def collect_runtime(bundle: Collector, directory: Path = Path('/run/wlanpi-beaco
 def collect(bundle: Collector, *, repo_root: Path, since: str, launcher=Path('/usr/sbin/fpms'), app_python=Path('/opt/wlanpi-beacon-live/bin/python')):
     bundle.read('os_release.txt', Path('/etc/os-release'))
     bundle.read('wlanpi_release.txt', Path('/etc/wlanpi-release'))
+    bundle.record('web_integration_preflight.json', json.dumps(inspect_web_integration(
+        Path('/opt/wlanpi-webui/workingdirectory'),
+        Path('/etc/wlanpi-webui/nginx/sites-enabled/wlanpi_webui.conf')), indent=2) + '\n')
     service_output = ''
     for filename, command in (
         ('uname.txt', ['uname', '-a']), ('python_version.txt', ['python3', '--version']),
         ('packages.txt', ['dpkg-query', '-W', '-f=${Package}\t${Version}\t${Status}\n',
-                          'wlanpi-fpms', 'wlanpi-core', 'wlanpi-common', 'python3', 'python3-venv', 'tshark', 'wireshark-common', 'iw', 'iproute2']),
+                          'wlanpi-fpms', 'wlanpi-core', 'wlanpi-common', 'wlanpi-webui', 'nginx', 'python3', 'python3-venv', 'tshark', 'wireshark-common', 'iw', 'iproute2']),
         ('tshark_version.txt', ['tshark', '--version']), ('dumpcap_version.txt', ['dumpcap', '--version']),
         ('fpms_service.txt', ['systemctl', 'show', 'wlanpi-fpms', '--no-pager',
                               '-p', 'FragmentPath', '-p', 'DropInPaths', '-p', 'ExecStart', '-p', 'User', '-p', 'Group',
                               '-p', 'ActiveState', '-p', 'SubState', '-p', 'MainPID', '-p', 'Result', '-p', 'ExecMainStatus']),
         ('fpms_journal.txt', ['journalctl', '-u', 'wlanpi-fpms', '--since', since, '-n', '300', '--no-pager', '-o', 'short-iso']),
+        ('utilization_journal.txt', ['journalctl', '-u', 'wlanpi-utilization', '--since', since, '-n', '300', '--no-pager', '-o', 'short-iso']),
+        ('utilization_session.txt', [str(app_python), '-m', 'beacon_live.device', 'session', 'status', '--summary']),
         ('dmesg_tail.txt', ['journalctl', '-k', '-n', '200', '--no-pager', '-o', 'short-iso']),
-        ('processes.txt', ['ps', '-eo', 'pid,ppid,user,comm,args']),
+        ('processes.txt', ['ps', '-eo', 'pid,ppid,user,pcpu,rss,etime,comm,args']),
+        ('usb_devices.txt', ['lsusb']),
+        ('usb_topology.txt', ['lsusb', '-t']),
         ('radio_locks.txt', ['lslocks']),
         ('rfkill.txt', ['rfkill', 'list']), ('disk.txt', ['df', '-h', str(repo_root), '/var/log', '/run']),
         ('memory.txt', ['free', '-m']),

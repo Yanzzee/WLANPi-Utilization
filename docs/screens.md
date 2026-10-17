@@ -176,6 +176,11 @@ Exclude:
 - control and extension frames; and
 - frames without a readable Retry bit.
 
+Frames explicitly reported with bad FCS are excluded because header identities
+and Retry bits are not trustworthy. Unknown/unverified FCS remains accepted.
+The same guard prevents damaged headers from creating observed clients or
+beacon BSSIDs. See [busy-channel validation](busy-channel-validation.md).
+
 Every retry transmission is counted. Multiple retries of one original frame
 are not deduplicated.
 

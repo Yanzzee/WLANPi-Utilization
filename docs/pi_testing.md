@@ -251,6 +251,12 @@ packet CSV adds PHY bandwidth, captured/original lengths, FCS status, Retry,
 sequence, fragment, QoS TID, A-MPDU reference, and BSSID/TA/RA/SA/DA wherever
 the driver and installed TShark expose them.
 
+Known bad FCS also has a separate `bad_fcs_excluded_count`; packet output
+retains `radiotap_bad_fcs`. Exclude explicitly bad-FCS packets from independent
+retry/client comparisons. Unknown/missing FCS stays eligible under the normal
+rules. For download-time phantom identities and stage-specific performance
+checks, see [busy-channel validation](busy-channel-validation.md).
+
 ### Independent Wireshark/TShark comparison
 
 The packet CSV and application audit share application parsing, so they are

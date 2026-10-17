@@ -479,6 +479,8 @@ before copying the application into `/opt/wlanpi-beacon-live`.
   metadata is 2.1.0.dev0.
 - [Web interface](docs/web-interface.md) — installation, shared-session controls,
   closed log downloads, and browser acceptance checks.
+- [Busy-channel validation](docs/busy-channel-validation.md) — corrupt-frame
+  identity guards, capture-quality evidence, and Pi performance/retest steps.
 - [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones
   and acceptance checks for WLAN Pi OS 26.10 DeadEye.
 - [Architecture](docs/architecture.md) — design rules, pipeline, data flow, and

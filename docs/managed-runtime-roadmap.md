@@ -407,3 +407,61 @@ backend access against the installed WLAN Pi image before exposing remote
 controls. Keep the backend separate and retain this frontend for future local
 browser use. Grafana and touchscreen hardware integration remain deferred;
 the release version stays `2.1.0.dev0` pending later milestones and acceptance.
+
+## Pi 5 follow-up: busy-channel hardening — October 16, 2026
+
+The user reports that basic web operation looks good on Raspberry Pi 5 with
+**direct capture**, but download speedtests can inflate observed MAC clients
+above 1,000, produce unexpected/hidden BSSIDs, and sometimes leave other
+metrics unavailable. The behavior was intermittent and not observed on the
+user's Pi 4. Adapter/driver and a raw capture from the affected run were not
+available, so the actual incident remains subject to Pi retest.
+
+Implemented two relevant guards. Normal live parsing now retains negotiated
+radiotap/TShark FCS quality, enables checksum validation where possible, and
+keeps known corrupt headers out of identities and metric inputs. Missing or
+unverified FCS is accepted. The multi-occurrence parser now counts actual WLAN
+type occurrences and does not copy ambiguous singleton addresses/Retry bits
+between headers. Repeated address fields cannot manufacture beacon frames.
+Valid-frame definitions and automatic selection are unchanged; no counter cap
+was added. New capture-quality counters and timestamp age expose corruption,
+rejected rows and decoder delay without finalizing buckets or restarting capture.
+
+The packet-level reproduction with real TShark 4.6.0 changed from **1,101
+clients / 201 BSSIDs** using the previous parser to **one client / one BSSID**
+with the guard. The fixture has one real AP/client pair and 1,300 damaged
+frames. Tests exercise driver bad-FCS flags and actual incorrect CRCs, plus
+unknown FCS, replay/streaming parity, repeated fields and timestamp validity.
+This confirms a software failure path, not the cause of the user's exact run.
+
+Band-specific primary-channel dropdowns and server-side grid validation are
+implemented. The new hardware-free benchmark verifies 120 seconds of exact
+metrics and retained history. Its laptop result is about 92k generated/parsed/
+analyzed frames per second and 23 MiB peak RSS; it excludes radio, TShark, IPC
+and UI costs and is not Pi capacity evidence. Before/after numbers and the
+short same-source Pi capture procedure are recorded in
+[busy-channel validation](busy-channel-validation.md).
+
+Launcher/authentication work advanced to verified upstream hook review at
+WebUI revision `2b112f5a739e4647de4f5fd48948cd16e4d07d94`: an existing
+`/auth/check` subrequest and Apps-card template can support a separate backend.
+A read-only installed-platform preflight now records paths/hashes/candidate
+hooks, also included in the diagnostic bundle alongside managed status/journal
+and WebUI/Nginx versions. Actual protected proxy/service/launcher deployment
+remains milestone 4 after installed-image validation; no remote listener or
+authentication bypass is enabled by this hardening milestone.
+
+**Remaining acceptance:** repeat the Pi 5 download/upload case after upgrading
+both broker and web process, record quality counters/stream age and adapter/
+driver, and retain a short raw capture if spikes persist. Compare Pi 4/5 stage
+performance before changing buffering or sampling analysis. Validate the
+channel dropdown and quality display in real browsers. Complete the protected
+launcher adapter using the installed-platform evidence. Release metadata stays
+`2.1.0.dev0`.
+
+**Hardening validation:** Python 3.13.3 full regression passed **708 tests with
+one optional Core transport skip in 17.15 seconds**. Real TShark tests cover
+both live and offline decoders with driver-reported bad FCS and incorrect CRCs.
+JavaScript syntax/simulated-DOM checks passed for channel changes, quality/age
+reporting, six existing graphs and `<1%`. CLI replay/help, compilation and diff
+checks passed. Installed Pi retest and real-browser acceptance remain pending.

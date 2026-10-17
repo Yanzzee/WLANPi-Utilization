@@ -43,6 +43,7 @@ from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import LoggingEvent
 from beacon_live.log_writer import LoggingService
 from beacon_live.models import BeaconRecord
+from beacon_live.models import CaptureHealth
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
@@ -152,6 +153,8 @@ class LiveAggregationMessage:
     capture_record_count: int = 0
     normalized_frame_count: int = 0
     malformed_capture_record_count: int = 0
+    bad_fcs_frame_count: int = 0
+    latest_capture_timestamp: Optional[float] = None
     eof: bool = False
 
 
@@ -492,6 +495,8 @@ def build_tshark_command(
         "wlan.defragment:FALSE",
         "-o",
         "wlan.enable_decryption:FALSE",
+        "-o",
+        "wlan.check_checksum:TRUE",
         "-N",
         "m",
         "-T",
@@ -696,6 +701,8 @@ def _live_aggregation_worker(
     capture_record_count = 0
     normalized_frame_count = 0
     malformed_capture_record_count = 0
+    bad_fcs_frame_count = 0
+    latest_capture_timestamp = None
     last_send = time.monotonic()
 
     def send(
@@ -712,6 +719,8 @@ def _live_aggregation_worker(
             capture_record_count=capture_record_count,
             normalized_frame_count=normalized_frame_count,
             malformed_capture_record_count=malformed_capture_record_count,
+            bad_fcs_frame_count=bad_fcs_frame_count,
+            latest_capture_timestamp=latest_capture_timestamp,
             eof=eof,
         )
         send_connection.send(message)  # type: ignore[attr-defined]
@@ -760,6 +769,8 @@ def _live_aggregation_worker(
                         malformed_capture_record_count += 1
                     normalized_frame_count += len(frames)
                     for frame in frames:
+                        bad_fcs_frame_count += frame.has_bad_fcs
+                        latest_capture_timestamp = max(latest_capture_timestamp or frame.timestamp, frame.timestamp)
                         first_live_frame = startup_filter.observe(frame.timestamp)
                         if first_live_frame:
                             analyzer.set_history_start_second(int(frame.timestamp) + 1)
@@ -1558,10 +1569,22 @@ def run_live(
         capture_record_count = 0
         normalized_frame_count = 0
         malformed_capture_record_count = 0
+        bad_fcs_frame_count = 0
+        latest_capture_timestamp = None
         worker_snapshot = analyzer.snapshot
         worker_exhausted = False
         worker_failed = False
         local_cu_by_second: dict[int, Optional[float]] = {}
+
+        def publish_health():
+            setter = getattr(dashboard, "set_capture_health", None)
+            if callable(setter):
+                setter(CaptureHealth(
+                    capture_record_count, normalized_frame_count,
+                    malformed_capture_record_count, bad_fcs_frame_count,
+                    latest_capture_timestamp,
+                    bool({"radiotap.flags.badfcs", "wlan.fcs.status"} & set(tshark_fields)),
+                ))
 
         initial_logging_requested = (
             logging_service is not None
@@ -1740,6 +1763,8 @@ def run_live(
                             malformed_capture_record_count = (
                                 message.malformed_capture_record_count
                             )
+                            bad_fcs_frame_count = message.bad_fcs_frame_count
+                            latest_capture_timestamp = message.latest_capture_timestamp
                             patched_stats: list[SecondStats] = []
                             for stats in message.stats:
                                 patched = replace(
@@ -1883,6 +1908,8 @@ def run_live(
                     normalized_frame_count += len(frames)
                     for parsed_frame in frames:
                         frame = parsed_frame
+                        bad_fcs_frame_count += frame.has_bad_fcs
+                        latest_capture_timestamp = max(latest_capture_timestamp or frame.timestamp, frame.timestamp)
                         first_live_frame = startup_filter.observe(frame.timestamp)
                         if first_live_frame:
                             analyzer.set_history_start_second(int(frame.timestamp) + 1)
@@ -2059,6 +2086,7 @@ def run_live(
                         raise LiveCommandError(build_tshark_stream_command(field_names=tshark_fields),
                                                stderr=process.capture_error)
                 if current >= next_display_refresh:
+                    publish_health()
                     # Paint on one hard wall-clock cadence. Capture publications
                     # only update shared state and logs; they never trigger a
                     # second dashboard refresh between these deadlines.
@@ -2243,6 +2271,7 @@ def run_live(
         finally:
             if survey_executor is not None:
                 survey_executor.shutdown(wait=True, cancel_futures=True)
+            publish_health()
             if logging_service is not None:
                 logging_service.stop()
                 _publish_closed_logs(dashboard, logging_service)

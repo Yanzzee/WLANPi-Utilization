@@ -68,10 +68,11 @@ class _RetainedFrame(NamedTuple):
     receiver_address: Optional[str]
     source_address: Optional[str]
     destination_address: Optional[str]
+    has_bad_fcs: bool = False
 
     @property
     def retry_eligible(self) -> bool:
-        return retry_exclusion_reason(
+        return not self.has_bad_fcs and retry_exclusion_reason(
             frame_type=self.frame_type,
             frame_subtype=self.frame_subtype,
             retry_flag=self.retry_flag,
@@ -1253,6 +1254,9 @@ class Analyzer:
         )
         projection.frame_count += 1
 
+        if frame.has_bad_fcs:
+            return
+
         known_by_address = self._known_bssid_addresses
         associated_bssid = _associated_bssid(frame, known_by_address)
         retry_in_scope = (
@@ -1612,6 +1616,8 @@ def _project_frames(
     clients: set[str] = set()
 
     for frame in frames:
+        if frame.has_bad_fcs:
+            continue
         associated_bssid = _associated_bssid(frame, known_by_address)
         retry_in_scope = (
             target_primary_frequency_mhz is None
@@ -1814,6 +1820,7 @@ def _retain_frame(frame: FrameRecord) -> _RetainedFrame:
         receiver_address=address(frame.receiver_address),
         source_address=address(frame.source_address),
         destination_address=address(frame.destination_address),
+        has_bad_fcs=frame.has_bad_fcs,
     )
 
 

@@ -197,9 +197,12 @@ The parser normalizes available fields into `FrameRecord`, including:
 
 TShark fields are negotiated from `tshark -G fields`, retaining compatibility
 with older installations. The export uses `occurrence=a` with a fixed
-aggregator. Drivers normally supply one capture record per MPDU; if a dissector
-does expose multiple WLAN headers in one record, the parser emits each aligned
-MPDU and Retry bit rather than retaining only the first occurrence.
+aggregator. Actual frame-type occurrences establish WLAN header count;
+repeated address fields do not establish extra frames. Aligned headers retain
+their Retry bits; ambiguous missing fields are not copied between headers.
+Known bad-FCS frames retain diagnostic counts/timestamps but cannot supply
+beacon identities, QBSS values, clients or retry samples. Missing/unverified FCS
+is accepted. See [busy-channel validation](busy-channel-validation.md).
 
 A valid beacon can also be represented as `BeaconRecord`. Replay inputs feed
 the same aggregation behavior without requiring Wi-Fi hardware.

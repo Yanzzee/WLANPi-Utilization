@@ -55,6 +55,12 @@ Band/channel/width apply only to a new session. Advanced source fields offer
 the existing automatic interface/namespace discovery and optional Core backend.
 There is no SSID/BSSID selector.
 
+Primary channel is a band-specific dropdown: 2.4 GHz channels 1–14, the normal
+5 GHz 20 MHz primary grid, and 6 GHz channels 1, 5, …, 233. Bonded-channel
+center numbers are not offered as primaries. The server validates the same
+grid, including hand-edited requests. Adapter/regulatory availability and width
+support still determine whether capture can start.
+
 Overview shows AP QBSS and local survey utilization separately, retries,
 admission capacity, advertised station sum, observed clients, BSSIDs, beacon
 loss, and rolling composition. Desktop displays all six graphs. Small screens
@@ -76,6 +82,12 @@ A failed read keeps the last values visible, marks the connection disconnected,
 disables controls, and retries with bounded backoff. The displayed receive time
 means a successful service response; the completed sample time identifies the
 data. Delayed/stalled capture can therefore retain an older sample time.
+
+Capture quality shows the owner's decoded-frame, bad-FCS and rejected-row
+counts and stream age from server time. Known corrupt frames cannot create
+clients/BSSIDs or retry samples. A late stream does not by itself establish a
+performance bottleneck; see [busy-channel validation](busy-channel-validation.md)
+for interpretation, exact synthetic regressions, and a repeatable Pi test.
 
 **Stop logging** closes CSV/JSONL while analysis continues. **Stop capture**
 requests the owner's normal cleanup and radio restoration. Controls carry the
@@ -140,3 +152,35 @@ Automated tests cover the API, real broker with synthetic owner, original
 snapshot/completed statistics, read-only consumers, closed-file identity and
 download races, and optional-dependency installation. Actual responsive browser
 rendering and these Pi hardware/performance checks remain acceptance gates.
+
+## Next launcher and direct-hosting adapter
+
+The user reports basic web operation on Pi 5. Direct access through the WLAN Pi
+Apps menu remains the next deployment milestone. Review of upstream WebUI
+revision `2b112f5a739e4647de4f5fd48948cd16e4d07d94` found an existing
+[internal Nginx auth subrequest](https://github.com/WLAN-Pi/wlanpi-webui/blob/2b112f5a739e4647de4f5fd48948cd16e4d07d94/install/etc/nginx/wlanpi_webui.conf),
+[session check/revocation hook](https://github.com/WLAN-Pi/wlanpi-webui/blob/2b112f5a739e4647de4f5fd48948cd16e4d07d94/wlanpi_webui/auth/auth.py),
+and [Apps-card template](https://github.com/WLAN-Pi/wlanpi-webui/blob/2b112f5a739e4647de4f5fd48948cd16e4d07d94/wlanpi_webui/templates/partials/apps_cards.html).
+The installed Pi image must be checked against these hooks; source review
+alone does not establish its authentication behavior.
+
+Collect that evidence without importing WebUI or changing services:
+
+```bash
+sudo python3 scripts/pi_web_preflight.py
+```
+
+The normal diagnostic bundle also includes this report. It prints source/config
+paths, hashes, and candidate-hook checks; it reads no session stores or keys.
+`integration_candidate: true` identifies matching source markers, not verified
+authentication or enabled hosting. Use `--webui-root` and `--nginx-config` for
+nonstandard installed paths.
+
+The next adapter should add a full-page Utilization launcher link and a
+protected `/utilization/` proxy to the separate loopback backend, with explicit
+public-origin/trusted-proxy handling and an optional web service unit. Verify
+the installed login, logout/revocation, idle/max-age expiry, API/download
+authorization, cookie behavior, reinstallation and failure recovery before
+enabling the route. The current preflight changes no Nginx rules and does not
+expose a remote listener. Custom Core endpoints remain unnecessary for this
+initial integration.

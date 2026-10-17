@@ -11,6 +11,7 @@ import stat
 import threading
 import time
 from pathlib import Path
+from beacon_live.channel import PRIMARY_CHANNELS
 
 from beacon_live.ipc import DEFAULT_SOCKET, to_wire
 from beacon_live.log_writer import build_live_log_paths
@@ -147,11 +148,12 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
 
     @app.get(url_prefix)
     def index():
-        return render_template("utilization.html", prefix=url_prefix, csrf=csrf)
+        return render_template("utilization.html", prefix=url_prefix, csrf=csrf,
+                               channel_choices=PRIMARY_CHANNELS)
 
     @app.get(url_prefix + "api/status")
     def status():
-        return jsonify(reader.read())
+        return jsonify(reader.read() | {"server_time": time.time()})
 
     def payload(allowed):
         value = request.get_json()
@@ -171,6 +173,8 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
             from beacon_live.ipc import from_wire
             paths = build_live_log_paths(directory, write_stats_csv=True, write_beacons_jsonl=True)
             config = from_wire(LiveSessionConfig, value)
+            if config.band not in PRIMARY_CHANNELS or int(config.channel) not in PRIMARY_CHANNELS[config.band]:
+                raise ValueError("Select a valid primary channel for the band")
             # Defaults match CLI/FPMS; the web form always supplies band/channel.
             validate_config(config)
             from dataclasses import replace

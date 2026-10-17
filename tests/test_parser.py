@@ -484,7 +484,9 @@ def test_boolean_fcs_flag_with_multiple_antenna_signals_preserves_one_frame(
         assert len(frames) == 1  # Antenna measurements are not extra MPDUs.
         frame = frames[0]
         assert frame.rssi_dbm == -42 and frame.frame_type == frame_type
-        assert frame.retry_flag is False and frame.retry_eligible == (frame_type == 2)
+        assert frame.retry_flag is False
+        assert frame.has_bad_fcs == (bad_fcs in ('True', '1'))
+        assert frame.retry_eligible == (frame_type == 2 and not frame.has_bad_fcs)
         if frame.is_beacon:
             assert frame.qbss_cu_raw == 14 and frame.qbss_station_count == 2
             assert frame.channel_definition.primary_frequency_mhz == 2412
