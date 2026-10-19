@@ -97,6 +97,7 @@ class ServiceBroker:
             raise ValueError("Unsupported Utilization IPC protocol version")
         self.poll_owner()
         op = request.get("op")
+        attached = False
         if op == "files":
             active = set(self.publication.logging.paths) if self.publication.logging.active else set()
             if self.publication.phase is SessionPhase.STARTING:
@@ -107,19 +108,21 @@ class ServiceBroker:
             return {"version": PROTOCOL_VERSION, "ok": True, "files": files}
         if op == "read":
             pass
-        elif op in {"start", "ensure"}:
+        elif op in {"start", "ensure", "join"}:
             config = from_wire(LiveSessionConfig, request.get("config"))
             config = replace(config, local_cu=config.local_cu or config.survey_debug)
             validate_config(config)
             if self.process is not None or self.publication.phase in ACTIVE_PHASES:
                 compatible = (
-                    op == "ensure" and self.publication.phase in {
+                    op in {"ensure", "join"} and self.publication.phase in {
                         SessionPhase.STARTING, SessionPhase.RUNNING,
-                    } and all(getattr(config, key) == getattr(self.publication.config, key)
-                              for key in SOURCE_FIELDS)
+                    } and (op == "join" or all(
+                        getattr(config, key) == getattr(self.publication.config, key)
+                        for key in SOURCE_FIELDS))
                 )
                 if not compatible:
                     raise ValueError("A Utilization session owns the radio; stop it before changing source")
+                attached = True
             else:
                 self._start(config)
         elif op in {"stop", "logging"}:
@@ -145,7 +148,8 @@ class ServiceBroker:
                 self._write_logging(enabled)
         else:
             raise ValueError("Unknown Utilization service operation")
-        return {"version": PROTOCOL_VERSION, "ok": True, "publication": to_wire(self.publication)}
+        return {"version": PROTOCOL_VERSION, "ok": True, "publication": to_wire(self.publication),
+                "attached": attached}
 
     def _start(self, config):
         session_id = uuid4().hex

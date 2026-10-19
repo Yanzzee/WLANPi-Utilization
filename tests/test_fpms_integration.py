@@ -20,6 +20,7 @@ def isolated_backend_settings(monkeypatch, tmp_path):
     monkeypatch.delenv('WLANPI_UTILIZATION_CAPTURE_BACKEND', raising=False)
     monkeypatch.delenv('WLANPI_UTILIZATION_RUNTIME_MODE', raising=False)
     monkeypatch.setattr(channel_utilization, 'BACKEND_CONFIG', tmp_path / 'fpms.json')
+    monkeypatch.setattr(channel_utilization, '_managed_session_status', lambda: None)
 
 
 def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
@@ -29,7 +30,8 @@ def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
     assert "--managed" in command
     menu = channel_utilization.build_channel_utilization_menu({})
     assert menu["name"] == "Utilization"
-    assert menu["action"][0]["action"][0]["action"][-1]["name"] == "Stop Capture"
+    assert menu["action"][0]["name"] == "Open Running Session"
+    assert menu["action"][1]["action"][0]["action"][-1]["name"] == "Stop Session"
 
 
 def test_managed_fpms_exit_detaches_without_disabling_shared_logging(monkeypatch, tmp_path):
@@ -71,6 +73,47 @@ def test_managed_fpms_display_can_join_logging_only_session(monkeypatch, tmp_pat
     # These are renderer proxies; ending the display does not signal the
     # logging proxy or disable logging in the capture owner.
     assert processes[0].signal_received is None
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_fpms_opens_existing_tuning_preserves_logging_and_reports_attachment(monkeypatch, tmp_path, resume):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    running = {"session_id": "a" * 32, "phase": "running", "config": {"band": "6", "channel": "5"},
+               "logging": {"active": True}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: running)
+    messages, processes = [], []
+    monkeypatch.setattr(channel_utilization._DisplaySession, "show_status", lambda self, message: messages.append(message))
+    monkeypatch.setattr(channel_utilization._DisplaySession, "start_display", lambda self: None)
+    def popen(command):
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+    state = {}
+    app = channel_utilization.ChannelUtilizationApp(state, popen=popen)
+    if resume:
+        app.resume()
+    else:
+        app.launch(band="2.4", channel=11, logging=False)
+    command = processes[0].command
+    assert command[command.index("--band") + 1] == "6"
+    assert command[command.index("--channel") + 1] == "5"
+    assert command[command.index("--logging-initial-state") + 1] == "disabled"
+    assert ("--attach" in command) is resume
+    assert state["channel_utilization_session"].logging_enabled
+    assert any("Session already running" in message for message in messages)
+    before = channel_utilization._logging_control_path().read_bytes()
+    state["page_exit_handler"]()
+    assert channel_utilization._logging_control_path().read_bytes() == before
+
+
+def test_fpms_resume_with_no_session_does_not_start_capture(monkeypatch):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    messages = []
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
+    app = channel_utilization.ChannelUtilizationApp({}, popen=lambda *args: pytest.fail("started a session"))
+    app.resume()
+    assert "No running session" in messages[0]
 
 
 @pytest.mark.parametrize("mode", [None, [], "invalid"])
@@ -686,7 +729,7 @@ def test_launch_failure_is_reported_without_leaving_session(
 
     app.launch(band="5", channel=36, logging=False)
 
-    assert errors == ["Unable to start capture. Check journal."]
+    assert errors == ["Unable to open session. Check journal."]
     assert "channel_utilization_session" not in g_vars
     assert g_vars["display_state"] == "menu"
 

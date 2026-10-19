@@ -178,6 +178,21 @@ def _run_live_command(
             except ServiceError as error:
                 print(str(error), file=sys.stderr)
                 return 1
+        if not args.standalone:
+            from beacon_live.runtime import ACTIVE_PHASES
+            from beacon_live.service_client import ServiceClient, ServiceError, managed_live
+            try:
+                existing = ServiceClient(args.service_socket).read()
+            except ServiceError:
+                existing = None
+            if existing is not None and existing.phase in ACTIVE_PHASES:
+                # A plain CLI open adopts the managed owner rather than trying
+                # to acquire its radio. Requested tuning never changes it.
+                try:
+                    return managed_live(live_options, socket_path=args.service_socket, attach_only=True)
+                except ServiceError as error:
+                    print(str(error), file=sys.stderr)
+                    return 1
         return run_live(**live_options)
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
@@ -299,9 +314,11 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--managed", action="store_true",
-                      help="Start or join a compatible shared session; exit detaches the display.")
+                      help="Display an existing shared session or start one if idle; exit detaches.")
     mode.add_argument("--attach", action="store_true",
                       help="Display the current service session without starting or configuring capture.")
+    mode.add_argument("--standalone", action="store_true",
+                      help="Run foreground capture instead of automatically attaching to an active service session.")
     parser.add_argument("--start-only", action="store_true",
                         help="With --managed, start/join the session and return without a display.")
     parser.add_argument("--service-socket", type=Path, default=DEFAULT_SOCKET,

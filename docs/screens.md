@@ -309,3 +309,27 @@ BSSIDs and timing is not used as a selection tie-breaker.
 
 These values describe different observations and must not be presented as
 interchangeable measurements.
+
+## Web organization
+
+The web overview applies the interactive TUI's separation of radio membership
+and selected metric sources. **Channel composition** comes first: channel-wide
+rolling counts, strongest estimated radio AP/vendor, its displayed SSID/BSSID,
+and all BSSIDs grouped with that radio. Mark the analyzer-selected QBSS source
+when it belongs to the displayed radio. Keep the full BSSID visible alongside
+SSID, RSSI and advertised stations. The strongest-radio footer continues using
+the analyzer's automatic cycling; it is not a manual selector.
+
+**Selected BSSIDs** appears separately and identifies the existing shared-screen
+sources: QBSS for Utilization/Admission, `TOP` for station maximum, highest
+one-second retry percentage for retries, and strongest eligible beacon BSSID
+for loss. Include each source's SSID, BSSID and RSSI, with AP name when known.
+Station maximum may come from a different BSSID than QBSS; its source label
+distinguishes advertised stations from rolling observed clients. These maxima
+do not replace the channel-wide sums/ratios in the metric cards or graphs.
+
+Graphs use the same identities as their corresponding screens. Table sorting,
+navigation and browser lifetime cannot change a reporting source, recompute
+metrics, restart capture or clear history. A future local survey curve will
+remain separate from AP-advertised CU; it is hidden in the current web interface
+pending adapter verification.

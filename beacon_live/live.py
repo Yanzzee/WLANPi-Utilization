@@ -1480,6 +1480,9 @@ def run_live(
             dashboard,
             actual_definition.width.value,
         )
+        definition_setter = getattr(dashboard, "set_capture_definition", None)
+        if callable(definition_setter):
+            definition_setter(actual_definition, verified=actual_verified)
         logging_service: Optional[LoggingService] = None
         if stats_csv is not None or beacons_jsonl is not None:
             first_log_path = stats_csv if stats_csv is not None else beacons_jsonl

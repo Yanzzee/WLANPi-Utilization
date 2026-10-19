@@ -38,6 +38,10 @@ class ServiceClient:
 
     def request(self, op, **values) -> RuntimePublication:
         response = self._exchange(op, **values)
+        return self._publication(response)
+
+    @staticmethod
+    def _publication(response) -> RuntimePublication:
         try:
             return from_wire(RuntimePublication, response.get("publication"))
         except (ValueError, TypeError) as error:
@@ -51,6 +55,10 @@ class ServiceClient:
 
     def ensure(self, config):
         return self.request("ensure", config=config)
+
+    def start_or_attach(self, config):
+        response = self._exchange("join", config=config)
+        return self._publication(response), response.get("attached") is True
 
     def stop(self, session_id):
         return self.request("stop", session_id=session_id)
@@ -142,7 +150,15 @@ def managed_live(options, *, socket_path=DEFAULT_SOCKET, attach_only=False, star
     options.pop("logging_control_path", None)
     status = options.pop("logging_status_path", None)
     client = ServiceClient(socket_path)
-    publication = client.read() if attach_only else client.ensure(LiveSessionConfig(**options))
+    if attach_only:
+        publication, attached = client.read(), True
+    else:
+        publication, attached = client.start_or_attach(LiveSessionConfig(**options))
+    attachment_notice = None
+    if attached and publication.phase in ACTIVE_PHASES:
+        attachment_notice = "Session already running; displaying the existing session"
+        print(f"{attachment_notice}: {publication.session_id}. Source settings are unchanged.",
+              file=sys.stderr, flush=True)
     # Joining a display-only consumer never disables logging owned elsewhere.
     if not attach_only and options.get("initial_logging_enabled"):
         client.set_logging(publication.session_id, True)
@@ -160,14 +176,20 @@ def managed_live(options, *, socket_path=DEFAULT_SOCKET, attach_only=False, star
     # Managed FPMS controls call the service explicitly. Its legacy shared
     # control file must not let another renderer's startup disable logging.
     follow_kwargs = dict(initial=publication, logging_status_path=status)
+    def display(dashboard):
+        if attachment_notice:
+            setter = getattr(dashboard, "set_notice", None)
+            if callable(setter):
+                setter(attachment_notice)
+        return dashboard
     if lcd_frame is not None:
-        return follow(client, LcdDashboard(lcd_frame, **kwargs), **follow_kwargs)
+        return follow(client, display(LcdDashboard(lcd_frame, **kwargs)), **follow_kwargs)
     if logging_only:
         return follow(client, NullDashboard(), **follow_kwargs)
     if should_use_curses():
-        dashboard = CursesDashboard(include_local_cu=config.local_cu, **kwargs)
+        dashboard = display(CursesDashboard(include_local_cu=config.local_cu, **kwargs))
         return dashboard.run(lambda: follow(client, dashboard, **follow_kwargs))
-    return follow(client, TerminalDashboard(include_local_cu=config.local_cu, **kwargs), **follow_kwargs)
+    return follow(client, display(TerminalDashboard(include_local_cu=config.local_cu, **kwargs)), **follow_kwargs)
 
 
 def main(argv=None):
@@ -192,7 +214,10 @@ def main(argv=None):
             publication = client.set_logging(args.session_id, args.enabled == "yes")
         value = to_wire(publication)
         if args.summary:
-            value = {key: value[key] for key in ("session_id", "phase", "logging", "capture_health", "error", "exit_code")}
+            value = {key: value[key] for key in (
+                "session_id", "phase", "config", "logging", "capture_health", "capture_definition",
+                "capture_definition_verified", "error", "exit_code",
+            )}
         print(json.dumps(value, indent=2))
         return 0
     except ServiceError as error:

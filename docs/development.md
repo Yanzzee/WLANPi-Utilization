@@ -56,6 +56,21 @@ For browser QA without hardware, run
 its controls affect only the preview. It starts with a populated 120-second
 history, explicit gaps, missing QBSS fields, and a retry percentage below 1%.
 Stop it with Ctrl-C after QA. See [web acceptance](web-interface.md).
+For reproducible frontend logic checks with Node available:
+
+```bash
+python tests/fixtures/web_preview.py --export /tmp/utilization-ui-cases
+node tests/web_ui_check.mjs /tmp/utilization-ui-cases
+```
+
+The preview has distinct QBSS/station/retry reporting BSSIDs, two strongest-radio
+members, gaps and retries below 1%. These simulated-DOM checks run the production
+JavaScript against exported publications, covering immediate existing-session
+display, source identities, AP sorting, PSC labels, center/width formatting,
+auth expiry/recovery and control tokens. They do not test rendered browser
+layout. Local browser automation availability and installed Pi browser checks
+must be reported separately.
+
 Protected-hosting unit and installer checks run with
 `python -m pytest -q tests/test_web.py tests/test_web_install.py`.
 `tests/test_web_nginx.py` additionally exercises the production route using an

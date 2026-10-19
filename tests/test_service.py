@@ -225,7 +225,8 @@ def test_attach_does_not_apply_initial_false_logging_control(service, tmp_path):
     client.stop(publication.session_id)
 
 
-def test_real_cli_attach_and_navigation_leave_shared_owner_running(service, tmp_path):
+@pytest.mark.parametrize("mode", [[], ["--attach"], ["--managed", "--channel", "6"]])
+def test_real_cli_attach_and_navigation_leave_shared_owner_running(service, tmp_path, mode):
     client, _ = service
     command = [sys.executable, "-m", "beacon_live.device", "--managed", "--band", "2.4",
                "--channel", "1", "--start-only", "--log-dir", str(tmp_path),
@@ -236,7 +237,7 @@ def test_real_cli_attach_and_navigation_leave_shared_owner_running(service, tmp_
     original = until(client, lambda pub: pub.phase is SessionPhase.RUNNING and bool(pub.completed_stats))
     frame = tmp_path / "attached.ppm"
     renderer = subprocess.Popen(
-        [sys.executable, "-m", "beacon_live.device", "--attach", "--lcd-frame", str(frame),
+        [sys.executable, "-m", "beacon_live.device", *mode, "--lcd-frame", str(frame),
          "--service-socket", str(client.socket_path)],
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
@@ -262,13 +263,33 @@ def test_real_cli_attach_and_navigation_leave_shared_owner_running(service, tmp_
              *command[command.index("--channel") + 2:]],
             capture_output=True, text=True, timeout=5,
         )
-        assert incompatible.returncode == 1
+        assert incompatible.returncode == 0, incompatible.stderr
+        assert "Session already running" in incompatible.stderr
         assert client.read().session_id == original.session_id
+        assert client.read().config.channel == "1"
     finally:
         if renderer.poll() is None:
             renderer.send_signal(signal.SIGINT)
             renderer.communicate(timeout=5)
         client.stop(original.session_id)
+
+
+def test_atomic_start_or_attach_uses_one_owner_and_keeps_existing_source_and_logging(service, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    client, _ = service
+    def open_session(channel):
+        return ServiceClient(client.socket_path).start_or_attach(config(tmp_path, channel=channel))
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(open_session, ["1", "6", "11", "1"]))
+    assert len({pub.session_id for pub, _ in results}) == 1
+    assert sum(not attached for _, attached in results) == 1
+    original = until(client, lambda pub: pub.phase is SessionPhase.RUNNING and bool(pub.completed_stats))
+    assert all(pub.config.channel == original.config.channel for pub, _ in results)
+    assert len((tmp_path / "stats.owners").read_text().splitlines()) == 1
+    assert not original.logging.active
+    with pytest.raises(ServiceError, match="owns the radio"):
+        client.request("start", config=config(tmp_path))
+    client.stop(original.session_id)
 
 
 def test_large_partial_write_retains_only_one_pending_latest_publication():

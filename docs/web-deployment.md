@@ -74,6 +74,27 @@ reviewed upstream `2b112f5a739e4647de4f5fd48948cd16e4d07d94` are accepted,
 with additional AST checks on the session-freshness and login gates. A later
 WebUI package upgrade may require review before reapplying this integration.
 
+### Pi 4 revision rejected during installation
+
+The supplied Pi 4 report (`wlanpi-doug-2g`) stopped at **Unsupported WebUI
+application revision** before installing the Apps card or route. Its four
+reported file hashes exactly match upstream WebUI
+[`dc39a7e852113ff00f2654c005d588755ce753c9`](https://github.com/WLAN-Pi/wlanpi-webui/tree/dc39a7e852113ff00f2654c005d588755ce753c9).
+Review confirms that its auth module, Nginx config and login/freshness functions
+match the supported version; later differences concern polling and a Grafana
+package check. The application hash
+`02f2915fc819ce479805dc0975d4490cf5a4d72cfdb237d68b65dcd6212f0330`
+is now allowlisted, retaining all existing auth/config/function checks. A local
+proposal against those exact upstream files passes validation without writes.
+
+After updating the Pi checkout/application, rerun the two integration commands
+above. No removal is needed after that refused installation. Use
+`sudo python3 scripts/pi_web_preflight.py` for the preflight; the scripts are
+also now executable for direct invocation. Verify the Apps card and normal
+HTTPS URL on Pi 4 after installation. The user reports that the earlier
+protected integration test worked well on Pi 5; that report does not establish
+all logout/expiry/reboot cases below.
+
 ## Authentication and process boundary
 
 Every page, asset, API control/status response and download passes Nginx's

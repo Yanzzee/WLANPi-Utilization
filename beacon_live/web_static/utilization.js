@@ -5,6 +5,8 @@
   const api = document.querySelector('meta[name="utilization-api"]').content;
   const csrf = document.querySelector('meta[name="utilization-csrf"]').content;
   const platformHosted = document.querySelector('meta[name="utilization-hosted"]').content === "yes";
+  const initialStatus = JSON.parse($("initial-status").textContent);
+  const attachedSession = initialStatus && activeSession(initialStatus.publication) ? initialStatus.publication.session_id : null;
   const ns = "http://www.w3.org/2000/svg";
   const activePhases = new Set(["starting", "running", "stopping"]);
   let publication = null, screens = new Map(), online = false, busy = false;
@@ -21,7 +23,19 @@
   const node = (tag, className, text) => {const element = document.createElement(tag); if (className) element.className = className; if (text != null) element.textContent = text; return element;};
   const svgNode = (tag, attributes = {}, text) => {const element = document.createElementNS(ns, tag); Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value)); if (text != null) element.textContent = text; return element;};
   const message = (id, text) => {$(id).textContent = text || ""; $(id).hidden = !text;};
-  const reporting = identity => identity?.bssid ? `${identity.ssid ?? "<Hidden SSID>"} · ${identity.bssid} · ${number(identity.rssi_dbm)} dBm` : "No reporting BSSID available";
+  const reporting = identity => {
+    if (!identity?.bssid) return identity?.unavailable_text || "No reporting BSSID available";
+    const state = publication.snapshot.bssids.find(row => row.bssid === identity.bssid);
+    return `${state?.latest_ap_name ? `${state.latest_ap_name} · ` : ""}${identity.ssid || "<Hidden SSID>"} · ${identity.bssid} · ${number(identity.rssi_dbm)} dBm`;
+  };
+  function activeSession(value) {return ["starting", "running", "stopping"].includes(value.phase);}
+  function stationSource() {return publication.snapshot.top_station_source === "mac" ? "Observed clients · 120s" : "Advertised QBSS";}
+  function sourceLabel(key) {
+    if (["cu", "admission_capacity"].includes(key)) return "QBSS source";
+    if (key === "total_station_count") return `Station maximum: ${number(publication.snapshot.top_station_count)} · ${stationSource()}`;
+    if (key === "retry") return `Retry maximum: ${percent(publication.snapshot.retry_bssids.find(row => row.bssid === publication.snapshot.top_retry_bssid)?.window_retry_percent, true)}`;
+    return "Strongest eligible BSSID";
+  }
 
   function requireLogin() {
     loginRequired = true; $("login-required").hidden = false; connection(false);
@@ -83,10 +97,10 @@
   }
 
   const metricDefinitions = [
-    ["ap-cu", "AP QBSS utilization", "teal"], ["local-cu", "Local survey utilization", "blue"],
+    ["ap-cu", "AP QBSS utilization", "teal"],
     ["retries", "Retries · one second", "purple"], ["admission", "Admission capacity", "blue"],
-    ["stations", "QBSS station count · sum", "orange"], ["clients", "Observed clients · one second", "teal"],
-    ["bssids", "BSSIDs · one second", "blue"], ["loss", "Beacon loss · one second", "orange"],
+    ["stations", "QBSS station count · sum", "orange"], ["clients", "Observed active clients · one second", "teal"],
+    ["loss", "Beacon loss · one second", "orange"],
   ];
   for (const [id, label, color] of metricDefinitions) {
     const card = node("article", `metric-card accent-${color}`);
@@ -104,30 +118,46 @@
   }
 
   function renderMetrics() {
-    const snapshot = publication.snapshot, c = snapshot.current, cfg = publication.config || {};
+    const snapshot = publication.snapshot, c = snapshot.current;
     const available = snapshot.generated_at != null && snapshot.history.some(row => row.sample_available) && c.sample_available;
     const value = key => available ? c[key] : null;
     const selected = reporting(screens.get("cu")?.identity);
     metric("ap-cu", percent(value("selected_qbss_cu_percent")), selected);
-    metric("local-cu", percent(value("local_cu_percent")), cfg.local_cu ? "Adapter survey · independent of AP QBSS" : "Survey not enabled for this session");
     metric("retries", percent(value("retry_percent"), true), available ? `${number(c.retry_frame_count)} retries / ${number(c.retry_eligible_frame_count)} eligible frames` : "Eligible unicast frames only");
     metric("admission", percent(available && c.selected_qbss_admission_capacity != null ? c.selected_qbss_admission_capacity / admissionMaximum * 100 : null), selected);
-    metric("stations", number(value("qbss_station_count_sum")), available ? `Selected AP: ${number(c.selected_qbss_station_count)} advertised stations` : "Advertised QBSS counts");
+    metric("stations", number(value("qbss_station_count_sum")), available ? `${sourceLabel("total_station_count")} · ${reporting(screens.get("total_station_count")?.identity)}` : "Advertised QBSS counts");
     metric("clients", number(value("unique_client_mac_count")), `${number(available ? snapshot.window_unique_client_mac_count : null)} distinct client MACs in the rolling window`);
-    metric("bssids", number(value("unique_bssid_count")), "Beacon BSSIDs in the completed second");
     metric("loss", percent(value("beacon_loss_percent")), available ? `${number(c.beacon_received_count)} received / ${number(c.beacon_expected_count)} expected · above −75 dBm` : "RSSI-qualified beacon reception");
     const collecting = publication.collecting && ["starting", "running"].includes(publication.phase);
     $("sample-time").textContent = available ? `Last completed sample · ${timeLabel(c.second)}${collecting ? " · Collecting" : ""}` : collecting ? "Collecting the first complete sample" : "No completed sample available";
-    const comp = snapshot.composition;
-    $("composition-detail").textContent = comp.displayed_bssid ? `Strongest radio: ${comp.strongest_radio_ap_name || comp.displayed_ssid || "<Hidden SSID>"}${comp.strongest_radio_vendor ? ` · ${comp.strongest_radio_vendor}` : ""}` : "No radio identity available";
-    $("composition-counts").replaceChildren(...[[comp.bssid_count, "BSSIDs"], [comp.qbss_bssid_count, "With QBSS"], [comp.estimated_radio_count, "Estimated radios"]].map(([count, label]) => {const item = node("div", "composition-stat"); item.append(node("strong", "", number(available ? count : null)), node("span", "", label)); return item;}));
     $("window-label").textContent = number(snapshot.window_seconds);
     $("bssid-count").textContent = number(snapshot.bssids.length);
   }
 
+  function renderComposition() {
+    const snapshot = publication.snapshot, comp = snapshot.composition;
+    const available = snapshot.history.some(row => row.sample_available);
+    $("composition-detail").textContent = comp.displayed_bssid ? `AP: ${comp.strongest_radio_ap_name || "<no AP name>"} · Vendor: ${comp.strongest_radio_vendor || "<unknown>"}` : "No radio identity available";
+    $("composition-current").textContent = `Displayed: ${reporting(screens.get("composition")?.identity)}`;
+    $("radio-counts").textContent = `Radio BSSIDs: ${number(available ? comp.strongest_radio_bssid_count : null)} · Radio QBSS stations: ${number(available ? comp.strongest_radio_station_count_sum : null)}`;
+    $("composition-counts").replaceChildren(...[[comp.bssid_count, "BSSIDs · 120s"], [comp.qbss_bssid_count, "With QBSS"], [comp.estimated_radio_count, "Estimated radios"]].map(([count, label]) => {const item = node("div", "composition-stat"); item.append(node("strong", "", number(available ? count : null)), node("span", "", label)); return item;}));
+    $("radio-bssids").replaceChildren(...comp.strongest_radio_bssids.map(bssid => {
+      const state = snapshot.bssids.find(row => row.bssid === bssid);
+      const row = node("tr"), identity = node("td"), ssid = node("div", "ssid", state?.ssid || "<Hidden SSID>");
+      ssid.title = state?.ssid || "<Hidden SSID>";
+      if (bssid === snapshot.selected_bssid) {row.className = "qbss-source"; ssid.append(node("span", "reporting", "QBSS source"));}
+      identity.append(ssid, node("div", "mac", bssid));
+      row.append(identity, node("td", "", `${number(state?.peak_rssi_dbm ?? state?.latest_rssi_dbm)} dBm`), node("td", "", number(state?.latest_station_count)));
+      return row;
+    }));
+    $("selected-bssids").replaceChildren(...["cu", "total_station_count", "retry", "beacons"].map(key => {
+      const item = node("div", "selected-bssid"); item.append(node("strong", "", sourceLabel(key)), node("p", "", reporting(screens.get(key)?.identity))); return item;
+    }));
+  }
+
   const graphDefinitions = [
-    {id: "cu", title: "Channel utilization", series: [["AP QBSS", "teal", "cu"], ["Local survey", "blue", "local_cu_percent"]]},
-    {id: "total_station_count", title: "Stations & observed clients", series: [["QBSS stations · sum", "orange", "total_station_count"], ["Observed clients", "teal", "unique_client_mac_count"]]},
+    {id: "cu", title: "Channel utilization", series: [["AP QBSS", "teal", "cu"]]},
+    {id: "total_station_count", title: "Stations & observed clients", series: [["QBSS stations · sum", "orange", "total_station_count"], ["Observed active clients", "teal", "unique_client_mac_count"]]},
     {id: "retry", title: "Retry percentage", series: [["Retries / eligible frames", "purple", "retry"]]},
     {id: "beacons", title: "Beacon loss", series: [["Above −75 dBm", "orange", "beacons"]]},
     {id: "admission_capacity", title: "Admission capacity", series: [["Selected AP", "blue", "admission_capacity"]]},
@@ -180,7 +210,7 @@
     });
     card.append(chart);
     const identity = screens.get(definition.id)?.identity;
-    const caption = node("p", "graph-identity", identity ? reporting(identity) : "Counts from the shared completed statistics"); caption.title = caption.textContent;
+    const caption = node("p", "graph-identity", identity ? `${sourceLabel(definition.id)} · ${reporting(identity)}` : "Counts from the shared completed statistics"); caption.title = caption.textContent;
     card.append(caption);
     return card;
   }
@@ -211,8 +241,14 @@
     const cfg = publication.config, phase = publication.phase;
     $("phase").textContent = phase.charAt(0).toUpperCase() + phase.slice(1);
     $("phase").className = `status ${phase === "failed" ? "bad" : ["starting", "stopping"].includes(phase) ? "warning" : phase === "running" ? "" : "neutral"}`;
-    $("tuning").textContent = cfg ? `${cfg.band ? `${cfg.band} GHz · ` : ""}${cfg.frequency_mhz ? `${cfg.frequency_mhz} MHz` : `Channel ${cfg.channel}`} · ${publication.capture_width || (cfg.channel_width ? `${cfg.channel_width} MHz` : "Band default")}` : "No session";
-    $("session-detail").textContent = cfg ? `${cfg.capture_backend === "core" ? "Core" : "Direct"} capture · ${cfg.iface === "auto" ? "Automatic interface" : cfg.iface}${cfg.netns ? ` · Namespace ${cfg.netns}` : ""}${activePhases.has(phase) ? " · Capture continues when views close" : " · Retained final history"}` : "Start a session to collect live channel metrics.";
+    const actual = publication.capture_definition;
+    const width = actual?.width || publication.capture_width || cfg?.channel_width;
+    const widthLabel = width ? `${String(width).replace(/\s*MHz$/i, "")} MHz` : "Width pending";
+    const primary = actual?.primary_frequency_mhz || cfg?.frequency_mhz;
+    const centers = actual ? [actual.center_frequency1_mhz, actual.center_frequency2_mhz] : [cfg?.center_frequency1_mhz, cfg?.center_frequency2_mhz];
+    const centerLabel = centers.filter(value => value != null).join(" / ");
+    $("tuning").textContent = cfg ? `${cfg.band ? `${cfg.band} GHz · ` : ""}Channel ${actual?.primary_channel || cfg.channel}${primary ? ` · ${primary} MHz primary` : ""} · ${widthLabel}` : "No session";
+    $("session-detail").textContent = cfg ? `${cfg.capture_backend === "core" ? "Core" : "Direct"} capture · ${cfg.iface === "auto" ? "Automatic interface" : cfg.iface}${cfg.netns ? ` · Namespace ${cfg.netns}` : ""} · ${centerLabel ? `Center ${centerLabel} MHz${actual ? publication.capture_definition_verified ? "" : " (unverified)" : " requested"}` : "Center frequency pending"}${activePhases.has(phase) ? `${publication.session_id === attachedSession ? " · Session already running" : ""} · Capture continues when views close` : " · Retained final history"}` : "Start a session to collect live channel metrics.";
     $("session-id").textContent = publication.session_id ? `Session ${publication.session_id}` : "No capture session";
     $("logging-state").textContent = publication.logging.active ? "● Logging active" : "Logging off";
     $("logging-state").classList.toggle("active", publication.logging.active);
@@ -245,7 +281,7 @@
     if (name === "logs") files();
   }
   document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.tab)));
-  document.querySelectorAll("[data-sort]").forEach(button => button.addEventListener("click", () => {descending = sortKey === button.dataset.sort ? !descending : button.dataset.sort !== "ssid"; sortKey = button.dataset.sort; if (publication) renderTable();}));
+  document.querySelectorAll("[data-sort]").forEach(button => button.addEventListener("click", () => {descending = sortKey === button.dataset.sort ? !descending : !["ssid", "latest_ap_name"].includes(button.dataset.sort); sortKey = button.dataset.sort; if (publication) renderTable();}));
   $("graph-choice").addEventListener("change", () => {chosenGraph = $("graph-choice").value; document.querySelectorAll("[data-graph]").forEach(card => card.classList.toggle("mobile-selected", card.dataset.graph === chosenGraph));});
   $("refresh-files").addEventListener("click", files);
 
@@ -262,7 +298,8 @@
   const channelChoices = JSON.parse($("channel").dataset.channels);
   $("band").addEventListener("change", () => {
     $("channel").replaceChildren(...channelChoices[$("band").value].map(channel => {
-      const option = node("option", "", String(channel)); option.value = String(channel); return option;
+      const psc = $("band").value === "6" && channel >= 5 && (channel - 5) % 16 === 0;
+      const option = node("option", "", `${channel}${psc ? " (PSC)" : ""}`); option.value = String(channel); return option;
     }));
     $("channel").value = {"2.4": "1", "5": "36", "6": "5"}[$("band").value];
   });
@@ -273,7 +310,7 @@
   });
   $("start-form").addEventListener("submit", async event => {
     event.preventDefault(); const data = new FormData(event.currentTarget), width = data.get("channel_width");
-    const body = {band: data.get("band"), channel: data.get("channel"), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, local_cu: data.has("local_cu"), logging_enabled: data.has("logging_enabled")};
+    const body = {band: data.get("band"), channel: data.get("channel"), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled")};
     if (width && width !== "20") body.center_frequency1_mhz = Number(data.get("center_frequency1_mhz"));
     if (width === "80+80") body.center_frequency2_mhz = Number(data.get("center_frequency2_mhz"));
     $("start-submit").disabled = true; message("form-error", null);
@@ -287,8 +324,7 @@
     return statusRequest;
   }
 
-  async function readStatus() {
-    const value = await request("status");
+  function applyStatus(value) {
     const changed = !publication || value.publication.revision !== publication.revision || value.publication.session_id !== publication.session_id;
     publication = value.publication; screens = new Map(value.screens.map(screen => [screen.screen_id, screen]));
     loggingAvailable = value.logging_available;
@@ -300,15 +336,17 @@
       const age = health.latest_timestamp == null ? null : Math.max(0, value.server_time - health.latest_timestamp);
       $("capture-health").textContent = `Capture quality · ${number(health.decoded_frames)} decoded frames · ${number(health.bad_fcs_frames)} bad FCS · ${number(health.rejected_records)} rejected rows · ${age == null ? "Waiting for capture timestamps" : `Latest capture ${number(age)}s ago`}${health.fcs_metadata_available ? "" : " · FCS metadata unavailable"}${age > 3 && publication.phase === "running" ? " · Quiet traffic, buffering or capture loss can leave gaps" : ""}`;
     }
-    if (changed) {renderSession(); renderMetrics(); renderTable(); $("graphs").replaceChildren(...graphDefinitions.map(drawGraph));}
+    if (changed) {renderSession(); renderComposition(); renderMetrics(); renderTable(); $("graphs").replaceChildren(...graphDefinitions.map(drawGraph));}
     if (!$("logs").hidden && Date.now() - filesAt > 5000) files();
     if (!failures) return;
     message("error", null); failures = 0;
   }
+  async function readStatus() {applyStatus(await request("status"));}
   async function poll() {
     try {await pollOnce();}
     catch (error) {failures++; connection(false); message("error", `${loginRequired ? "Sign-in required." : "Service unavailable."} ${publication ? "Showing the last received values; capture status is unknown. " : ""}${error.name === "AbortError" ? "The request timed out." : error.message} Retrying automatically.`);}
     setTimeout(poll, Math.min(10000, 1000 * Math.max(1, failures)));
   }
+  if (initialStatus) applyStatus(initialStatus);
   poll();
 })();

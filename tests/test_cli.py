@@ -12,6 +12,24 @@ from beacon_live.models import FrameRecord
 from beacon_live.retry_debug import RetryCaptureData
 
 
+@pytest.mark.parametrize("standalone", [False, True])
+def test_cli_adopts_active_managed_session_unless_standalone_is_explicit(monkeypatch, standalone):
+    from beacon_live.models import MetricsSnapshot
+    from beacon_live.runtime import LiveSessionConfig, RuntimePublication, SessionPhase
+    calls = []
+    publication = RuntimePublication("a" * 32, 5, SessionPhase.RUNNING,
+                                     LiveSessionConfig(band="6", channel="5"), MetricsSnapshot.empty())
+    monkeypatch.setattr("beacon_live.service_client.ServiceClient.read", lambda self: publication)
+    monkeypatch.setattr("beacon_live.service_client.managed_live",
+                        lambda options, **kwargs: calls.append(("attach", options, kwargs)) or 0)
+    monkeypatch.setattr("beacon_live.cli.run_live", lambda **kwargs: calls.append(("standalone", kwargs)) or 0)
+    args = ["live", "--band", "2.4", "--channel", "11"]
+    assert main(args + (["--standalone"] if standalone else [])) == 0
+    assert calls[0][0] == ("standalone" if standalone else "attach")
+    if not standalone:
+        assert calls[0][2]["attach_only"] is True
+
+
 def test_live_passes_explicit_interface_and_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     monkeypatch.setattr("beacon_live.cli.run_live", lambda **kwargs: (calls.append(kwargs) or 0))

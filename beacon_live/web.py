@@ -157,8 +157,14 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
 
     @app.get(url_prefix)
     def index():
+        try:
+            initial = reader.read() | {"server_time": time.time()}
+        except ServiceError:
+            # Keep the page/reconnect UI available when the broker is absent.
+            initial = None
         return render_template("utilization.html", prefix=url_prefix, csrf=csrf,
-                               channel_choices=PRIMARY_CHANNELS, platform_hosted=bool(proxy_token))
+                               channel_choices=PRIMARY_CHANNELS, platform_hosted=bool(proxy_token),
+                               initial=initial)
 
     @app.get(url_prefix + "api/status")
     def status():

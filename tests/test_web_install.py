@@ -122,6 +122,16 @@ def test_unsupported_or_insecure_layout_fails_before_writes(platform, change):
     assert nginx.read_bytes() == before
 
 
+def test_allowlisted_application_still_requires_reviewed_session_gates(platform, monkeypatch):
+    package, _, _, _ = platform
+    path = package / "app.py"
+    changed = path.read_text().replace("    pass", "    return True", 1)
+    path.write_text(changed)
+    monkeypatch.setattr(install, "APPLICATION_SHA256", {hashlib.sha256(changed.encode()).hexdigest()})
+    with pytest.raises(install.IntegrationError, match="session freshness/login gates"):
+        install.prepare(*platform)
+
+
 @pytest.mark.parametrize("phase", ["syntax", "restart", "readiness", "webui_reload", "nginx_reload"])
 def test_failed_install_restores_files_token_and_original_service_state(platform, phase):
     package, nginx, config, unit = platform

@@ -1,5 +1,6 @@
 """Web rendering/control boundaries; no radio or frame aggregation in handlers."""
 import re
+import json
 from dataclasses import replace
 
 import pytest
@@ -141,6 +142,65 @@ def test_page_tabs_assets_and_multiple_clients_are_read_only(web):
     assert service.publication.session_id == SESSION
 
 
+def test_page_bootstraps_the_running_publication_and_preserves_data_without_a_control(web):
+    service, app, client, _ = web
+    sample = replace(MetricsSnapshot.empty().current, second=1000, retry_percent=.25)
+    service.publication = replace(service.publication, snapshot=replace(
+        MetricsSnapshot.empty(), generated_at=1001., current=sample, history=(sample,)))
+    app.extensions["utilization_reader"].deadline = 0
+    page = client.get("/utilization/").text
+    data = json.loads(re.search(r'<script id="initial-status" type="application/json">(.*?)</script>', page, re.S)[1])
+    assert data["publication"]["session_id"] == SESSION
+    assert data["publication"]["phase"] == "running"
+    assert data["publication"]["snapshot"]["current"]["retry_percent"] == .25
+    assert not service.controls
+    assert page.index('id="composition-title"') < page.index('On this channel')
+    assert 'data-sort="latest_ap_name"' in page
+    assert "Stop session" in page and "Stop capture" not in page
+    assert 'name="local_cu"' not in page
+
+
+def test_protected_page_reuses_platform_favicons_and_actual_capture_tuning(tmp_path):
+    from beacon_live.channel import ChannelDefinition
+    service = FakeService()
+    actual = ChannelDefinition(5180, ChannelWidth.MHZ20, 5180, primary_channel=36)
+    service.publication = replace(service.publication, config=LiveSessionConfig(
+        band="5", channel="36", channel_width=ChannelWidth.MHZ80, center_frequency1_mhz=5210),
+        capture_definition=actual, capture_definition_verified=True, capture_width="20")
+    client = create_app(client=service, proxy_token=PROXY_TOKEN).test_client()
+    headers = {"X-Utilization-Proxy-Token": PROXY_TOKEN}
+    page = client.get("/utilization/", headers=headers).text
+    assert 'href="/static/img/favicon-32x32.png"' in page
+    assert 'href="/static/img/favicon-16x16.png"' in page
+    data = client.get("/utilization/api/status", headers=headers).json
+    assert data["publication"]["capture_definition"]["width"] == "20"
+    assert data["publication"]["capture_definition"]["center_frequency1_mhz"] == 5180
+    assert data["publication"]["config"]["center_frequency1_mhz"] == 5210
+
+
+def test_page_still_loads_and_can_reconnect_when_broker_is_absent(tmp_path):
+    service = FakeService()
+    service.failed = True
+    client = create_app(client=service, log_directory=tmp_path).test_client()
+    page = client.get("/utilization/")
+    assert page.status_code == 200
+    assert '<script id="initial-status" type="application/json">null</script>' in page.text
+    assert client.get("/utilization/api/status").status_code == 503
+    service.failed = False
+    assert client.get("/utilization/api/status").json["publication"]["session_id"] == SESSION
+    assert not service.controls
+
+
+def test_embedded_status_escapes_untrusted_text_without_creating_script_tags(tmp_path):
+    service = FakeService()
+    text = '</script><script src="/unexpected.js"></script>'
+    service.publication = replace(service.publication, notice=text)
+    page = create_app(client=service, log_directory=tmp_path).test_client().get("/utilization/").text
+    assert text not in page
+    embedded = re.search(r'<script id="initial-status" type="application/json">(.*?)</script>', page, re.S)[1]
+    assert json.loads(embedded)["publication"]["notice"] == text
+
+
 def test_channel_choices_and_server_validation_use_primary_band_grid(web):
     from html import unescape
     import json
@@ -160,9 +220,10 @@ def test_channel_choices_and_server_validation_use_primary_band_grid(web):
 
 def test_capture_quality_preserves_owner_counts_and_reports_server_time(web):
     from beacon_live.models import CaptureHealth
-    service, _, client, _ = web
+    service, app, client, _ = web
     service.publication = replace(service.publication,
         capture_health=CaptureHealth(2000, 1900, 100, 300, 1000.25, True))
+    app.extensions["utilization_reader"].deadline = 0
     response = client.get("/utilization/api/status").json
     assert response['publication']['capture_health'] == {
         'capture_records': 2000, 'decoded_frames': 1900, 'rejected_records': 100,
@@ -172,13 +233,14 @@ def test_capture_quality_preserves_owner_counts_and_reports_server_time(web):
 
 
 def test_status_preserves_null_zero_gap_and_sub_one_retry_percent(web):
-    service, _, client, _ = web
+    service, app, client, _ = web
     base = service.publication.snapshot
     zero = replace(base.current, second=1000, retry_percent=0.0)
     small = replace(base.current, second=1001, retry_percent=0.25)
     gap = replace(base.current, second=1002, sample_available=False)
     snapshot = replace(base, generated_at=1003.0, current=small, history=(zero, small, gap))
     service.publication = replace(service.publication, snapshot=snapshot, completed_stats=(zero, small))
+    app.extensions["utilization_reader"].deadline = 0
     value = client.get("/utilization/api/status").json
     assert value["publication"]["snapshot"]["current"]["retry_percent"] == 0.25
     assert value["publication"]["snapshot"]["history"][0]["retry_percent"] == 0
@@ -311,6 +373,7 @@ def test_open_download_survives_retention_unlink_and_rejects_parent_symlink(tmp_
 def test_unavailable_service_is_explicit_and_page_does_not_start_it(web):
     service, app, client, _ = web
     service.failed = True
+    app.extensions["utilization_reader"].deadline = 0
     assert client.get("/utilization/").status_code == 200
     assert client.get("/utilization/api/status").status_code == 503
     assert service.controls == []

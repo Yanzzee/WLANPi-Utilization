@@ -6,6 +6,7 @@ from threading import Event
 import pytest
 
 from beacon_live.models import MetricsSnapshot
+from beacon_live.channel import ChannelDefinition
 from beacon_live.runtime import (
     LiveSessionConfig,
     ManagedRuntime,
@@ -57,6 +58,7 @@ def test_multiple_late_and_slow_consumers_share_original_metrics_and_history():
         dashboard.publish_stats(rows)
         dashboard.refresh(snapshot)
         dashboard.set_capture_width("20 MHz")
+        dashboard.set_capture_definition(ChannelDefinition(5180), verified=True)
         dashboard.set_logging_status(active=True, paths=(Path("stats.csv"),))
         dashboard.set_notice("survey unavailable")
         late = runtime.subscribe()
@@ -89,6 +91,8 @@ def test_multiple_late_and_slow_consumers_share_original_metrics_and_history():
     assert final.logging.active is False
     assert final.logging.paths == (Path("stats.csv"),)
     assert final.capture_width == "20 MHz"
+    assert final.capture_definition.center_frequency1_mhz == 5180
+    assert final.capture_definition_verified
     assert final.notice == "survey unavailable"
     assert final.collecting is False
     with pytest.raises(FrozenInstanceError):

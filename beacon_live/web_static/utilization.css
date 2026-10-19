@@ -157,7 +157,8 @@ a{
   display:flex;
   gap:10px;
   align-items:center;
-  margin:8px 0 6px
+  margin:8px 0 6px;
+  flex-wrap:wrap
 }
 .session-title strong{
   font-size:18px;
@@ -273,7 +274,7 @@ a{
 }
 .metric-grid{
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-columns:repeat(3,minmax(0,1fr));
   gap:12px
 }
 .metric-card{
@@ -322,15 +323,11 @@ a{
   --card-color:var(--orange)
 }
 .composition{
-  margin:16px 0 28px;
+  margin:0 0 28px;
   background:#eaf1f2;
   border:1px solid #dfe9eb;
   border-radius:9px;
-  padding:16px 18px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:20px
+  padding:18px
 }
 .composition p{
   font-size:12px;
@@ -344,6 +341,38 @@ a{
   display:flex;
   gap:28px;
   flex-shrink:0
+}
+.composition-layout{
+  display:grid;
+  grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);
+  gap:24px
+}
+.radio-details,.selection-details{
+  min-width:0
+}
+.radio-details h3,.selection-details h3{
+  font-size:13px
+}
+.radio-details .table-wrap{
+  margin-top:12px
+}
+.radio-identity,.selected-bssid p{
+  font-size:11px;
+  line-height:1.6;
+  overflow-wrap:anywhere
+}
+.selected-bssid{
+  padding:10px 0;
+  border-bottom:1px solid var(--line)
+}
+.selected-bssid strong{
+  font-size:11px
+}
+.qbss-source{
+  background:var(--mint)
+}
+.graph-heading{
+  margin-top:28px
 }
 .composition-stat strong{
   font-size:21px;
@@ -459,9 +488,8 @@ a{
 .graph-identity{
   font-size:10px;
   color:var(--muted);
-  white-space:nowrap;
-  text-overflow:ellipsis;
-  overflow:hidden;
+  white-space:normal;
+  overflow-wrap:anywhere;
   border-top:1px solid #edf1f3;
   padding-top:10px;
   margin-top:4px;
@@ -750,6 +778,9 @@ summary{
   }
 }
 @media(max-width:1050px){
+  .composition-layout{
+    grid-template-columns:1fr
+  }
   .session-bar{
     align-items:flex-start;
     flex-direction:column;
@@ -857,11 +888,13 @@ summary{
     font-size:9px
   }
   .composition{
-    flex-direction:column;
-    align-items:stretch;
     padding:15px;
     margin-bottom:24px;
-    gap:14px
+  }
+  .composition > .section-heading{
+    flex-direction:column;
+    gap:14px;
+    align-items:stretch
   }
   .composition-counts{
     justify-content:space-between;

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from beacon_live.channel import ChannelWidth
+from beacon_live.channel import ChannelDefinition, ChannelWidth
 from beacon_live.log_writer import (
     DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
     DEFAULT_MIN_FREE_BYTES,
@@ -88,6 +88,8 @@ class RuntimePublication:
     error: str | None = None
     closed_logs: tuple[ClosedLog, ...] = ()
     capture_health: CaptureHealth = CaptureHealth()
+    capture_definition: ChannelDefinition | None = None
+    capture_definition_verified: bool = False
 
 
 class SessionConflictError(RuntimeError):
@@ -311,6 +313,10 @@ class _RuntimeDashboard:
 
     def set_capture_width(self, width: str) -> None:
         self._runtime._publish(self._session_id, capture_width=width)
+
+    def set_capture_definition(self, definition: ChannelDefinition, *, verified: bool = False) -> None:
+        self._runtime._publish(self._session_id, capture_definition=definition,
+                               capture_definition_verified=verified)
 
     def set_logging_status(
         self, *, active: bool, paths: tuple[Path, ...] | None, message: str | None = None

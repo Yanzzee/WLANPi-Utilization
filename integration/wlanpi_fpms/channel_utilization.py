@@ -152,6 +152,8 @@ def build_launch_command(
     mode = configured_runtime_mode()
     if mode == "managed":
         command.append("--managed")
+    elif mode == "standalone":
+        command.append("--standalone")
     elif mode == "invalid":
         command.append("--invalid-runtime-mode")  # Reject before touching a radio.
     return command
@@ -160,7 +162,7 @@ def build_launch_command(
 def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, object]:
     """Return one FPMS Apps menu node with band/channel-first selection."""
     app = ChannelUtilizationApp(g_vars)
-    return {
+    menu = {
         "name": "Utilization",
         "action": [
             _band_menu(app, "2.4 GHz", "2.4", _24_GHZ_CHANNELS),
@@ -175,6 +177,9 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
             ),
         ],
     }
+    if configured_runtime_mode() == "managed":
+        menu["action"].insert(0, {"name": "Open Running Session", "action": app.resume})
+    return menu
 
 
 def _band_menu(
@@ -213,7 +218,7 @@ def _band_menu(
             }
         )
         if configured_runtime_mode() == "managed":
-            actions[-1]["action"].append({"name": "Stop Capture", "action": app.stop_capture})
+            actions[-1]["action"].append({"name": "Stop Session", "action": app.stop_capture})
     return {"name": name, "action": actions}
 
 
@@ -257,6 +262,29 @@ def _frequency_mhz(band: str, channel: int) -> int:
     return 5950 + channel * 5
 
 
+def _managed_session_status():
+    """Use the installed CLI boundary; FPMS has its own Python environment."""
+    result = subprocess.run([EXECUTABLE, "session", "status", "--summary"],
+                            capture_output=True, text=True, timeout=6)
+    if result.returncode != 0:
+        raise OSError("Utilization service status unavailable")
+    state = json.loads(result.stdout)
+    return state if state.get("phase") in {"starting", "running", "stopping"} else None
+
+
+def _session_channel(state):
+    config = state["config"]
+    actual = state.get("capture_definition") or {}
+    frequency = actual.get("primary_frequency_mhz") or config.get("frequency_mhz")
+    band = config.get("band")
+    if band is None and frequency is not None:
+        band = "2.4" if frequency < 2500 else "5" if frequency < 5925 else "6"
+    channel = actual.get("primary_channel")
+    if channel is None and frequency is not None:
+        channel = 14 if frequency == 2484 else (frequency - {"2.4": 2407, "5": 5000, "6": 5950}[band]) // 5
+    return band or ("2.4" if int(config["channel"]) <= 14 else "5"), int(channel or config["channel"])
+
+
 class ChannelUtilizationApp:
     """Launch a standalone owner or managed renderer and mirror its FPMS frames."""
 
@@ -273,8 +301,24 @@ class ChannelUtilizationApp:
         self.clock = clock
         self.wall_clock = wall_clock
 
-    def launch(self, *, band: str, channel: int, logging: bool) -> None:
+    def resume(self) -> None:
+        self.launch(band="5", channel=36, logging=False, resume_only=True)
+
+    def launch(self, *, band: str, channel: int, logging: bool, resume_only: bool = False) -> None:
         if self.g_vars.get("channel_utilization_recovering"):
+            return
+        running = None
+        if configured_runtime_mode() == "managed":
+            try:
+                running = _managed_session_status()
+                if running is not None:
+                    band, channel = _session_channel(running)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                LOGGER.exception("Unable to read managed Utilization session")
+                _display_error(self.g_vars, "Session unavailable. Check journal.")
+                return
+        if resume_only and running is None:
+            _display_status(self.g_vars, "No running session. Select a channel to start.")
             return
         logging_only_session = self.g_vars.get(
             "channel_utilization_logging_session"
@@ -295,16 +339,15 @@ class ChannelUtilizationApp:
         new_session = False
         if not isinstance(session, _DisplaySession):
             _write_logging_enabled(logging, apply_managed=False)
+            command = build_launch_command(band=band, channel=channel, logging=logging)
+            if resume_only:
+                command[command.index("--managed")] = "--attach"
             session = _DisplaySession(
                 self.g_vars,
-                build_launch_command(
-                    band=band,
-                    channel=channel,
-                    logging=logging,
-                ),
+                command,
                 band=band,
                 channel=channel,
-                logging_enabled=logging,
+                logging_enabled=logging or bool(running and running.get("logging", {}).get("active")),
                 popen=self.popen,
                 clock=self.clock,
                 wall_clock=self.wall_clock,
@@ -318,7 +361,7 @@ class ChannelUtilizationApp:
                 self.g_vars["channel_utilization_recovering"] = True
                 try:
                     _display_status(
-                        self.g_vars, "Unable to start capture. Check journal."
+                        self.g_vars, "Unable to open session. Check journal."
                     )
                 finally:
                     try:
@@ -332,7 +375,8 @@ class ChannelUtilizationApp:
             session.report_exit()
             return
         else:
-            logging_started = session.set_logging(logging)
+            if running is None or logging:
+                logging_started = session.set_logging(logging)
 
         self.g_vars["page_exit_handler"] = session.stop
         self.g_vars["page_up_handler"] = session.navigate_up
@@ -342,13 +386,23 @@ class ChannelUtilizationApp:
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
-        if logging_started:
+        if running is not None:
+            session.show_status(f"Session already running: Ch {channel} {band} GHz. Loading display.")
+        elif logging_started:
             session.show_logging_status("Logging started")
         if new_session:
             # Install page handlers before the worker can observe a fast exit.
             session.start_display()
 
     def start_logging_only(self, *, band: str, channel: int) -> None:
+        if configured_runtime_mode() == "managed":
+            try:
+                running = _managed_session_status()
+                if running is not None:
+                    band, channel = _session_channel(running)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                _display_error(self.g_vars, "Session unavailable. Check journal.")
+                return
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession) and not display_session.finished:
             if display_session.set_logging(True):
@@ -401,7 +455,7 @@ class ChannelUtilizationApp:
                 raise OSError(result.stderr)
             state = json.loads(result.stdout)
             if state.get("phase") not in {"starting", "running", "stopping"}:
-                _display_status(self.g_vars, "Capture already stopped")
+                _display_status(self.g_vars, "Session already stopped")
                 return
             result = subprocess.run(
                 [EXECUTABLE, "session", "stop", "--session-id", state["session_id"], "--summary"],
@@ -409,7 +463,7 @@ class ChannelUtilizationApp:
             )
             if result.returncode != 0:
                 raise OSError(result.stderr)
-            _display_status(self.g_vars, "Capture stopping")
+            _display_status(self.g_vars, "Session stopping")
         except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
             LOGGER.exception("Utilization stop control failed")
             _display_error(self.g_vars, "Stop failed. Check journal.")
@@ -532,7 +586,7 @@ class _DisplaySession:
 
     def stop(self) -> None:
         was_logging = self.logging_enabled
-        if "--managed" not in self.command:
+        if "--managed" not in self.command and "--attach" not in self.command:
             self.set_logging(False)
         self.stop_event.set()
         process = self.process
@@ -549,7 +603,7 @@ class _DisplaySession:
                     process.wait(timeout=2)
         if self.thread is not None and self.thread is not threading.current_thread():
             self.thread.join(timeout=2)
-        if was_logging and "--managed" not in self.command:
+        if was_logging and "--managed" not in self.command and "--attach" not in self.command:
             self.show_logging_status("Logging stopped")
         self.g_vars.pop("channel_utilization_session", None)
         self.g_vars.pop("page_exit_handler", None)

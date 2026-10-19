@@ -442,9 +442,12 @@ state remains readable until an explicit new session.
 one isolated capture owner process. `service_client.py` attaches terminal/LCD
 renderers to the owner's typed JSON publications. Start/join, explicit stop,
 and logging controls share this boundary. Renderer exit detaches and preserves
-the owner; incompatible sources fail until it stops. The normal CLI and initial
-FPMS setting retain standalone foreground behavior pending managed device
-acceptance. See [managed service operation](managed-service.md) and the
+the owner. Consumer opens atomically join an active session using its actual
+configuration; explicit conflicting starts still fail until it stops. A plain
+CLI open adopts an active managed session and otherwise retains foreground
+capture; `--standalone` explicitly selects that mode. The initial FPMS setting
+retains standalone behavior pending managed device acceptance. See
+[managed service operation](managed-service.md) and the
 [managed runtime roadmap](managed-runtime-roadmap.md).
 
 `web.py` provides a separate Flask/Waitress consumer at `/utilization/`.
@@ -452,6 +455,13 @@ HTTP threads share a one-second publication cache and render the existing
 snapshot/screen views; controls use the same broker as CLI and FPMS. Browser
 lifetimes do not own capture. Local assets support compact phone views and
 expanded desktop graphs/table without an additional analysis pipeline.
+The initial page embeds the cached publication, so an existing session renders
+without waiting for a first status response. Composition/strongest-radio members
+and selected QBSS/station/retry identities remain separate, using the existing
+screen definitions and snapshot fields. The owner additionally publishes capture
+tuning and verification status for center-frequency/width display. Local survey
+reporting is hidden in the web UI pending adapter validation; analyzer/API/log
+definitions are retained.
 
 Optional WLAN Pi hosting uses the existing Nginx `/auth/check` guard on every
 Utilization route and a separate web unit listening only on a private Unix

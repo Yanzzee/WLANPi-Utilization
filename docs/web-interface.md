@@ -55,6 +55,8 @@ own explicit installer; the manual command above retains loopback operation.
 
 Opening a page reads the service; an idle service stays idle. Choose **Start
 session** explicitly, or start through managed CLI/FPMS and open the page later.
+The page embeds the current publication at load and immediately displays an
+existing session's ID, phase and retained history before the first poll returns.
 Band/channel/width apply only to a new session. Advanced source fields offer
 the existing automatic interface/namespace discovery and optional Core backend.
 There is no SSID/BSSID selector.
@@ -64,17 +66,37 @@ Primary channel is a band-specific dropdown: 2.4 GHz channels 1–14, the normal
 center numbers are not offered as primaries. The server validates the same
 grid, including hand-edited requests. Adapter/regulatory availability and width
 support still determine whether capture can start.
+6 GHz preferred scanning channels use labels such as **5 (PSC)**; the submitted
+channel remains the integer. Session tuning shows the primary frequency,
+width in MHz and center frequency/frequencies supplied by the owner. Requested
+or unverified tuning is labeled accordingly.
 
-Overview shows AP QBSS and local survey utilization separately, retries,
-admission capacity, advertised station sum, observed clients, BSSIDs, beacon
-loss, and rolling composition. Desktop displays all six graphs. Small screens
+Overview places channel composition above **On this channel**. The strongest
+estimated radio lists AP name/vendor, its currently displayed SSID/BSSID/RSSI,
+all grouped BSSIDs and their advertised station counts, and a QBSS-source mark.
+The adjacent selected-BSSID section identifies the QBSS source, station maximum,
+retry maximum and strongest beacon-loss-eligible BSSID independently. It follows
+the [TUI identity rules](screens.md#web-organization): these sources need not
+belong to one radio. Station maximum uses the analyzer's QBSS/observed source
+and count, rather than borrowing the QBSS reporting identity.
+
+Six current cards show AP QBSS utilization, retries, admission capacity,
+advertised station sum, observed active clients and beacon loss. The duplicated
+one-second BSSID card is removed; rolling composition counts and the completed
+second BSSID graph retain their distinct scopes. Local survey reporting and
+its web start option are hidden pending adapter validation. The existing engine,
+CLI option, API fields and logs retain their definitions; a future verified
+survey display can add a separate line to the CU graph.
+
+Desktop displays all six graphs. Small screens
 keep the same metric cards and offer a graph selector. The BSSID table uses
 latest snapshot beacon values and explicitly labels rolling observations.
-Sorting changes table presentation only.
+AP name and the existing metric columns are sortable; missing AP names sort
+last in either direction. Sorting changes table presentation only. Protected
+hosting reuses WLAN Pi's existing browser-tab and touch icons.
 
 Null fields display an em dash; real zeros remain zero. Unavailable graph
-samples break the line. Nonzero retries below 1% display as `<1%`. Local survey
-remains unavailable when disabled or when no sample is available. Capture width,
+samples break the line. Nonzero retries below 1% display as `<1%`. Capture width,
 collecting state, partial-coverage notices, errors, and logging/disk warnings
 come from the owner publication. The browser does not close analyzer buckets
 or advance capture history using its clock. A stopped session retains its final
@@ -93,7 +115,7 @@ clients/BSSIDs or retry samples. A late stream does not by itself establish a
 performance bottleneck; see [busy-channel validation](busy-channel-validation.md)
 for interpretation, exact synthetic regressions, and a repeatable Pi test.
 
-**Stop logging** closes CSV/JSONL while analysis continues. **Stop capture**
+**Stop logging** closes CSV/JSONL while analysis continues. **Stop session**
 requests the owner's normal cleanup and radio restoration. Controls carry the
 current session ID; a stale page cannot stop a replacement session. A new start
 can briefly be rejected while the previous owner process finishes cleanup;

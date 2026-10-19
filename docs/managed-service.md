@@ -26,17 +26,28 @@ FPMS configuration. Service installation/reinstallation restarts the broker
 and ends its current capture gracefully. The service starts idle, including
 after reboot or service restart; it never resumes capture automatically.
 
-`--managed` starts or joins a compatible session. Compatible requests preserve
-the existing session ID, log paths, capture, and history. Compatibility checks
-cover source/namespace, backend, tuning, survey, sampling, and raw diagnostic
-capture choices. A different source requires an explicit stop and then a new
-start. Logging paths and limits belong to the initial owner configuration;
-joining consumers cannot replace them. `--attach` reads the current owner
-configuration without requesting a start or reconfiguration.
+`--managed` atomically opens the active session or starts one if idle. An
+existing session wins over the command's requested source/tuning: the CLI
+reports **Session already running** and displays the actual owner configuration,
+session ID, logs and history. Source changes still require an explicit stop
+and new start. Logging paths and limits belong to the initial owner;
+display-only attachment cannot replace them or disable logging. An explicit
+logging request can enable logging. `--attach` only reads the current owner
+and never starts one. A plain `sudo wlanpi-utilization` also attaches when the
+managed broker has an active session; otherwise it retains foreground capture.
+Use `--standalone` to request foreground capture explicitly. Radio exclusion
+still prevents that mode from acquiring a radio already owned by a session.
+
+The broker's strict `start`/compatible `ensure` APIs continue rejecting
+conflicting source requests. The consumer `join` operation preserves an active
+owner atomically, including concurrent opens with different requested channels.
 
 Exiting a managed CLI view with Q/Ctrl+C or leaving the FPMS display detaches
 that renderer. Capture and active logging continue with zero renderers. FPMS
-managed mode adds **Stop Capture** to each channel menu. **Stop Logging**
+managed mode adds **Open Running Session** above band selection and **Stop
+Session** to each channel menu. Opening a display through a different channel
+choice still loads the current source and reports that it is already running.
+The resume-only entry cannot create a replacement session. **Stop Logging**
 disables logging without ending capture. CLI controls require the actual
 `session_id` value from status, not the literal placeholder `SESSION_ID`.
 While a session is active, read its ID automatically before using the desired
@@ -60,8 +71,8 @@ another owner. The final publication can precede process reaping by a short
 interval; a new start remains blocked until cleanup and reaping finish. Final
 history stays readable until a new explicit start. Stale control IDs fail.
 
-The normal live command without `--managed` keeps standalone behavior,
-including stopping capture on exit. Select `--fpms-runtime standalone` to
+Foreground capture stops on exit; managed attachment only detaches. Select
+`--fpms-runtime standalone` to
 restore that FPMS behavior. Reinstallation without a runtime flag preserves
 the saved selection in `/etc/wlanpi-beacon-live/fpms.json`. The
 `WLANPI_UTILIZATION_RUNTIME_MODE=managed|standalone` environment variable can
@@ -137,9 +148,11 @@ the broker. Browser startup, reconnect, and navigation have no implicit
 start/stop behavior. `sudo wlanpi-utilization web` accesses the private broker
 as root and listens on loopback, suitable for a local browser or SSH tunnel.
 See [web installation and browser checks](web-interface.md). SSE remains
-optional if measured polling overhead justifies it. The platform login adapter
-and least-privilege proxy/backend deployment remain milestone 4, before remote
-controls are exposed.
+optional if measured polling overhead justifies it. The optional platform login
+adapter and private Unix backend are described in [protected deployment](web-deployment.md).
+Page loads embed the current cached publication before the first status poll,
+without a start/control operation. Publications now include capture tuning and
+its verification flag so consumers can show actual width/center frequencies.
 
 On the target Pi, record image/package versions, adapter, source namespace,
 backend, band/width, revision, and diagnostic bundle. Check:
@@ -150,8 +163,10 @@ backend, band/width, revision, and diagnostic bundle. Check:
    CLI. Verify one TShark/decoder/owner, matching current data/history, FPMS
    navigation/rotation, and logging status. Exit all displays and verify capture
    and logging remain active; reconnect and verify retained history.
-3. Try another channel/backend while active. Verify a useful conflict and no
-   retune. Toggle logging and verify the session ID/history persist. Stop
+3. Open CLI/managed FPMS with another channel while active. Verify the
+   already-running message, actual current tuning and no retune. Explicit
+   conflicting API starts must still fail. Toggle logging and verify the
+   session ID/history persist. Stop
    capture through FPMS and CLI; verify owner exit and physical radio restoration.
 4. Test SIGTERM/service restart, startup failure, source EOF, unavailable
    socket, optional Core owner shutdown, and low disk using the existing safe

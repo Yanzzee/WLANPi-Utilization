@@ -523,3 +523,66 @@ After that gate, proceed to milestone 5's same-source beacon pcapng export;
 original packet bytes/timestamps/radiotap, mixed-frame analyzer input, disk
 isolation and WiFi-Beacon-analysis context remain required. No release tag or
 production Pi deployment was performed by this local implementation.
+
+## Web/TUI alignment and Pi 4 compatibility — October 19, 2026
+
+The user reports that the preceding protected-hosting test worked well on Pi 5.
+Pi 4 installation refused its unrecognized WebUI application revision before
+writing a card/route. All four supplied Pi 4 hashes exactly match upstream
+`dc39a7e852113ff00f2654c005d588755ce753c9`. Review of its application against
+the previous supported revision confirms identical login/freshness functions;
+differences concern polling and the Grafana package check. The installer now
+accepts that application hash while retaining exact auth-module/Nginx hashes
+and AST gates. A read-only proposal against the exact upstream Pi 4 files
+passes. Preflight and integration scripts are executable as well as usable
+through `python3`. Installed Pi 4 routing/authentication acceptance is pending.
+
+The web overview now follows [TUI organization](screens.md#web-organization):
+channel composition first, all strongest-radio members and their QBSS marker,
+then a separate selected-BSSID panel for QBSS, station maximum, retry maximum
+and beacon-loss identity. AP/SSID/BSSID/RSSI context uses the existing screen
+and analyzer selections, including distinct sources and strongest-radio cycling;
+station details no longer borrow the QBSS selection. No metric is recomputed
+by the browser. AP-name sorting, observed-active-client legend wording, PSC
+labels, platform favicon links, matching Start/Stop session labels and six
+current cards are implemented. The duplicate one-second BSSID card and local
+survey web display/start option are removed. Survey engine/API/log semantics
+remain intact; future verified reporting can add a distinct CU graph line.
+
+Capture publications include the tuned channel definition and its verification
+flag, allowing explicit center frequencies and MHz widths without assuming
+requested tuning was applied. Page HTML embeds the current read-only cached
+publication and renders existing session state/history before its first poll.
+Missing-data, true-zero, graph-gap and `<1%` behavior is preserved.
+
+Consumer opens now atomically use an existing managed owner regardless of the
+requested source, with an already-running message and unchanged tuning/history.
+The broker still rejects explicit conflicting starts. A plain CLI open attaches
+to an active managed session; without one it retains foreground behavior, and
+`--standalone` explicitly requests that behavior. Managed FPMS adds **Open
+Running Session**, which cannot start a replacement, and displays the current
+source when opened through another channel choice. Display-only opens and
+exits preserve active shared logging. Source changes require Stop session and
+an explicit new start. Update broker, CLI, web and FPMS together for these
+development-publication additions.
+
+**Evidence:** full Python 3.13.3 regression passed **741 tests with one optional
+Core transport skip in 20.14 seconds**, including real broker/CLI attachment
+and actual TLS Nginx route tests. Concurrent different-channel opens share one
+owner, and CLI auto/explicit attach and managed opens retain the original
+session/history. Tests cover current-page bootstrap, unavailable-broker recovery,
+safe embedded JSON, capture tuning publication, FPMS resume/logging preservation
+and unchanged auth gates. Exported synthetic fixtures and the checked-in
+`tests/web_ui_check.mjs` pass simulated-DOM checks in protected and local modes
+for distinct metric identities, radio membership, AP sorting, PSC labels,
+center/width formatting, initial existing-session rendering, expiry/reconnect,
+CSRF/session IDs and activity throttling. Native Brave access timed out, so
+rendered-browser acceptance for this layout is not claimed.
+
+**Next device checks:** repeat protected integration installation on Pi 4 and
+open its normal HTTPS Apps/Utilization URL. Retest desktop/phone composition,
+source identities, tuning labels and existing-session opens across web/CLI/FPMS
+on both Pis. Finish installed login/logout/expiry/reboot and controlled busy-
+channel checks before marking milestone 4 accepted. Beacon pcapng export and
+WiFi-Beacon-analysis end-to-end context remain milestones 5–6; release metadata
+stays `2.1.0.dev0`.

@@ -163,6 +163,11 @@ While a display is open:
   changing the active screen.
 
 Changing screens never restarts capture or clears graph history.
+In managed FPMS mode, **Open Running Session** loads the existing display
+without band/channel selection. A channel's **Display** action also adopts an
+active session and reports its current tuning. Left detaches that managed
+display; **Stop Session** explicitly ends capture. Foreground FPMS mode keeps
+the stop-on-exit behavior described above.
 
 ## Use the command line
 
@@ -186,9 +191,10 @@ sudo wlanpi-utilization --attach
 sudo wlanpi-utilization session status --summary
 ```
 
-The service starts idle; an explicit managed request starts capture. Compatible
-CLI and FPMS requests join that session. A request for another source/channel
-fails until the owner is explicitly stopped. Closing a managed display or
+The service starts idle; an explicit managed request starts capture. CLI and
+managed FPMS opens join an active session, reporting **Session already running**
+and retaining its actual tuning even if another channel was requested. Changing
+source requires an explicit stop and new session. Closing a managed display or
 leaving FPMS detaches the renderer and retains capture, logging, and history.
 Controls require the actual `session_id` from status. The commands below read
 it automatically; rerun the assignment after starting a new session. The word
@@ -201,8 +207,9 @@ sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" -
 sudo wlanpi-utilization session stop --session-id "$UTILIZATION_SESSION_ID" --summary
 ```
 
-Standalone mode remains available through the normal live command without
-`--managed`. To restore standalone FPMS behavior, reinstall with
+The plain live command automatically attaches to an active managed session;
+otherwise it starts foreground capture. `--standalone` explicitly selects
+foreground mode. To restore standalone FPMS behavior, reinstall with
 `--fpms-runtime standalone`. See [managed service operation](docs/managed-service.md)
 for permissions, shutdown, failure behavior, and device checks.
 

@@ -8,6 +8,12 @@
   <meta name="utilization-api" content="{{ prefix }}api/">
   <meta name="utilization-hosted" content="{{ 'yes' if platform_hosted else 'no' }}">
   <title>Utilization</title>
+  {% if platform_hosted %}
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png">
+  {% endif %}
+  <script id="initial-status" type="application/json">{{ initial|tojson }}</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='utilization.css') }}">
   <script src="{{ url_for('static', filename='utilization.js') }}" defer></script>
 </head>
@@ -20,7 +26,7 @@
   <main id="main" class="shell">
     <section class="session-bar" aria-label="Capture session">
       <div><div class="eyebrow">Capture session</div><div class="session-title"><span id="phase" class="status neutral">—</span><strong id="tuning">No session</strong></div><p id="session-detail" class="muted">Open this page without changing capture.</p></div>
-      <div class="actions"><span id="logging-state" class="logging-state">Logging —</span><button id="logging-toggle" class="button secondary" disabled>Start logging</button><button id="stop" class="button danger" disabled>Stop capture</button><button id="new-session" class="button primary" disabled>Start session</button></div>
+      <div class="actions"><span id="logging-state" class="logging-state">Logging —</span><button id="logging-toggle" class="button secondary" disabled>Start logging</button><button id="stop" class="button danger" disabled>Stop session</button><button id="new-session" class="button primary" disabled>Start session</button></div>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <div id="error" class="notice error" role="alert" hidden></div>
@@ -33,17 +39,25 @@
       <span class="nav-caption">Shared <span id="window-label">120</span>-second history</span>
     </nav>
     <section id="overview" class="panel" aria-label="Overview">
+      <section class="composition" aria-labelledby="composition-title">
+        <div class="section-heading"><h2 id="composition-title">Channel composition</h2><div id="composition-counts" class="composition-counts"></div></div>
+        <div class="composition-layout">
+          <div class="radio-details"><h3>Strongest estimated radio</h3><p id="composition-detail">Waiting for beacon observations</p><p id="composition-current" class="radio-identity"></p><p id="radio-counts" class="muted"></p>
+            <div class="table-wrap"><table><caption class="sr-only">BSSIDs grouped with the strongest estimated radio. The QBSS source is marked when it belongs to this radio.</caption><thead><tr><th scope="col">SSID / BSSID</th><th scope="col">RSSI</th><th scope="col">QBSS stations</th></tr></thead><tbody id="radio-bssids"></tbody></table></div>
+          </div>
+          <div class="selection-details"><h3>Selected BSSIDs</h3><div id="selected-bssids" class="selected-bssids"></div><p class="muted">Automatic metric sources; these may belong to different radios.</p></div>
+        </div>
+      </section>
       <div class="section-heading"><h2>On this channel</h2><span id="sample-time" class="muted">No completed sample</span></div>
       <div id="metrics" class="metric-grid"></div>
-      <section class="composition" aria-label="Channel composition"><div><span class="eyebrow">Channel composition · rolling window</span><p id="composition-detail">Waiting for beacon observations</p></div><div id="composition-counts" class="composition-counts"></div></section>
       <div class="section-heading graph-heading"><h2>Rolling history</h2><label class="mobile-graph">Graph <select id="graph-choice" aria-label="Visible graph on small screens"><option value="cu">Utilization</option><option value="total_station_count">Stations &amp; clients</option><option value="retry">Retries</option><option value="beacons">Beacon loss</option><option value="admission_capacity">Admission capacity</option><option value="bssid_history">BSSIDs</option></select></label><span class="muted desktop-caption">Gaps mean unavailable data</span></div>
       <div id="graphs" class="graph-grid"></div>
-      <p class="method-note">AP QBSS utilization and local survey utilization are separate measurements. Observed clients are distinct client MAC addresses heard on the channel.</p>
+      <p class="method-note">AP QBSS utilization and station counts are advertised measurements. Observed active clients are distinct eligible client MAC addresses heard on the channel.</p>
     </section>
     <section id="bssids" class="panel" aria-label="BSSID table" hidden>
       <div class="section-heading"><h2>Observed BSSIDs</h2><span class="muted">Latest beacon values · automatically selected reporting source</span></div>
       <div class="table-wrap"><table><caption class="sr-only">Latest beacon values and rolling-window observations. Column buttons change table order only.</caption><thead><tr>
-        <th scope="col"><button data-sort="ssid">SSID / BSSID</button></th><th scope="col">AP name</th><th scope="col" aria-sort="descending"><button data-sort="latest_rssi_dbm">RSSI ↓</button></th><th scope="col"><button data-sort="latest_qbss_cu_percent">QBSS CU</button></th><th scope="col"><button data-sort="latest_station_count">QBSS stations</button></th><th scope="col"><button data-sort="window_unique_client_mac_count">Observed clients · 120s</button></th><th scope="col"><button data-sort="window_retry_percent">Retries · 120s</button></th><th scope="col">Admission · 32µs units</th><th scope="col">Last beacon</th>
+        <th scope="col"><button data-sort="ssid">SSID / BSSID</button></th><th scope="col"><button data-sort="latest_ap_name">AP name</button></th><th scope="col" aria-sort="descending"><button data-sort="latest_rssi_dbm">RSSI ↓</button></th><th scope="col"><button data-sort="latest_qbss_cu_percent">QBSS CU</button></th><th scope="col"><button data-sort="latest_station_count">QBSS stations</button></th><th scope="col"><button data-sort="window_unique_client_mac_count">Observed clients · 120s</button></th><th scope="col"><button data-sort="window_retry_percent">Retries · 120s</button></th><th scope="col">Admission · 32µs units</th><th scope="col">Last beacon</th>
       </tr></thead><tbody id="bssid-rows"></tbody></table><p id="bssid-empty" class="empty">No beacon observations in the current window.</p></div>
       <p class="method-note">QBSS fields come from each BSSID's latest beacon. Missing fields remain unavailable. Sorting changes only this table, never the reporting BSSID.</p>
     </section>
@@ -58,9 +72,9 @@
     <div class="dialog-header"><div><span class="eyebrow">New capture</span><h2 id="dialog-title">Start a session</h2></div><button type="button" id="cancel-start" class="icon-button" aria-label="Close session setup">×</button></div>
     <p class="muted">All views will share this channel and its rolling history.</p>
     <div class="form-grid"><label>Band<select name="band" id="band"><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option></select></label><label>Primary channel<select name="channel" id="channel" data-channels='{{ channel_choices|tojson }}' required>{% for channel in channel_choices["2.4"] %}<option value="{{ channel }}">{{ channel }}</option>{% endfor %}</select></label><label class="wide">Capture width<select name="channel_width" id="channel-width"><option value="">Band default</option><option value="20">20 MHz</option><option value="40">40 MHz</option><option value="80">80 MHz</option><option value="160">160 MHz</option><option value="80+80">80 + 80 MHz</option><option value="320">320 MHz</option></select></label><div class="centers wide" id="centers" hidden><label>Center frequency 1 · MHz<input name="center_frequency1_mhz" type="number" min="2000" max="7200"></label><label id="center-two" hidden>Center frequency 2 · MHz<input name="center_frequency2_mhz" type="number" min="2000" max="7200"></label></div></div>
-    <label class="check"><input name="local_cu" type="checkbox"> Include local survey utilization when available</label><label class="check"><input name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
+    <label class="check"><input name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
     <details><summary>Capture source</summary><div class="form-grid"><label>Backend<select name="capture_backend"><option value="direct">Direct capture</option><option value="core">Core · optional</option></select></label><label>Interface<input name="iface" value="auto" required spellcheck="false"></label><label class="wide">Network namespace · optional<input name="netns" spellcheck="false" placeholder="Automatic discovery"></label></div></details>
-    <div id="form-error" class="notice error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="cancel-bottom" class="button secondary">Cancel</button><button type="submit" id="start-submit" class="button primary">Start capture</button></div>
+    <div id="form-error" class="notice error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="cancel-bottom" class="button secondary">Cancel</button><button type="submit" id="start-submit" class="button primary">Start session</button></div>
   </form></dialog>
 </body>
 </html>

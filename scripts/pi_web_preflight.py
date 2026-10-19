@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only evidence for the future protected Utilization launcher adapter.
+"""Read-only evidence for the protected Utilization launcher adapter.
 
 Reads source/configuration as text; never imports the installed WebUI, reads
 session stores/keys, changes services, or enables a listener. Hook detection

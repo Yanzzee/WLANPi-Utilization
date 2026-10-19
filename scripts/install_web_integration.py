@@ -26,6 +26,7 @@ NGINX_SHA256 = "8d4704f848e77777ef1220ecbb442beb9220f7cde3a71735968d2b6517f0382f
 APPLICATION_SHA256 = {
     "573e60fb1a4af250c118888e4d318c824c870a2cec3a14889f49b78e88e1b1bb",  # reviewed upstream
     "b90723ca640079f8e7354fd0757c4d85b0d4e591ccc51d99147cb247bf0af3f9",  # wlanpi-r5 preflight
+    "02f2915fc819ce479805dc0975d4490cf5a4d72cfdb237d68b65dcd6212f0330",  # Pi 4: upstream dc39a7e
 }
 # Relevant before_request functions at reviewed upstream 2b112f5. Other WebUI
 # supported application revision also has its original session gates intact.
