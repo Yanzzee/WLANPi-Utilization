@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="utilization-csrf" content="{{ csrf }}">
   <meta name="utilization-api" content="{{ prefix }}api/">
+  <meta name="utilization-hosted" content="{{ 'yes' if platform_hosted else 'no' }}">
   <title>Utilization</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='utilization.css') }}">
   <script src="{{ url_for('static', filename='utilization.js') }}" defer></script>
@@ -14,7 +15,7 @@
   <a class="skip-link" href="#main">Skip to metrics</a>
   <header class="masthead">
     <div class="brand"><svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 24h5V16H3zm8 0h5V10h-5zm8 0h5V4h-5zm8 0h3V13h-3z"/></svg><div><h1>Utilization</h1><p>Live wireless metrics</p></div></div>
-    <div class="connection"><span id="connection" class="status neutral">Connecting</span><span id="updated" class="muted">Waiting for the service</span></div>
+    <div class="connection">{% if platform_hosted %}<a class="muted" href="/apps">WLAN Pi Apps</a>{% endif %}<span id="connection" class="status neutral">Connecting</span><span id="updated" class="muted">Waiting for the service</span></div>
   </header>
   <main id="main" class="shell">
     <section class="session-bar" aria-label="Capture session">
@@ -23,6 +24,7 @@
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <div id="error" class="notice error" role="alert" hidden></div>
+    <p id="login-required" class="notice" hidden>Sign in to WLAN Pi to reconnect. Capture continues in the managed service. <a href="/login" target="_blank" rel="noopener">Open WLAN Pi sign-in</a></p>
     <p id="capture-health" class="method-note" aria-live="off">Capture quality unavailable</p>
     <nav class="navigation" aria-label="Views">
       <button class="nav-item selected" data-tab="overview" aria-current="page">Overview</button>

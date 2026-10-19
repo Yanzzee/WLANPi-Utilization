@@ -11,8 +11,10 @@ from beacon_live.models import MetricsSnapshot
 from beacon_live.runtime import LiveSessionConfig, RuntimePublication, SessionPhase
 from beacon_live.service_client import ServiceError
 from beacon_live.web import PublicationReader, create_app, open_closed_log
+from beacon_live.web import read_proxy_token
 
 SESSION = "a" * 32
+PROXY_TOKEN = "b" * 64
 
 
 class FakeService:
@@ -50,6 +52,64 @@ class FakeService:
         return self.records
 
 
+def test_protected_proxy_requires_private_token_for_every_route_and_checks_public_origin(tmp_path):
+    service = FakeService()
+    app = create_app(client=service, log_directory=tmp_path, proxy_token=PROXY_TOKEN)
+    client = app.test_client()
+    base = "https://wlanpi-r5.local"
+    for path in ("", "api/status", "api/files", "assets/utilization.js", "api/files/" + "c" * 32):
+        assert client.get("/utilization/" + path, base_url=base).status_code == 403
+    headers = {"X-Utilization-Proxy-Token": PROXY_TOKEN}
+    page = client.get("/utilization/", base_url=base, headers=headers)
+    assert page.status_code == 200
+    token = re.search(r'name="utilization-csrf" content="([^"]+)"', page.text)[1]
+    body = {"session_id": SESSION}
+    assert not service.controls
+    assert client.post("/utilization/api/session/stop", base_url=base, json=body, headers={
+        **headers, "Origin": base, "X-Utilization-CSRF": token}).status_code == 202
+    for origin in ("http://wlanpi-r5.local", "https://foreign.example", "https://wlanpi-r5.local.evil.example"):
+        assert client.post("/utilization/api/session/stop", base_url=base, json=body, headers={
+            **headers, "Origin": origin, "X-Forwarded-Proto": "https", "X-Forwarded-Host": "foreign.example",
+            "X-Utilization-CSRF": token}).status_code == 403
+    assert len(service.controls) == 1
+    assert client.post("/utilization/api/session/stop", base_url=base, json=body, headers={
+        **headers, "Origin": base}).status_code == 403
+    assert client.get("/utilization/", base_url=base, headers={
+        **headers, "Sec-Fetch-Site": "cross-site"}).status_code == 403
+
+
+def test_private_proxy_token_file_permissions_symlinks_and_cli_pairing(tmp_path):
+    from beacon_live.web import main
+    path = tmp_path / "proxy.token"
+    path.write_text(PROXY_TOKEN + "\n")
+    path.chmod(0o600)
+    assert read_proxy_token(path) == PROXY_TOKEN
+    path.chmod(0o640)
+    with pytest.raises(ValueError, match="owner-only"):
+        read_proxy_token(path)
+    path.chmod(0o600)
+    alias = tmp_path / "alias"
+    alias.symlink_to(path)
+    with pytest.raises(OSError):
+        read_proxy_token(alias)
+    for args in (["--unix-socket", str(tmp_path / "web.sock")], ["--proxy-token-file", str(path)]):
+        with pytest.raises(SystemExit):
+            main(args)
+
+
+def test_protected_cli_creates_only_a_private_unix_listener(tmp_path, monkeypatch):
+    import waitress
+    from beacon_live.web import main
+    path = tmp_path / "proxy.token"
+    path.write_text(PROXY_TOKEN)
+    path.chmod(0o600)
+    calls = []
+    monkeypatch.setattr(waitress, "serve", lambda app, **options: calls.append(options))
+    assert main(["--unix-socket", str(tmp_path / "web.sock"), "--proxy-token-file", str(path)]) == 0
+    assert len(calls) == 1 and "host" not in calls[0] and "port" not in calls[0]
+    assert calls[0]["unix_socket_perms"] == "660" and calls[0]["url_scheme"] == "https"
+
+
 @pytest.fixture
 def web(tmp_path):
     service = FakeService()
@@ -72,7 +132,9 @@ def test_page_tabs_assets_and_multiple_clients_are_read_only(web):
             assert "script-src 'self'" in page.headers["Content-Security-Policy"]
             assert page.headers["Cache-Control"] == "no-store"
         for asset in ("utilization.css", "utilization.js"):
-            assert other.get("/utilization/assets/" + asset).status_code == 200
+            response = other.get("/utilization/assets/" + asset)
+            assert response.status_code == 200
+            response.close()
         assert other.get("/utilization/api/status").status_code == 200
     assert service.reads == 1  # One cached publication, shared across HTTP clients.
     assert service.controls == []

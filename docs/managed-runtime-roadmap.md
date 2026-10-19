@@ -107,10 +107,10 @@ Nginx, Gunicorn, and Flask; sign-in uses Core PAM validation for local accounts
 in the sudo group. Initially keep Utilization's backend separate. Add a launcher
 entry and propose a same-origin `/utilization/` route to a loopback or Unix
 socket backend, protected using the installed platform's authentication.
-This is an integration design, not an existing authenticated proxy contract.
-Verify actual launcher/configuration hooks and session validation on the target
-image before choosing the adapter. A launcher link alone does not authenticate
-the backend. Protect controls, streams, and downloads consistently, including
+The optional milestone 4 adapter now uses the reviewed platform auth subrequest
+and a private Unix backend; installed-image acceptance is still required.
+A launcher link alone does not authenticate the backend. Protect controls,
+streams, and downloads consistently, including
 CSRF/origin checks and expiry/logout. Never trust browser-supplied identity
 headers or expose an unprotected privileged listener. Custom upstream Core
 endpoints are optional later work.
@@ -170,12 +170,16 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   and desktop layouts, null/zero/gap semantics, `<1%`, delayed publications,
   reconnect/navigation, multiple tabs, and local-browser operation.
   **Implementation and local automated coverage complete October 16;
-  visual browser and Pi acceptance remain pending.** See milestone 3 evidence
+  Pi 5 display and speedtest retest accepted October 19 with different test
+  conditions. Broader browser/device/performance coverage remains pending.** See milestone 3 evidence
   below and [web operation/checks](web-interface.md).
 - [ ] **4. Launcher and authentication.** Implement the verified platform
   launcher and protected route without merging the Utilization backend into
   Core. Test login/logout/expiry, controls/stream/download authorization,
   installation/reinstallation, URL prefixes, and service failure recovery on Pi.
+  **Implementation and local checks complete October 19; installed Pi
+  authentication/systemd/browser acceptance remains pending.** See milestone 4
+  evidence below and [protected deployment](web-deployment.md).
 - [ ] **5. Beacon pcapng export.** Implement the same-source export branch,
   rotation, retention, disk isolation, status, and downloads. Compare retained
   beacon bytes/timestamps/radiotap with source packets; decode every segment
@@ -451,17 +455,71 @@ and WebUI/Nginx versions. Actual protected proxy/service/launcher deployment
 remains milestone 4 after installed-image validation; no remote listener or
 authentication bypass is enabled by this hardening milestone.
 
-**Remaining acceptance:** repeat the Pi 5 download/upload case after upgrading
-both broker and web process, record quality counters/stream age and adapter/
-driver, and retain a short raw capture if spikes persist. Compare Pi 4/5 stage
-performance before changing buffering or sampling analysis. Validate the
-channel dropdown and quality display in real browsers. Complete the protected
-launcher adapter using the installed-platform evidence. Release metadata stays
-`2.1.0.dev0`.
+**October 19 Pi 5 evidence:** the user reports a good display and a speedtest
+without the previous anomalies, and accepts proceeding. Conditions differed;
+this does not prove exact replication or establish the cause of the original
+spikes. Adapter/driver identification and controlled Pi 4/5 stage performance
+remain open evidence. Retain a short raw capture if spikes recur. Complete
+channel/quality browser coverage alongside protected-hosting acceptance.
+Release metadata stays `2.1.0.dev0`.
 
 **Hardening validation:** Python 3.13.3 full regression passed **708 tests with
 one optional Core transport skip in 17.15 seconds**. Real TShark tests cover
 both live and offline decoders with driver-reported bad FCS and incorrect CRCs.
 JavaScript syntax/simulated-DOM checks passed for channel changes, quality/age
 reporting, six existing graphs and `<1%`. CLI replay/help, compilation and diff
-checks passed. Installed Pi retest and real-browser acceptance remain pending.
+checks passed. The later Pi retest is recorded above; broader real-browser
+acceptance remains pending.
+
+## Milestone 4 implementation and evidence — October 19, 2026
+
+Added a full-page **Utilization** Apps card, protected `/utilization/` Nginx
+route, optional `wlanpi-utilization-web.service` and reversible integration
+installer. The existing root-only capture broker and CLI/FPMS behavior remain
+unchanged. The web service listens only on a private root:`www-data` Unix
+socket and consumes the same publications; browser navigation and login
+lifetimes cannot stop capture or reset history. Direct remains the default,
+Core optional, with Grafana and touchscreen hardware deferred.
+
+The supplied Pi 5 preflight auth-module and Nginx hashes match reviewed
+upstream sources. The installer accepts that Pi application revision and the
+reviewed upstream revision, with AST checks on freshness/login functions.
+Unknown authentication/config revisions are refused for review. Managed-block
+edits preserve custom Apps cards, repeated installation reuses the private
+token, and syntax/startup/readiness/reload failures roll back files and web
+service state. It never restarts the broker or FPMS. General application
+updates through the existing FPMS installer still restart those services;
+[deployment instructions](web-deployment.md) distinguish the two steps.
+
+Every proxied route uses existing `/auth/check` session validation. The backend
+requires a private proxy token, and controls also check CSRF and the HTTPS
+origin. Browser-supplied forwarded/token headers cannot establish authority.
+Expired/revoked API access returns 401, disables controls and offers normal
+platform sign-in; successful login reconnects without starting a new capture.
+Polling does not refresh idle sessions. Actual interaction uses the existing
+`HEAD /apps` cookie-refresh behavior, throttled to once a minute, while the
+platform retains its revocation/idle/max-age policy.
+
+**Local evidence:** the full Python 3.13.3 regression suite passed **728 tests
+with one optional Core transport skip in 17.43 seconds**. The installer suite
+also passed **16 tests** with warnings treated as errors. The production
+Nginx fragment was tested using Nginx 1.28.3 over verified TLS, private Waitress
+Unix listeners and a real broker with synthetic capture owner. Checks cover
+unauthorized pages/status/controls/downloads, login expiry/revocation, forged
+headers, auth-service errors failing closed, closed CSV download and a stable
+capture ID/history across clients and renewed access. A controlled auth checker
+supplied auth outcomes; actual installed PAM/cookie policy is not claimed.
+JavaScript simulated-DOM checks passed for expiry messaging, disabled controls,
+retained values, same-session reconnect, POST CSRF/session IDs, activity
+throttling, no idle refresh from polling, and rejection before a control when
+activity renewal requires sign-in. These are logic checks, not rendered-browser
+acceptance.
+
+**Next bounded check:** install on Pi 5 using the documented commands, then
+verify normal HTTPS Apps access without forwarding, real login/logout/expiry,
+closed-download authorization, reinstallation and web-only restart with the
+same capture ID. Complete reboot/unit acceptance and broader browser coverage.
+After that gate, proceed to milestone 5's same-source beacon pcapng export;
+original packet bytes/timestamps/radiotap, mixed-frame analyzer input, disk
+isolation and WiFi-Beacon-analysis context remain required. No release tag or
+production Pi deployment was performed by this local implementation.

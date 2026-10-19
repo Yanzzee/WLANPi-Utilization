@@ -1,0 +1,26 @@
+[Unit]
+Description=Utilization authenticated web backend
+Wants=wlanpi-utilization.service
+After=wlanpi-utilization.service
+
+[Service]
+Type=simple
+User=root
+Group=www-data
+RuntimeDirectory=wlanpi-utilization-web
+RuntimeDirectoryMode=0750
+UMask=0007
+ExecStart=/opt/wlanpi-beacon-live/bin/wlanpi-utilization web --unix-socket /run/wlanpi-utilization-web/web.sock --proxy-token-file /etc/wlanpi-beacon-live/web-proxy.token
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=15
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

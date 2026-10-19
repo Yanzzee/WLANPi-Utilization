@@ -56,6 +56,16 @@ For browser QA without hardware, run
 its controls affect only the preview. It starts with a populated 120-second
 history, explicit gaps, missing QBSS fields, and a retry percentage below 1%.
 Stop it with Ctrl-C after QA. See [web acceptance](web-interface.md).
+Protected-hosting unit and installer checks run with
+`python -m pytest -q tests/test_web.py tests/test_web_install.py`.
+`tests/test_web_nginx.py` additionally exercises the production route using an
+actual Nginx binary with `http_auth_request` and TLS support, OpenSSL, private
+Unix listeners, and a synthetic owner/auth checker. Set
+`UTILIZATION_TEST_NGINX=/path/to/nginx` when it is outside PATH; the test skips
+if Nginx or OpenSSL is absent. Its temporary certificate is trusted explicitly
+by the test client. It needs permission to bind local Unix sockets, but no radio,
+systemd, PAM or system configuration changes. Installed platform acceptance is
+documented separately in [protected deployment](web-deployment.md).
 The hardware-free `scripts/benchmark_live_replay.py` checks busy-channel
 parser/analyzer throughput and exact metrics; see
 [benchmark scope and Pi retest](busy-channel-validation.md).

@@ -7,6 +7,10 @@ CSV/JSONL downloads. Direct capture remains the default; Core is optional.
 
 ## Install and open on a Pi
 
+For direct HTTPS access through WLAN Pi's existing login and Apps menu, use
+[protected deployment](web-deployment.md). The manual loopback/SSH procedure
+below remains available for local operation and development.
+
 Update the checkout, then install the service and optional web dependencies:
 
 ```bash
@@ -42,10 +46,10 @@ reloader, local assets, host/origin checks, a per-process CSRF token for control
 and no response caching. Restarting this web process invalidates tokens;
 reload open pages before sending another control.
 
-Platform launcher/login integration is milestone 4. This milestone uses local
-access or an authenticated SSH tunnel. It does not supply a WLAN Pi login
-adapter, a remote HTTP listener, or an automatically enabled web systemd unit.
-The later adapter must protect page, status, controls, and downloads together.
+The optional milestone 4 adapter adds a protected Apps entry, HTTPS route and
+separate web service through a private Unix socket. It protects page, status,
+controls and downloads with the platform login. That integration requires its
+own explicit installer; the manual command above retains loopback operation.
 
 ## Use the shared session
 
@@ -153,10 +157,12 @@ snapshot/completed statistics, read-only consumers, closed-file identity and
 download races, and optional-dependency installation. Actual responsive browser
 rendering and these Pi hardware/performance checks remain acceptance gates.
 
-## Next launcher and direct-hosting adapter
+## Launcher and direct hosting
 
-The user reports basic web operation on Pi 5. Direct access through the WLAN Pi
-Apps menu remains the next deployment milestone. Review of upstream WebUI
+The user reports good Pi 5 display operation and an October 19 speedtest without
+the earlier count spikes, with different conditions that prevent claiming exact
+replication. The next device check is direct access through the WLAN Pi Apps
+menu. Review of upstream WebUI
 revision `2b112f5a739e4647de4f5fd48948cd16e4d07d94` found an existing
 [internal Nginx auth subrequest](https://github.com/WLAN-Pi/wlanpi-webui/blob/2b112f5a739e4647de4f5fd48948cd16e4d07d94/install/etc/nginx/wlanpi_webui.conf),
 [session check/revocation hook](https://github.com/WLAN-Pi/wlanpi-webui/blob/2b112f5a739e4647de4f5fd48948cd16e4d07d94/wlanpi_webui/auth/auth.py),
@@ -176,11 +182,12 @@ paths, hashes, and candidate-hook checks; it reads no session stores or keys.
 authentication or enabled hosting. Use `--webui-root` and `--nginx-config` for
 nonstandard installed paths.
 
-The next adapter should add a full-page Utilization launcher link and a
-protected `/utilization/` proxy to the separate loopback backend, with explicit
-public-origin/trusted-proxy handling and an optional web service unit. Verify
-the installed login, logout/revocation, idle/max-age expiry, API/download
-authorization, cookie behavior, reinstallation and failure recovery before
-enabling the route. The current preflight changes no Nginx rules and does not
-expose a remote listener. Custom Core endpoints remain unnecessary for this
-initial integration.
+The implemented adapter adds a full-page Utilization launcher link and a
+protected `/utilization/` proxy to a separate private Unix-socket backend.
+It validates supported platform sources, preserves existing Apps cards, and
+provides repeat installation, backups and rollback. API expiry displays the
+normal sign-in link while capture continues. See
+[installation and installed-image acceptance](web-deployment.md) for commands,
+authentication boundaries and remaining Pi login/logout/expiry checks. The
+read-only preflight itself still changes no services or Nginx rules. Custom
+Core endpoints remain unnecessary for this integration.

@@ -453,6 +453,16 @@ snapshot/screen views; controls use the same broker as CLI and FPMS. Browser
 lifetimes do not own capture. Local assets support compact phone views and
 expanded desktop graphs/table without an additional analysis pipeline.
 
+Optional WLAN Pi hosting uses the existing Nginx `/auth/check` guard on every
+Utilization route and a separate web unit listening only on a private Unix
+socket. Nginx overwrites a private proxy-token header; the backend validates
+that token and checks CSRF/HTTPS origin for controls. Broker permissions remain
+root-only. Polling does not extend the platform idle cookie; actual interaction
+uses the existing Apps endpoint for that platform behavior. The integration
+installer validates supported sources, edits only managed route/card blocks,
+and rolls back failed deployment without restarting capture. See
+[protected deployment](web-deployment.md).
+
 The logging worker records closed-file descriptor identities after flushing
 and closing each CSV/JSONL segment. The broker retains a bounded session-owned
 catalog across capture sessions. The web process opens registered files under

@@ -98,14 +98,17 @@ def open_closed_log(record: dict, directory: Path):
 
 
 def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT_LOG_DIRECTORY,
-               url_prefix="/utilization/"):
+               url_prefix="/utilization/", proxy_token=None):
     from flask import Flask, abort, jsonify, render_template, request, send_file
     from werkzeug.exceptions import HTTPException
 
     if not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)+", url_prefix):
         raise ValueError("URL prefix must contain path segments and end in a slash")
     app = Flask(__name__, static_folder="web_static", static_url_path=url_prefix + "assets")
-    app.config.update(MAX_CONTENT_LENGTH=16 * 1024, TRUSTED_HOSTS=["localhost", "127.0.0.1"])
+    if proxy_token is not None and not re.fullmatch(r"[0-9a-f]{64}", proxy_token):
+        raise ValueError("Invalid private proxy token")
+    app.config.update(MAX_CONTENT_LENGTH=16 * 1024,
+                      TRUSTED_HOSTS=None if proxy_token else ["localhost", "127.0.0.1"])
     service = client if client is not None else ServiceClient(socket_path)
     reader = PublicationReader(service)
     directory = Path(log_directory).absolute()
@@ -114,12 +117,18 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
 
     @app.before_request
     def local_origin():
-        # The milestone-3 server binds loopback. Platform login/proxy integration
-        # is a separate adapter; browser identity headers are never trusted here.
+        # The protected deployment uses a private Unix socket and a token set
+        # only by the authenticated TLS location in Nginx. Neither browser
+        # identity headers nor forwarded scheme/host headers confer authority.
+        if proxy_token is not None:
+            supplied = request.headers.get("X-Utilization-Proxy-Token", "")
+            if not hmac.compare_digest(supplied.encode(), proxy_token.encode()):
+                abort(403, "Use the authenticated WLAN Pi Utilization route")
         if request.headers.get("Sec-Fetch-Site") == "cross-site":
             abort(403, "Cross-origin requests are not allowed")
         origin = request.headers.get("Origin")
-        if origin is not None and origin.rstrip("/") != request.host_url.rstrip("/"):
+        expected_origin = "https://" + request.host if proxy_token else request.host_url.rstrip("/")
+        if origin is not None and origin.rstrip("/") != expected_origin:
             abort(403, "Cross-origin requests are not allowed")
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             supplied = request.headers.get("X-Utilization-CSRF", "")
@@ -149,7 +158,7 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
     @app.get(url_prefix)
     def index():
         return render_template("utilization.html", prefix=url_prefix, csrf=csrf,
-                               channel_choices=PRIMARY_CHANNELS)
+                               channel_choices=PRIMARY_CHANNELS, platform_hosted=bool(proxy_token))
 
     @app.get(url_prefix + "api/status")
     def status():
@@ -271,6 +280,18 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
     return app
 
 
+def read_proxy_token(path: Path) -> str:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "r", encoding="ascii") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.geteuid():
+            raise ValueError("Proxy token must be an owner-only regular file owned by the web service user")
+        token = stream.read(128).strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", token):
+        raise ValueError("Invalid private proxy token file")
+    return token
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="wlanpi-utilization web", description="Serve the local Utilization web interface.")
     parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
@@ -278,18 +299,28 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--url-prefix", default="/utilization/")
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIRECTORY)
+    parser.add_argument("--unix-socket", type=Path, help="Private socket for authenticated WLAN Pi hosting.")
+    parser.add_argument("--proxy-token-file", type=Path, help="Owner-only shared token for the protected Nginx route.")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error("Port must be between 1 and 65535")
+    if bool(args.unix_socket) != bool(args.proxy_token_file):
+        parser.error("Private hosting requires both --unix-socket and --proxy-token-file")
+    if args.unix_socket and (args.host != "127.0.0.1" or args.port != 8765):
+        parser.error("Use either the private socket or loopback host/port options")
     try:
         from waitress import serve
-        app = create_app(socket_path=args.socket, log_directory=args.log_dir, url_prefix=args.url_prefix)
+        token = read_proxy_token(args.proxy_token_file) if args.proxy_token_file else None
+        app = create_app(socket_path=args.socket, log_directory=args.log_dir, url_prefix=args.url_prefix,
+                         proxy_token=token)
     except ImportError:
         parser.error("Install the web extra: pip install -e '.[web]' or use the Pi installer with --with-web")
-    except ValueError as error:
+    except (ValueError, OSError, UnicodeError) as error:
         parser.error(str(error))
-    print(f"Utilization: http://{args.host if ':' not in args.host else '[' + args.host + ']'}:{args.port}{args.url_prefix}", flush=True)
-    serve(app, host=args.host, port=args.port, threads=4, connection_limit=32,
+    listener = {"unix_socket": str(args.unix_socket), "unix_socket_perms": "660", "url_scheme": "https"} if args.unix_socket else {"host": args.host, "port": args.port}
+    print(f"Utilization: private WLAN Pi socket {args.unix_socket}" if args.unix_socket
+          else f"Utilization: http://{args.host}:{args.port}{args.url_prefix}", flush=True)
+    serve(app, **listener, threads=4, connection_limit=32,
           max_request_body_size=16 * 1024, channel_timeout=15, clear_untrusted_proxy_headers=True)
     return 0
 

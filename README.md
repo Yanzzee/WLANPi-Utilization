@@ -224,9 +224,19 @@ ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
 
 The responsive page provides metrics, shared history graphs, a BSSID table,
 session/logging controls, and closed CSV/JSONL downloads. Opening, refreshing,
-or closing it leaves capture running. The server currently listens on loopback;
-WLAN Pi launcher/login integration is the next milestone. See
-[web operation and Pi acceptance](docs/web-interface.md).
+or closing it leaves capture running. This manual server listens on loopback.
+For direct hosting through WLAN Pi's existing login and Apps menu, stop the
+manual web process and install the optional protected adapter:
+
+```bash
+sudo python3 scripts/install_web_integration.py --check
+sudo python3 scripts/install_web_integration.py
+```
+
+Open `https://<your-pi>/utilization/` or choose **Apps → Utilization**, without an
+SSH tunnel. See [protected deployment and Pi acceptance](docs/web-deployment.md)
+for supported platform checks, rollback and login/logout acceptance, and
+[web operation](docs/web-interface.md) for controls and metric behavior.
 
 ### Standalone commands
 

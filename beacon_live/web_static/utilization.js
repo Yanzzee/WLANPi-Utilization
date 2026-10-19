@@ -4,6 +4,7 @@
   const $ = id => document.getElementById(id);
   const api = document.querySelector('meta[name="utilization-api"]').content;
   const csrf = document.querySelector('meta[name="utilization-csrf"]').content;
+  const platformHosted = document.querySelector('meta[name="utilization-hosted"]').content === "yes";
   const ns = "http://www.w3.org/2000/svg";
   const activePhases = new Set(["starting", "running", "stopping"]);
   let publication = null, screens = new Map(), online = false, busy = false;
@@ -11,6 +12,8 @@
   let admissionMaximum = 31250;
   let loggingAvailable = false;
   let statusRequest = null;
+  let loginRequired = false;
+  let activityAt = 0, activityRequest = null;
   const number = value => value == null ? "—" : new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(value);
   const percent = (value, retry = false) => value == null ? "—" : retry && value > 0 && value < 1 ? "<1%" : `${number(value)}%`;
   const date = seconds => seconds == null ? "—" : new Date(seconds * 1000).toLocaleString();
@@ -20,13 +23,41 @@
   const message = (id, text) => {$(id).textContent = text || ""; $(id).hidden = !text;};
   const reporting = identity => identity?.bssid ? `${identity.ssid ?? "<Hidden SSID>"} · ${identity.bssid} · ${number(identity.rssi_dbm)} dBm` : "No reporting BSSID available";
 
+  function requireLogin() {
+    loginRequired = true; $("login-required").hidden = false; connection(false);
+    return new Error("Sign in to WLAN Pi to reconnect.");
+  }
+
+  async function recordActivity() {
+    if (!platformHosted || Date.now() - activityAt < 60000) return;
+    if (!activityRequest) activityRequest = (async () => {
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 6000);
+      try {
+        // The normal Apps endpoint updates the platform's sliding idle cookie.
+        // HEAD avoids transferring HTML. Status polls never keep a login alive.
+        const response = await fetch("/apps", {method: "HEAD", credentials: "same-origin", cache: "no-store", redirect: "manual", signal: controller.signal});
+        if (response.status === 401 || response.type === "opaqueredirect" || response.status === 302) throw requireLogin();
+        if (!response.ok) throw new Error("WLAN Pi session activity check failed.");
+        activityAt = Date.now();
+      } finally {clearTimeout(timer);}
+    })().finally(() => {activityRequest = null;});
+    return activityRequest;
+  }
+  if (platformHosted) for (const event of ["pointerdown", "keydown"]) {
+    document.addEventListener(event, () => {recordActivity().catch(() => {});}, {passive: true});
+  }
+
   async function request(path, body) {
+    if (body !== undefined) await recordActivity();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
     try {
       const options = {signal: controller.signal, cache: "no-store", credentials: "same-origin"};
       if (body !== undefined) Object.assign(options, {method: "POST", headers: {"Content-Type": "application/json", "X-Utilization-CSRF": csrf}, body: JSON.stringify(body)});
       const response = await fetch(api + path, options);
+      if (response.status === 401) {
+        throw requireLogin();
+      }
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || `Request failed (${response.status})`);
       return value;
@@ -263,6 +294,7 @@
     loggingAvailable = value.logging_available;
     admissionMaximum = value.units?.admission_capacity_max || admissionMaximum;
     connection(true);
+    loginRequired = false; $("login-required").hidden = true;
     const health = publication.capture_health;
     if (health) {
       const age = health.latest_timestamp == null ? null : Math.max(0, value.server_time - health.latest_timestamp);
@@ -275,7 +307,7 @@
   }
   async function poll() {
     try {await pollOnce();}
-    catch (error) {failures++; connection(false); message("error", `Service unavailable. ${publication ? "Showing the last received values; capture status is unknown. " : ""}${error.name === "AbortError" ? "The request timed out." : error.message} Retrying automatically.`);}
+    catch (error) {failures++; connection(false); message("error", `${loginRequired ? "Sign-in required." : "Service unavailable."} ${publication ? "Showing the last received values; capture status is unknown. " : ""}${error.name === "AbortError" ? "The request timed out." : error.message} Retrying automatically.`);}
     setTimeout(poll, Math.min(10000, 1000 * Math.max(1, failures)));
   }
   poll();

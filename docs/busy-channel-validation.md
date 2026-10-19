@@ -1,5 +1,12 @@
 # Busy-channel identity and missing-data validation
 
+**Pi 5 retest, October 19, 2026:** the user reports that the display looks good
+and a speedtest did not produce the earlier anomalies. Conditions differed,
+so this supports proceeding with the next milestone but does not establish
+exact replication or prove the original cause. Direct capture was used for
+the reported issue. Adapter/driver details and controlled Pi performance
+measurements remain open evidence.
+
 On October 16, the user reported that the web application works on Raspberry
 Pi 5 with **direct capture**, but download speedtests sometimes raise observed
 client MACs above 1,000 or produce hundreds of unexpected/hidden BSSIDs and
