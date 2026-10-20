@@ -496,6 +496,8 @@ before copying the application into `/opt/wlanpi-beacon-live`.
   metadata is 2.1.0.dev0.
 - [Web interface](docs/web-interface.md) — installation, shared-session controls,
   closed log downloads, and browser acceptance checks.
+- [Beacon pcapng export](docs/beacon-export.md) — offline helper, packet fidelity
+  checks, and the boundary before live export/rotation integration.
 - [Busy-channel validation](docs/busy-channel-validation.md) — corrupt-frame
   identity guards, capture-quality evidence, and Pi performance/retest steps.
 - [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones

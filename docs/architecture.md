@@ -479,6 +479,16 @@ catalog across capture sessions. The web process opens registered files under
 its log root, verifies their identity, and streams downloads independently of
 capture. Active files are excluded. See [web operation](web-interface.md).
 
+`pcapng.py` provides the milestone 5a export foundation: a bounded reader and
+beacon packet-block selector/writer, currently used by the offline
+`scripts/export_beacons.py` helper. It preserves source packet/timestamp/interface
+bytes independently of decoded metrics. It is not installed on the live
+decoder path and performs blocking I/O. Future live integration must fan one
+full-packet source to the existing all-frame decoder and a bounded isolated
+export worker; an export failure must not block analysis. Rotation, retention,
+worker controls/status and web downloads remain the next step. See
+[beacon export](beacon-export.md).
+
 - **FPMS display:** live capture plus LCD artifacts and screen navigation.
 - **FPMS display and log:** the same runtime with logging active.
 - **FPMS logging-only:** the same capture/analyzer with rendering disabled.
@@ -506,6 +516,7 @@ sessions so the device never starts two capture pipelines for one app session.
 | Shared renderer attachment and controls | `beacon_live/service_client.py` |
 | Web API and responsive renderer | `beacon_live/web.py`, `beacon_live/templates/`, `beacon_live/web_static/` |
 | Logging | `beacon_live/log_writer.py` |
+| Beacon pcapng export foundation (offline) | `beacon_live/pcapng.py`, `scripts/export_beacons.py` |
 | CLI/device entrypoints | `beacon_live/cli.py`, `beacon_live/device.py` |
 | FPMS integration | `integration/wlanpi_fpms/channel_utilization.py` |
 

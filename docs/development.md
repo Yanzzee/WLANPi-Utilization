@@ -81,6 +81,14 @@ if Nginx or OpenSSL is absent. Its temporary certificate is trusted explicitly
 by the test client. It needs permission to bind local Unix sockets, but no radio,
 systemd, PAM or system configuration changes. Installed platform acceptance is
 documented separately in [protected deployment](web-deployment.md).
+The beacon-export foundation uses only standard-library stream/file I/O.
+Run `python -m pytest -q tests/test_pcapng.py tests/test_pcapng_export.py`.
+Pure block/filter/file-publication tests need no capture tools; independent
+TShark fidelity/analyzer checks skip when unavailable. `WLANPI_TEST_TSHARK`
+selects a non-default binary. The native FPMS stop regression in
+`tests/test_service.py` additionally needs a temporary local Unix socket and
+uses a synthetic owner, not hardware. See [export scope](beacon-export.md).
+
 The hardware-free `scripts/benchmark_live_replay.py` checks busy-channel
 parser/analyzer throughput and exact metrics; see
 [benchmark scope and Pi retest](busy-channel-validation.md).

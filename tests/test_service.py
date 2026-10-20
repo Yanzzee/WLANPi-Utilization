@@ -292,6 +292,44 @@ def test_atomic_start_or_attach_uses_one_owner_and_keeps_existing_source_and_log
     client.stop(original.session_id)
 
 
+def test_native_fpms_menu_stop_ends_shared_owner_and_logging_but_keeps_broker_and_history(service, tmp_path, monkeypatch):
+    import ast
+    import types
+    from integration.wlanpi_fpms import channel_utilization as fpms
+    client, broker = service
+    client.ensure(config(tmp_path, initial_logging_enabled=True))
+    original = until(client, lambda pub: pub.logging.active and bool(pub.completed_stats))
+    settings = tmp_path / "fpms.json"
+    settings.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.delenv("WLANPI_UTILIZATION_RUNTIME_MODE", raising=False)
+    monkeypatch.setattr(fpms, "BACKEND_CONFIG", settings)
+    real_run = subprocess.run
+    def installed_cli(command, **options):
+        assert command[0] == fpms.EXECUTABLE
+        return real_run([sys.executable, "-m", "beacon_live.device", *command[1:],
+                         "--socket", str(client.socket_path)], **options)
+    monkeypatch.setattr(fpms.subprocess, "run", installed_cli)
+    messages = []
+    monkeypatch.setattr(fpms, "_display_status", lambda state, text: messages.append(text))
+    monkeypatch.setattr(fpms, "_display_error", lambda state, text: pytest.fail(text))
+    menu = fpms.build_channel_utilization_menu({})
+    stop = menu["action"][1]["action"][0]["action"][-1]["action"]
+    # Execute the actual FunctionType gate from the pinned native dispatcher.
+    fixture = Path(__file__).parent / "fixtures/fpms_1_4_24/fpms.py"
+    tree = ast.parse(fixture.read_text())
+    gates = [node for node in ast.walk(tree) if isinstance(node, ast.If)
+             and any(isinstance(child, ast.Attribute) and child.attr == "FunctionType" for child in ast.walk(node.test))]
+    gate = max(gates, key=lambda node: node.lineno)
+    exec(compile(ast.Module(body=[gate], type_ignores=[]), str(fixture), "exec"),
+         {"types": types, "g_vars": {"option_selected": stop}})
+    stopped = until(client, lambda pub: pub.phase is SessionPhase.STOPPED)
+    assert messages == ["Session stopping"]
+    assert stopped.session_id == original.session_id and stopped.snapshot == original.snapshot
+    assert not stopped.logging.active and stopped.closed_logs
+    assert (tmp_path / "stats.restored").exists()
+    assert broker.poll() is None
+
+
 def test_large_partial_write_retains_only_one_pending_latest_publication():
     sender, receiver = socket.socketpair()
     try:

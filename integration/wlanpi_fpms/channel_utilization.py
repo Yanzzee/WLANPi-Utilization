@@ -178,7 +178,7 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
         ],
     }
     if configured_runtime_mode() == "managed":
-        menu["action"].insert(0, {"name": "Open Running Session", "action": app.resume})
+        menu["action"].insert(0, {"name": "Open Running Session", "action": _resume_action(app)})
     return menu
 
 
@@ -218,7 +218,7 @@ def _band_menu(
             }
         )
         if configured_runtime_mode() == "managed":
-            actions[-1]["action"].append({"name": "Stop Session", "action": app.stop_capture})
+            actions[-1]["action"].append({"name": "Stop Session", "action": _stop_session_action(app)})
     return {"name": name, "action": actions}
 
 
@@ -252,6 +252,20 @@ def _stop_logging_action(
         app.stop_logging()
 
     return stop_logging
+
+
+def _resume_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
+    def resume() -> None:
+        app.resume()
+
+    return resume
+
+
+def _stop_session_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
+    def stop_session() -> None:
+        app.stop_capture()
+
+    return stop_session
 
 
 def _frequency_mhz(band: str, channel: int) -> int:

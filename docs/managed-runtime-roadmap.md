@@ -177,8 +177,10 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   launcher and protected route without merging the Utilization backend into
   Core. Test login/logout/expiry, controls/stream/download authorization,
   installation/reinstallation, URL prefixes, and service failure recovery on Pi.
-  **Implementation and local checks complete October 19; installed Pi
-  authentication/systemd/browser acceptance remains pending.** See milestone 4
+  **Implementation and local checks complete October 19; Pi 4 Apps,
+  login/logout/expiry, session attachment and web startup after reboot/relogin
+  confirmed October 20. Remaining failure/release checks and the repaired FPMS
+  Stop Session device retest remain open.** See milestone 4
   evidence below and [protected deployment](web-deployment.md).
 - [ ] **5. Beacon pcapng export.** Implement the same-source export branch,
   rotation, retention, disk isolation, status, and downloads. Compare retained
@@ -186,6 +188,11 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   with TShark. Prove analyzer results match with export on/off for a mixed
   beacon/data/retry fixture. Test slow/full disks, queue overflow, malformed
   input, repeated rotation, and export stop/restart without history resets.
+  **5a complete October 20:** bounded hardware-free reader/filter/writer and
+  offline helper, with original packet-block fidelity, TShark decoding and
+  unchanged mixed-frame analyzer results. Live source fan-out, worker/disk
+  isolation, rotation/retention, status and downloads remain 5b. See
+  [export foundation](beacon-export.md).
 - [ ] **6. Offline analysis and release acceptance.** Run the end-to-end
   workflow below with exported segments, record evidence, complete device and
   performance checks, reconcile versions, and prepare v2.1.0 release notes.
@@ -586,3 +593,66 @@ on both Pis. Finish installed login/logout/expiry/reboot and controlled busy-
 channel checks before marking milestone 4 accepted. Beacon pcapng export and
 WiFi-Beacon-analysis end-to-end context remain milestones 5–6; release metadata
 stays `2.1.0.dev0`.
+
+## Pi acceptance, FPMS callback repair and milestone 5a — October 20, 2026
+
+The user confirms Pi 4 Apps access, login/logout/expiry and existing-session
+attachment, plus web-page startup after reboot/relogin. Reboot acceptance means
+the web/login route is available while capture starts idle. An in-memory capture
+session is not resumed automatically. The page result is confirmed; a specific
+post-reboot `idle` status was not supplied. Broader failure/download-authorization,
+radio restoration and controlled busy-channel release checks remain open.
+
+The user also reports the FPMS Stop Capture/Session item not stopping capture.
+Inspection found that the native FPMS dispatcher executes only plain
+`FunctionType` callbacks, while Stop Session and Open Running Session used bound
+methods. Both actions now use plain wrappers consistent with Display/Logging.
+Tests verify every managed menu leaf is dispatchable, stop passes the current
+session ID and reports errors, and the actual pinned dispatcher gate reaches
+the real synthetic broker. Stop ends the owner and logging with a cleanup
+marker, preserves final history/session ID, and leaves the broker running.
+Physical Pi retesting is still required after adapter reinstallation. The
+expected stopped display retains final data with phase `stopped`, not a cleared
+session; leaving a renderer remains detach-only.
+
+**Milestone 5a complete locally:** `beacon_live/pcapng.py` adds a bounded block
+reader, beacon selector and stream writer. It preserves complete selected
+packet blocks verbatim, including payload/radiotap/FCS, timestamps and packet
+options. All interface descriptions retain their original numbering and
+timestamp resolution/offset metadata. Both section byte orders, multiple
+sections/interfaces, Enhanced and obsolete Packet Blocks are covered. Changed
+section lengths become unspecified; source statistics/secrets/unknown metadata
+are omitted. Untimestamped, unsupported-link, truncated and malformed packets
+have explicit skip counters; malformed containers/options, unsupported versions
+and non-copyable custom options fail export. Default limits are 4 MiB per block
+and 256 interface contexts per section.
+
+`scripts/export_beacons.py` makes the foundation reviewable against existing
+closed full-packet pcapng files. It never captures, retunes or controls a session.
+It refuses existing destinations, writes a private temporary file, closes it
+and atomically publishes without replacement, cleaning up owned partial files
+on errors. Live capture/analysis, direct default, optional Core behavior,
+CLI/FPMS metrics and shared history are unchanged by this export step.
+
+**Evidence:** Python 3.13.3 full regression passes **813 tests with one optional
+Core transport skip in 20.92 seconds**. New pcapng tests exercise exact bytes,
+decimal/binary clocks, signed offsets, multi-interface/section contexts, opaque
+extended radiotap/FCS, short reads/writes, malformed input, size/interface bounds,
+write failure and publication races. Real TShark checks match source beacon
+timestamps/interface IDs/radiotap/RSSI/SSID, including nanosecond timestamps.
+A synthetic fan-out delivers all 27 original mixed frames to the existing
+decoder/analyzer while selecting three beacon packets for export. Export on/off
+snapshots match, including four eligible frames, three retries, one observed
+client and 12 advertised stations in a completed second. This is a hardware-free
+fan-out contract, not deployed live export or Pi throughput evidence.
+
+**Next bounded implementation (5b):** connect a single full-packet source to
+the existing decoder and a bounded export worker, keeping all required frames
+on the analysis branch. Add independently readable rotation segments, owned-file
+retention/free-space limits, disk/queue-failure isolation, publications/controls
+and registered downloads. Confirm export on/off and slow/full-disk behavior
+leave capture/history intact, then repeat physical direct/Core lifecycle checks.
+The current offline helper is not a web download or live export toggle.
+WiFi-Beacon-analysis validation with AP/classroom/schedule/timezone context is
+still milestone 6. Grafana/touchscreen integration remain deferred and release
+metadata remains `2.1.0.dev0`.

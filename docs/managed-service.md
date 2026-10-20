@@ -71,6 +71,29 @@ another owner. The final publication can precede process reaping by a short
 interval; a new start remains blocked until cleanup and reaping finish. Final
 history stays readable until a new explicit start. Stale control IDs fail.
 
+**Stop Session** in any channel menu targets the current shared owner, not
+that menu's channel. It closes logging and requests normal radio cleanup. The
+broker and web services keep running; the session ID and final graphs remain
+visible with phase `stopped` and logging inactive. Leaving a managed display
+with Left only detaches it and is a different operation.
+
+An October 20 fix wraps Stop Session and Open Running Session in plain function
+callbacks. The pinned FPMS dispatcher tests `types.FunctionType` and silently
+ignores bound methods; those two menu entries previously registered bound
+methods. Regression tests now execute the native dispatcher gate and confirm
+real broker owner-stop, log closure, retained history and a cleanup marker.
+The marker is synthetic; physical Pi radio restoration still needs device
+verification. Older installations may show the previous **Stop Capture** label.
+Update the checkout and reinstall the adapter to receive the fix:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web
+```
+
+This application installer restarts the broker and FPMS, ending an active
+capture through normal shutdown. The web launcher/proxy does not need to be
+removed or reinstalled for this callback fix.
+
 Foreground capture stops on exit; managed attachment only detaches. Select
 `--fpms-runtime standalone` to
 restore that FPMS behavior. Reinstallation without a runtime flag preserves

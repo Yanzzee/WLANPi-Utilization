@@ -34,6 +34,53 @@ def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
     assert menu["action"][1]["action"][0]["action"][-1]["name"] == "Stop Session"
 
 
+def test_all_managed_menu_leaves_are_functions_accepted_by_native_fpms():
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    menu = channel_utilization.build_channel_utilization_menu({})
+    def check(items):
+        for item in items:
+            action = item["action"]
+            if isinstance(action, list):
+                check(action)
+            else:
+                assert isinstance(action, FunctionType), item["name"]
+    check(menu["action"])
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_native_fpms_stop_menu_action_sends_current_session_id_and_reports_failure(monkeypatch, failure):
+    import subprocess
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    calls, messages, errors = [], [], []
+    identifier = "a" * 32
+    def run(command, **kwargs):
+        calls.append(command)
+        if command[1:3] == ["session", "status"]:
+            return subprocess.CompletedProcess(command, 0, json.dumps({"phase": "running", "session_id": identifier}), "")
+        return subprocess.CompletedProcess(command, 1 if failure else 0, "", "fixture stop failed" if failure else "")
+    monkeypatch.setattr(channel_utilization.subprocess, "run", run)
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, text: messages.append(text))
+    monkeypatch.setattr(channel_utilization, "_display_error", lambda state, text: errors.append(text))
+    menu = channel_utilization.build_channel_utilization_menu({})
+    action = menu["action"][1]["action"][0]["action"][-1]["action"]
+    # Match FPMS's native dispatcher, not a direct method call that bypasses it.
+    if isinstance(action, FunctionType):
+        action()
+    assert calls[-1][1:] == ["session", "stop", "--session-id", identifier, "--summary"]
+    assert bool(errors) is failure
+    assert messages == ([] if failure else ["Session stopping"])
+
+
+def test_native_fpms_resume_menu_action_opens_existing_session(monkeypatch):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    calls = []
+    monkeypatch.setattr(channel_utilization.ChannelUtilizationApp, "resume", lambda self: calls.append("resume"))
+    action = channel_utilization.build_channel_utilization_menu({})["action"][0]["action"]
+    if isinstance(action, FunctionType):
+        action()
+    assert calls == ["resume"]
+
+
 def test_managed_fpms_exit_detaches_without_disabling_shared_logging(monkeypatch, tmp_path):
     channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
     monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")

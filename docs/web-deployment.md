@@ -6,8 +6,10 @@ existing login, session revocation, idle expiry and maximum session age.
 Utilization remains a separate backend and managed capture consumer; no custom
 Core endpoint or additional analyzer is introduced.
 
-Implementation and local regression checks are complete. Installed Pi login,
-systemd, reboot and browser acceptance below remain required before release.
+Implementation and local regression checks are complete. On October 20 the
+user confirmed Pi 4 Apps access, login/logout/expiry, existing-session attachment,
+and web-page availability after reboot/relogin. Remaining release/device checks
+below include failure recovery, download authorization and capture-idle startup.
 
 ## Install on the Pi
 
@@ -176,7 +178,9 @@ browser, direct/Core backend and session ID alongside a diagnostic bundle.
    backend/auth service fails closed, then recovers without capture restart.
 6. Check enabled web service and Apps access after reboot; radio restoration
    and broker session persistence follow the existing managed-service policy
-   (an in-memory capture session does not survive reboot). Test removal and
+   (an in-memory capture session does not survive reboot). The expected result
+   is an available login/Apps/Utilization page and an idle capture service;
+   no radio capture resumes until an explicit start. Test removal and
    reinstallation, preserving other Apps cards and capture when applicable.
 
 Local tests exercise the production Nginx fragment over verified TLS, real
