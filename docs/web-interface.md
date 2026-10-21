@@ -67,6 +67,8 @@ The page embeds the current publication at load and immediately displays an
 existing session's ID, phase and retained history before the first poll returns.
 Band/channel/width apply only to a new session. Advanced source fields offer
 the existing automatic interface/namespace discovery and optional Core backend.
+The session header shows the owner's resolved interface/namespace once discovery
+publishes it, while the requested configuration retains `iface=auto` if selected.
 There is no SSID/BSSID selector.
 
 The single session button shows **Start session** while idle and **Stop session**
@@ -85,6 +87,50 @@ support still determine whether capture can start.
 channel remains the integer. Session tuning shows the primary frequency,
 width in MHz and center frequency/frequencies supplied by the owner. Requested
 or unverified tuning is labeled accordingly.
+
+The capture-width menu labels the existing runtime policy: **Band default
+(20 MHz)** on 2.4 GHz, **Band default (80 MHz)** on normal 5/6 GHz primaries.
+An edge primary without a standard 80 MHz block shows the actual **20 MHz**
+fallback instead. This corrects the label without changing capture defaults.
+2.4 GHz offers 20/40 MHz, 5 GHz offers 20/40/80/160/80+80, and 6 GHz also
+offers 320 MHz. Widths with no valid block containing the chosen primary are
+omitted, including bonded widths for channel 14 or the upper 6 GHz edge.
+
+Explicit bonded widths use center-frequency dropdowns labelled, for example,
+**5210 MHz (Ch 42)**. Choices depend on band, width and primary; no free-text
+center is accepted. The first 80+80 segment contains the primary, and the second
+must be a different, nonadjacent 80 MHz block. Overlapping standard 320 MHz
+placements are both offered when applicable. The web start endpoint validates
+the same fixed plan, including hand-edited requests. The standard channel plan
+does not override adapter capabilities or regional restrictions checked at start.
+
+Fixed center channels used by the form:
+
+| Band | Width | Center channels |
+| --- | --- | --- |
+| 2.4 GHz | 40 | 3–11, step 1 |
+| 5 GHz | 40 | 38, 46, 54, 62, 102, 110, 118, 126, 134, 142, 151, 159, 167, 175 |
+| 5 GHz | 80 / each 80+80 segment | 42, 58, 106, 122, 138, 155, 171 |
+| 5 GHz | 160 | 50, 114, 163 |
+| 6 GHz | 40 | 3–227, step 8 |
+| 6 GHz | 80 / each 80+80 segment | 7–215, step 16 |
+| 6 GHz | 160 | 15–207, step 32 |
+| 6 GHz | 320 | 31, 63, 95, 127, 159, 191 |
+
+The plan is checked against [IWD 3.4 operating-class tables](https://kernel.googlesource.com/pub/scm/network/wireless/iwd/+/refs/tags/3.4/src/band.c)
+and [Linux v6.12 channel-definition rules](https://github.com/torvalds/linux/blob/v6.12/net/wireless/chan.c).
+The normal 20 MHz primary grid and existing runtime defaults remain unchanged.
+
+Capture source now has an interface dropdown with **Automatic discovery** plus
+all wireless interfaces reported by `iw dev` in root and named network namespaces,
+including each mode and namespace. It loads when setup opens; **Refresh
+interfaces** repeats the read (inventory is cached for five seconds). Discovery
+uses only `iw dev` and `ip netns list`/read-only namespace execution, with a
+five-second overall budget and partial-error reporting. It never captures,
+retunes or changes an interface mode. Selecting a concrete interface also fills
+its namespace; automatic mode retains an optional namespace restriction. A
+selected interface that disappears stays marked Unavailable and blocks submission
+until another valid choice is made, rather than silently switching radios.
 
 Overview places channel composition above **On this channel**. The strongest
 estimated radio lists AP name/vendor, its currently displayed SSID/BSSID/RSSI,

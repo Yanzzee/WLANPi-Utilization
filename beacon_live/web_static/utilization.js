@@ -14,6 +14,8 @@
   let admissionMaximum = 31250;
   let loggingAvailable = false;
   let statusRequest = null;
+  let interfacesRequest = null;
+  const interfacesById = new Map();
   let loginRequired = false;
   let activityAt = 0, activityRequest = null;
   const number = value => value == null ? "—" : new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(value);
@@ -89,6 +91,7 @@
     $("logging-toggle").textContent = publication?.logging.active ? "Stop logging" : "Start logging";
     $("start-submit").disabled = !online || busy || active;
     $("refresh-files").disabled = !online || busy;
+    $("refresh-interfaces").disabled = !online || busy || Boolean(interfacesRequest);
   }
 
   function connection(connected) {
@@ -250,8 +253,11 @@
     const primary = actual?.primary_frequency_mhz || cfg?.frequency_mhz;
     const centers = actual ? [actual.center_frequency1_mhz, actual.center_frequency2_mhz] : [cfg?.center_frequency1_mhz, cfg?.center_frequency2_mhz];
     const centerLabel = centers.filter(value => value != null).join(" / ");
+    const target = publication.capture_target;
+    const iface = target?.interface || (cfg?.iface === "auto" ? "Automatic interface" : cfg?.iface);
+    const netns = target ? target.namespace : cfg?.netns;
     $("tuning").textContent = cfg ? `${cfg.band ? `${cfg.band} GHz · ` : ""}Channel ${actual?.primary_channel || cfg.channel}${primary ? ` · ${primary} MHz primary` : ""} · ${widthLabel}` : "No session";
-    $("session-detail").textContent = cfg ? `${cfg.capture_backend === "core" ? "Core" : "Direct"} capture · ${cfg.iface === "auto" ? "Automatic interface" : cfg.iface}${cfg.netns ? ` · Namespace ${cfg.netns}` : ""} · ${centerLabel ? `Center ${centerLabel} MHz${actual ? publication.capture_definition_verified ? "" : " (unverified)" : " requested"}` : "Center frequency pending"}${activePhases.has(phase) ? `${publication.session_id === attachedSession ? " · Session already running" : ""} · Capture continues when views close` : " · Retained final history"}` : "Start a session to collect live channel metrics.";
+    $("session-detail").textContent = cfg ? `${cfg.capture_backend === "core" ? "Core" : "Direct"} capture · ${iface}${netns ? ` · Namespace ${netns}` : ""} · ${centerLabel ? `Center ${centerLabel} MHz${actual ? publication.capture_definition_verified ? "" : " (unverified)" : " requested"}` : "Center frequency pending"}${activePhases.has(phase) ? `${publication.session_id === attachedSession ? " · Session already running" : ""} · Capture continues when views close` : " · Retained final history"}` : "Start a session to collect live channel metrics.";
     $("session-id").textContent = publication.session_id ? `Session ${publication.session_id}` : "No capture session";
     $("logging-state").textContent = publication.logging.active ? "● Logging active" : "Logging off";
     $("logging-state").classList.toggle("active", publication.logging.active);
@@ -297,7 +303,7 @@
   $("session-toggle").addEventListener("click", () => {
     if (!online || busy || publication?.phase === "stopping") return;
     if (publication && activeSession(publication)) control("session/stop", {session_id: publication.session_id});
-    else {message("form-error", null); $("start-dialog").showModal();}
+    else {message("form-error", null); $("start-dialog").showModal(); loadInterfaces();}
   });
   $("logging-toggle").addEventListener("click", async () => {
     if (!online || busy || !publication || !activeSession(publication) || !loggingAvailable || publication.phase === "stopping") return;
@@ -306,23 +312,80 @@
   });
   ["cancel-start", "cancel-bottom"].forEach(id => $(id).addEventListener("click", () => $("start-dialog").close()));
   const channelChoices = JSON.parse($("channel").dataset.channels);
+  const captureOptions = JSON.parse($("capture-options").textContent);
+  function optionsFor(select, entries, fallback) {
+    const previous = select.value;
+    select.replaceChildren(...entries.map(([value, label]) => {const option = node("option", "", label); option.value = String(value); return option;}));
+    select.value = entries.some(([value]) => String(value) === previous) ? previous : String(fallback ?? entries[0]?.[0] ?? "");
+  }
+  function primaryCenters(width) {
+    const plan = captureOptions[$("band").value], primary = plan.defaults[$("channel").value]?.frequency;
+    const size = width === "80+80" ? 80 : Number(width);
+    return (plan.centers[width === "80+80" ? "80" : width] || []).filter(center => {
+      const offset = primary - (center.frequency - size / 2 + 10);
+      return offset >= 0 && offset < size && offset % 20 === 0;
+    });
+  }
+  function syncCenters() {
+    const width = $("channel-width").value, wide = width && width !== "20";
+    $("centers").hidden = !wide; $("center-two").hidden = width !== "80+80";
+    $("center-one").required = Boolean(wide); $("center-two-choice").required = width === "80+80";
+    const entries = centers => centers.map(c => [c.frequency, `${c.frequency} MHz (Ch ${c.channel})`]);
+    optionsFor($("center-one"), wide ? entries(primaryCenters(width)) : []);
+    const second = width === "80+80" ? captureOptions[$("band").value].centers["80"].filter(c => Math.abs(c.frequency - Number($("center-one").value)) > 80) : [];
+    optionsFor($("center-two-choice"), entries(second));
+  }
+  function syncWidths() {
+    const plan = captureOptions[$("band").value], defaultWidth = plan.defaults[$("channel").value]?.width || "20";
+    optionsFor($("channel-width"), [["", `Band default (${defaultWidth} MHz)`], ...plan.widths.filter(width => width === "20" || primaryCenters(width).length).map(width => [width, `${width === "80+80" ? "80 + 80" : width} MHz`])], "");
+    syncCenters();
+  }
   $("band").addEventListener("change", () => {
     $("channel").replaceChildren(...channelChoices[$("band").value].map(channel => {
       const psc = $("band").value === "6" && channel >= 5 && (channel - 5) % 16 === 0;
       const option = node("option", "", `${channel}${psc ? " (PSC)" : ""}`); option.value = String(channel); return option;
     }));
     $("channel").value = {"2.4": "1", "5": "36", "6": "5"}[$("band").value];
+    syncWidths();
   });
-  $("channel-width").addEventListener("change", () => {
-    const width = $("channel-width").value; $("centers").hidden = !width || width === "20"; $("center-two").hidden = width !== "80+80";
-    document.querySelector('[name="center_frequency1_mhz"]').required = !$("centers").hidden;
-    document.querySelector('[name="center_frequency2_mhz"]').required = width === "80+80";
+  $("channel").addEventListener("change", syncWidths);
+  $("channel-width").addEventListener("change", syncCenters);
+  $("center-one").addEventListener("change", () => {
+    syncCenters();
   });
+  syncWidths();
+  function syncInterface() {
+    const target = interfacesById.get($("iface").value);
+    $("netns").readOnly = Boolean(target);
+    if (target) $("netns").value = target.namespace || "";
+  }
+  async function loadInterfaces() {
+    if (interfacesRequest) return interfacesRequest;
+    interfacesRequest = (async () => {
+      try {
+        const inventory = await request("interfaces");
+        interfacesById.clear(); inventory.interfaces.forEach(item => interfacesById.set(item.id, item));
+        const previous = $("iface").value;
+        const entries = [["auto", "Automatic discovery"], ...inventory.interfaces.map(item => [item.id, `${item.id} · ${item.mode}`])];
+        if (previous && previous !== "auto" && !interfacesById.has(previous)) entries.push([previous, `${previous} · Unavailable`]);
+        optionsFor($("iface"), entries, "auto");
+        syncInterface();
+        $("interface-note").textContent = inventory.errors.length ? inventory.errors.join(" · ") : inventory.interfaces.length ? "Interfaces include root and named network namespaces." : "No wireless interfaces found. Connect an adapter and refresh.";
+      } catch (error) {$("interface-note").textContent = error.message;}
+    })().finally(() => {interfacesRequest = null; setControls();});
+    setControls();
+    return interfacesRequest;
+  }
+  $("iface").addEventListener("change", syncInterface);
+  $("refresh-interfaces").addEventListener("click", loadInterfaces);
   $("start-form").addEventListener("submit", async event => {
     event.preventDefault();
     if (!online || busy || (publication && activeSession(publication))) return;
     const data = new FormData(event.currentTarget), width = data.get("channel_width");
     const body = {band: data.get("band"), channel: data.get("channel"), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled")};
+    const target = interfacesById.get(body.iface);
+    if (body.iface !== "auto" && !target) {message("form-error", "Refresh interfaces and select an available interface."); return;}
+    if (target) {body.iface = target.interface; body.netns = target.namespace;}
     if (width && width !== "20") body.center_frequency1_mhz = Number(data.get("center_frequency1_mhz"));
     if (width === "80+80") body.center_frequency2_mhz = Number(data.get("center_frequency2_mhz"));
     busy = true; setControls(); message("form-error", null);

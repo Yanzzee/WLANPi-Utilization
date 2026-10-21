@@ -53,10 +53,13 @@ Session**, **Stop Session**, and only the applicable **Start Logging** or
 **Stop Logging** action; no separate running-status item is shown. Left from the
 managed display refreshes this menu and returns directly to these controls,
 even when capture started from a channel submenu. Connect Session cannot create
-a replacement session. An existing-session notice shows
+a replacement session. A brief band/channel popup shows
 once per display connection, never on periodic FPMS refresh. Starting the
 display from idle FPMS, or joining its active logging-only proxy, does not show
 that notice. Even a stale channel menu adopts the current active source.
+Idle managed channel submenus offer Start Session, Start + Log and Start Logging;
+Stop Logging belongs only to an active session with logging enabled. The explicit
+legacy standalone mode retains its background-logging stop control.
 Start Session and Start + Log are the idle channel actions. Start Logging and
 Start + Log report **Logging already being saved** when logging is active;
 they preserve the current files. Enabling logging on an existing session uses

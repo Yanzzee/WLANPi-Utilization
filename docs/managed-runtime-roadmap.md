@@ -882,3 +882,59 @@ menu open, start/stop the session and logging from web/CLI, and verify the menu
 changes without reopening it. Confirm Connect Session, the single logging
 action, Stop Session → idle choices, and Left detachment. Check the web receive
 clock. Proceed with 5b after recording any resulting device corrections.
+
+## Capture setup choices and resolved source display — October 21, 2026
+
+**Completed locally:** idle managed FPMS channel menus no longer offer Stop
+Logging alongside Start Logging. The active root already offers only the
+applicable logging action. Connect Session now briefly shows only band/channel,
+such as `6 GHz · Ch 5`, rather than repeating Session already running. Explicit
+legacy standalone mode retains its background-logging stop control.
+
+The web heading is now Strongest radio (grouping remains best-effort; metric
+definitions and estimated radio counts retain their meaning). The capture header
+shows a resolved interface/namespace when available. `run_live` publishes its
+chosen CaptureTarget through the existing immutable runtime/IPC publication;
+requested auto configuration is preserved for source ownership/compatibility.
+The resolved target remains with final history and resets on a new session.
+
+The start form uses a fixed, shared channel plan for band-specific widths and
+center dropdowns labelled frequency plus center channel. Valid centers contain
+the selected primary; 80+80 secondary choices exclude the primary block and
+adjacent blocks; standard overlapping 320 MHz placements are retained. The web
+API rejects unsupported/off-grid combinations before requesting capture. Data
+was checked against the IWD operating-class tables and Linux v6.12 channel
+geometry, linked in [web operation](web-interface.md). The width label follows
+the existing runtime: 20 MHz on 2.4 GHz and 80 MHz on normal 5/6 GHz primaries,
+falling back to 20 MHz where a primary cannot form the default block. The
+suggested 40 MHz 5 GHz default did not match the code and was not adopted.
+
+Interface setup now lists wireless interfaces in root/named namespaces, with
+automatic discovery retained. Opening setup or refreshing performs bounded
+read-only inventory through a protected GET endpoint, cached for five seconds.
+Partial results report namespace/command failures without changing capture.
+Namespaced selections send the real interface and namespace separately. A
+disappearing selection stays Unavailable and cannot silently fall back to auto.
+Read-only inventory and the UI remain separate from analysis/radio mutation.
+
+**Evidence:** full Python 3.13.3 regression passes **883 tests with one optional
+Core transport skip in 24.86 seconds**. Tests cover standard/off-grid centers,
+band limits, overlapping 320 placements, nonadjacent 80+80, runtime-default edge
+fallbacks, web rejection before controls, read-only interface inventories and
+overall timeout/partial results. Actual live target publication, immutable
+runtime state, real broker IPC, web status and unchanged auto config are covered.
+Protected/local simulated-DOM checks pass for dependent dropdowns, center labels,
+namespaced interface payloads, resolved header display, an unplugged selection,
+explicit center submissions and existing metric/control/auth contracts.
+Native Pi adapter/driver/regulatory and rendered dropdown acceptance remain for
+the next device run; only logic/contract acceptance is claimed here.
+
+**Next device check:** sync and run `sudo ./scripts/install_wlanpi_fpms.sh`,
+then check idle/active FPMS menus, the short Connect popup, interface inventory
+and resolved header. Exercise each available band, default/explicit widths,
+primary/center dependencies and an interface in a named namespace when present.
+Unsupported hardware/regulatory combinations must still fail through normal
+capture checks. This UI refinement does not advance live export: milestone 5b
+(same-source full-packet fan-out, beacon worker, rotation/disk limits/status/
+downloads) remains next, followed by milestone 6 offline-analysis/release checks.
+Version remains `2.1.0.dev0`.

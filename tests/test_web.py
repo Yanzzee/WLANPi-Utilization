@@ -58,7 +58,7 @@ def test_protected_proxy_requires_private_token_for_every_route_and_checks_publi
     app = create_app(client=service, log_directory=tmp_path, proxy_token=PROXY_TOKEN)
     client = app.test_client()
     base = "https://wlanpi-r5.local"
-    for path in ("", "api/status", "api/files", "assets/utilization.js", "api/files/" + "c" * 32):
+    for path in ("", "api/status", "api/interfaces", "api/files", "assets/utilization.js", "api/files/" + "c" * 32):
         assert client.get("/utilization/" + path, base_url=base).status_code == 403
     headers = {"X-Utilization-Proxy-Token": PROXY_TOKEN}
     page = client.get("/utilization/", base_url=base, headers=headers)
@@ -277,6 +277,44 @@ def test_start_validates_configuration_without_exposing_paths(web, tmp_path):
                     {"channel_width": "40", "center_frequency1_mhz": None}):
         assert client.post("/utilization/api/session/start", json=body | changed, headers=headers).status_code == 400
     assert len(service.controls) == 1
+
+
+def test_interfaces_are_cached_read_only_and_preserve_partial_inventory(tmp_path):
+    from beacon_live.capture_target import CaptureTarget, InterfaceInventory, WirelessInterface
+    service, reads = FakeService(), []
+    def provider():
+        reads.append(True)
+        return InterfaceInventory((WirelessInterface(CaptureTarget("mon0", "lab"), "phy1", "monitor"),), ("One namespace unavailable",))
+    app = create_app(client=service, log_directory=tmp_path, interface_provider=provider)
+    client = app.test_client()
+    expected = {"interfaces": [{"id": "lab:mon0", "interface": "mon0", "namespace": "lab", "phy": "phy1", "mode": "monitor"}],
+                "errors": ["One namespace unavailable"]}
+    assert client.get("/utilization/api/interfaces").json == expected
+    assert client.get("/utilization/api/interfaces").json == expected
+    assert reads == [True]
+    assert not service.controls and service.reads == 0
+
+
+def test_actual_capture_target_is_published_without_replacing_requested_auto_config(web):
+    from beacon_live.capture_target import CaptureTarget
+    service, app, client, _ = web
+    service.publication = replace(service.publication, capture_target=CaptureTarget("sniffer", "capture"))
+    app.extensions["utilization_reader"].deadline = 0
+    value = client.get("/utilization/api/status").json["publication"]
+    assert value["capture_target"] == {"interface": "sniffer", "namespace": "capture"}
+    assert value["config"]["iface"] == "auto"
+
+
+@pytest.mark.parametrize("body", [
+    {"band": "2.4", "channel": "1", "channel_width": "80", "center_frequency1_mhz": 2442},
+    {"band": "5", "channel": "36", "channel_width": "320", "center_frequency1_mhz": 5330},
+    {"band": "5", "channel": "44", "channel_width": "80", "center_frequency1_mhz": 5230},
+    {"band": "5", "channel": "36", "channel_width": "80+80", "center_frequency1_mhz": 5210, "center_frequency2_mhz": 5290},
+])
+def test_web_rejects_unsupported_or_off_grid_bonding_before_start(web, body):
+    service, _, client, headers = web
+    assert client.post("/utilization/api/session/start", json=body, headers=headers).status_code == 400
+    assert not service.controls
 
 
 def test_mutations_require_same_origin_and_csrf_and_current_id(web):

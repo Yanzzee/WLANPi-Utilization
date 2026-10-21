@@ -15,6 +15,7 @@ from typing import Callable
 from uuid import uuid4
 
 from beacon_live.channel import ChannelDefinition, ChannelWidth
+from beacon_live.capture_target import CaptureTarget
 from beacon_live.log_writer import (
     DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
     DEFAULT_MIN_FREE_BYTES,
@@ -90,6 +91,7 @@ class RuntimePublication:
     capture_health: CaptureHealth = CaptureHealth()
     capture_definition: ChannelDefinition | None = None
     capture_definition_verified: bool = False
+    capture_target: CaptureTarget | None = None
 
 
 class SessionConflictError(RuntimeError):
@@ -317,6 +319,9 @@ class _RuntimeDashboard:
     def set_capture_definition(self, definition: ChannelDefinition, *, verified: bool = False) -> None:
         self._runtime._publish(self._session_id, capture_definition=definition,
                                capture_definition_verified=verified)
+
+    def set_capture_target(self, target: CaptureTarget) -> None:
+        self._runtime._publish(self._session_id, capture_target=target)
 
     def set_logging_status(
         self, *, active: bool, paths: tuple[Path, ...] | None, message: str | None = None

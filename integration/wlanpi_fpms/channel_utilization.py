@@ -330,13 +330,12 @@ def _band_menu(
                         "name": "Start Logging",
                         "action": _logging_only_action(app, band, channel),
                     },
-                    {
-                        "name": "Stop Logging",
-                        "action": _stop_logging_action(app),
-                    },
                 ],
             }
         )
+        if configured_runtime_mode() == "standalone":
+            # Preserve the explicit legacy background-logging exit control.
+            actions[-1]["action"].append({"name": "Stop Logging", "action": _stop_logging_action(app)})
     return {"name": name, "action": actions}
 
 
@@ -548,7 +547,7 @@ class ChannelUtilizationApp:
         elif new_session and running is not None and not (
             isinstance(logging_only_session, _LoggingOnlySession) and not logging_only_session.finished
         ):
-            session.show_status(f"Session already running: Ch {channel} {band} GHz. Loading display.")
+            session.show_status(f"{band} GHz · Ch {channel}")
         elif logging_started:
             session.show_logging_status("Logging started")
         if new_session:

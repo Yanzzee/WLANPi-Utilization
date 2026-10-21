@@ -1418,11 +1418,15 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     snapshots: list[object] = []
     displayed_widths: list[str] = []
     displayed_definitions: list[tuple] = []
+    displayed_targets = []
     displayed_notices: list[str] = []
 
     class Dashboard:
         def set_capture_width(self, width: str) -> None:
             displayed_widths.append(width)
+
+        def set_capture_target(self, target):
+            displayed_targets.append(target)
 
         def set_capture_definition(self, definition, *, verified=False):
             displayed_definitions.append((definition, verified))
@@ -1491,6 +1495,7 @@ def test_fixed_band_width_preserves_process_analyzer_logging_and_dashboard_state
     assert configured_definitions[0].center_frequency1_mhz == 5210
     assert displayed_definitions == [(configured_definitions[0], True)]
     assert displayed_widths == ["80"]
+    assert displayed_targets == [CaptureTarget("wlan0")]
     assert snapshots
     assert snapshots[-1].history
     assert stats_csv.exists() and beacons_jsonl.exists()

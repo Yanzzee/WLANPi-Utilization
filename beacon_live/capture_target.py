@@ -6,6 +6,7 @@ import logging
 import re
 import shlex
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -50,6 +51,52 @@ class WirelessInterface:
     target: CaptureTarget
     phy: str
     mode: str
+
+
+@dataclass(frozen=True)
+class InterfaceInventory:
+    interfaces: tuple[WirelessInterface, ...] = ()
+    errors: tuple[str, ...] = ()
+
+
+def list_wireless_interfaces(*, command_runner=subprocess.run, clock=time.monotonic) -> InterfaceInventory:
+    """Read root/named-namespace Wi-Fi inventories within a five-second budget.
+
+    No tuning, mode changes or capture, including while another session owns
+    the adapter. Partial results remain useful when a namespace disappears.
+    """
+    deadline = clock() + 5
+    errors, found = [], []
+    def read(command):
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise CaptureTargetError("Interface discovery timed out; refresh to try again")
+        try:
+            result = command_runner(command, capture_output=True, text=True, check=False, timeout=min(1.0, remaining))
+            if result.returncode:
+                raise CaptureTargetError(f"Cannot inspect {shlex.join(command)}")
+            return result.stdout
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise CaptureTargetError(f"Cannot inspect {shlex.join(command)}: {error}") from error
+    try:
+        found.extend(parse_iw_interfaces(read(["iw", "dev"])))
+    except CaptureTargetError as error:
+        errors.append(str(error))
+    try:
+        namespaces = parse_namespace_names(read(["ip", "netns", "list"]))
+    except CaptureTargetError as error:
+        errors.append(str(error))
+        namespaces = ()
+    for namespace in namespaces:
+        if clock() >= deadline:
+            errors.append("Interface discovery timed out; refresh to inspect remaining namespaces")
+            break
+        try:
+            probe = CaptureTarget("probe", namespace)
+            found.extend(parse_iw_interfaces(read(probe.command(["iw", "dev"])), namespace))
+        except CaptureTargetError as error:
+            errors.append(str(error))
+    return InterfaceInventory(tuple(sorted(set(found), key=lambda item: item.target.label)), tuple(errors))
 
 
 def parse_iw_interfaces(text: str, namespace: str | None = None) -> tuple[WirelessInterface, ...]:

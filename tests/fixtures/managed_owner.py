@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from beacon_live.analyzer import Analyzer
 from beacon_live.channel import ChannelDefinition
+from beacon_live.capture_target import CaptureTarget
 from beacon_live.models import FrameRecord
 from beacon_live.log_writer import LiveLogPaths, LoggingService, LogMetadata
 from beacon_live.service import run_owner, serve
@@ -27,6 +28,7 @@ def runner(**options):
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.with_suffix(".owners").open("a") as output:
             output.write(f"{os.getpid()}\n")
+    dashboard.set_capture_target(CaptureTarget("fixture0", "capture"))
     dashboard.set_capture_started()
     analyzer = Analyzer(streaming=True)
     analyzer.set_history_start_second(1001)

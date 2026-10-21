@@ -1332,6 +1332,9 @@ def run_live(
         if netns is not None:
             print(f"Capture interface: {target.label}", file=sys.stderr, flush=True)
     hardware_iface = target if netns is not None else iface
+    target_setter = getattr(dashboard, "set_capture_target", None)
+    if callable(target_setter):
+        target_setter(target)
     from beacon_live.core_diagnostics import CoreDiagnostics
     with (
         CoreDiagnostics(core_diagnostics_path) as core_diagnostics,

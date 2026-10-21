@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 from beacon_live.channel import PRIMARY_CHANNELS
+from beacon_live.capture_options import validate_selection, web_channel_plan
+from beacon_live.capture_target import list_wireless_interfaces
 
 from beacon_live.ipc import DEFAULT_SOCKET, to_wire
 from beacon_live.log_writer import build_live_log_paths
@@ -98,7 +100,7 @@ def open_closed_log(record: dict, directory: Path):
 
 
 def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT_LOG_DIRECTORY,
-               url_prefix="/utilization/", proxy_token=None):
+               url_prefix="/utilization/", proxy_token=None, interface_provider=None):
     from flask import Flask, abort, jsonify, render_template, request, send_file
     from werkzeug.exceptions import HTTPException
 
@@ -114,6 +116,9 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
     directory = Path(log_directory).absolute()
     csrf = secrets.token_urlsafe(32)
     app.extensions["utilization_reader"] = reader
+    interface_lock = threading.Lock()
+    interface_cache, interface_deadline = None, 0.0
+    interface_provider = interface_provider or list_wireless_interfaces
 
     @app.before_request
     def local_origin():
@@ -164,7 +169,19 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
             initial = None
         return render_template("utilization.html", prefix=url_prefix, csrf=csrf,
                                channel_choices=PRIMARY_CHANNELS, platform_hosted=bool(proxy_token),
-                               initial=initial)
+                               initial=initial, capture_options=web_channel_plan())
+
+    @app.get(url_prefix + "api/interfaces")
+    def interfaces():
+        nonlocal interface_cache, interface_deadline
+        with interface_lock:
+            if interface_cache is None or time.monotonic() >= interface_deadline:
+                inventory = interface_provider()
+                interface_cache = {"interfaces": [dict(id=item.target.label, interface=item.target.interface,
+                    namespace=item.target.namespace, mode=item.mode, phy=item.phy) for item in inventory.interfaces],
+                    "errors": inventory.errors}
+                interface_deadline = time.monotonic() + 5
+            return jsonify(interface_cache)
 
     @app.get(url_prefix + "api/status")
     def status():
@@ -190,6 +207,8 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
             config = from_wire(LiveSessionConfig, value)
             if config.band not in PRIMARY_CHANNELS or int(config.channel) not in PRIMARY_CHANNELS[config.band]:
                 raise ValueError("Select a valid primary channel for the band")
+            validate_selection(config.band, int(config.channel), config.channel_width,
+                               config.center_frequency1_mhz, config.center_frequency2_mhz)
             # Defaults match CLI/FPMS; the web form always supplies band/channel.
             validate_config(config)
             from dataclasses import replace

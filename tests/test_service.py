@@ -299,6 +299,8 @@ def test_native_fpms_menu_stop_ends_shared_owner_and_logging_but_keeps_broker_an
     client, broker = service
     client.ensure(config(tmp_path, initial_logging_enabled=True))
     original = until(client, lambda pub: pub.logging.active and bool(pub.completed_stats))
+    assert original.capture_target.interface == "fixture0"
+    assert original.capture_target.namespace == "capture"
     settings = tmp_path / "fpms.json"
     settings.write_text('{"runtime_mode":"managed"}')
     monkeypatch.delenv("WLANPI_UTILIZATION_RUNTIME_MODE", raising=False)

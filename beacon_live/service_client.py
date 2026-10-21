@@ -217,6 +217,7 @@ def main(argv=None):
             value = {key: value[key] for key in (
                 "session_id", "phase", "config", "logging", "capture_health", "capture_definition",
                 "capture_definition_verified", "error", "exit_code",
+                "capture_target",
             )}
         print(json.dumps(value, indent=2))
         return 0

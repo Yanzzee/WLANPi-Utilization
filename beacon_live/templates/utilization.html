@@ -13,6 +13,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png">
   {% endif %}
+  <script id="capture-options" type="application/json">{{ capture_options|tojson }}</script>
   <script id="initial-status" type="application/json">{{ initial|tojson }}</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='utilization.css') }}">
   <script src="{{ url_for('static', filename='utilization.js') }}" defer></script>
@@ -42,8 +43,8 @@
       <section class="composition" aria-labelledby="composition-title">
         <div class="section-heading"><h2 id="composition-title">Channel composition</h2><div id="composition-counts" class="composition-counts"></div></div>
         <div class="composition-layout">
-          <div class="radio-details"><h3>Strongest estimated radio</h3><p id="composition-detail">Waiting for beacon observations</p><p id="composition-current" class="radio-identity"></p><p id="radio-counts" class="muted"></p>
-            <div class="table-wrap"><table><caption class="sr-only">BSSIDs grouped with the strongest estimated radio. The QBSS source is marked when it belongs to this radio.</caption><thead><tr><th scope="col">SSID / BSSID</th><th scope="col">RSSI</th><th scope="col">QBSS stations</th></tr></thead><tbody id="radio-bssids"></tbody></table></div>
+          <div class="radio-details"><h3>Strongest radio</h3><p id="composition-detail">Waiting for beacon observations</p><p id="composition-current" class="radio-identity"></p><p id="radio-counts" class="muted"></p>
+            <div class="table-wrap"><table><caption class="sr-only">BSSIDs grouped with the strongest radio. The QBSS source is marked when it belongs to this radio.</caption><thead><tr><th scope="col">SSID / BSSID</th><th scope="col">RSSI</th><th scope="col">QBSS stations</th></tr></thead><tbody id="radio-bssids"></tbody></table></div>
           </div>
           <div class="selection-details"><h3>Selected BSSIDs</h3><div id="selected-bssids" class="selected-bssids"></div><p class="muted">Automatic metric sources; these may belong to different radios.</p></div>
         </div>
@@ -71,9 +72,9 @@
   <dialog id="start-dialog" aria-labelledby="dialog-title"><form id="start-form">
     <div class="dialog-header"><div><span class="eyebrow">New capture</span><h2 id="dialog-title">Start a session</h2></div><button type="button" id="cancel-start" class="icon-button" aria-label="Close session setup">×</button></div>
     <p class="muted">All views will share this channel and its rolling history.</p>
-    <div class="form-grid"><label>Band<select name="band" id="band"><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option></select></label><label>Primary channel<select name="channel" id="channel" data-channels='{{ channel_choices|tojson }}' required>{% for channel in channel_choices["2.4"] %}<option value="{{ channel }}">{{ channel }}</option>{% endfor %}</select></label><label class="wide">Capture width<select name="channel_width" id="channel-width"><option value="">Band default</option><option value="20">20 MHz</option><option value="40">40 MHz</option><option value="80">80 MHz</option><option value="160">160 MHz</option><option value="80+80">80 + 80 MHz</option><option value="320">320 MHz</option></select></label><div class="centers wide" id="centers" hidden><label>Center frequency 1 · MHz<input name="center_frequency1_mhz" type="number" min="2000" max="7200"></label><label id="center-two" hidden>Center frequency 2 · MHz<input name="center_frequency2_mhz" type="number" min="2000" max="7200"></label></div></div>
+    <div class="form-grid"><label>Band<select name="band" id="band"><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option></select></label><label>Primary channel<select name="channel" id="channel" data-channels='{{ channel_choices|tojson }}' required>{% for channel in channel_choices["2.4"] %}<option value="{{ channel }}">{{ channel }}</option>{% endfor %}</select></label><label class="wide">Capture width<select name="channel_width" id="channel-width"><option value="">Band default (20 MHz)</option><option value="20">20 MHz</option><option value="40">40 MHz</option></select></label><div class="centers wide" id="centers" hidden><label>Center frequency 1<select name="center_frequency1_mhz" id="center-one"></select></label><label id="center-two" hidden>Center frequency 2<select name="center_frequency2_mhz" id="center-two-choice"></select></label></div></div>
     <label class="check"><input id="start-logging" name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
-    <details><summary>Capture source</summary><div class="form-grid"><label>Backend<select name="capture_backend"><option value="direct">Direct capture</option><option value="core">Core · optional</option></select></label><label>Interface<input name="iface" value="auto" required spellcheck="false"></label><label class="wide">Network namespace · optional<input name="netns" spellcheck="false" placeholder="Automatic discovery"></label></div></details>
+    <details><summary>Capture source</summary><div class="form-grid"><label>Backend<select name="capture_backend"><option value="direct">Direct capture</option><option value="core">Core · optional</option></select></label><label>Interface<select name="iface" id="iface"><option value="auto">Automatic discovery</option></select></label><button type="button" id="refresh-interfaces" class="button secondary small">Refresh interfaces</button><label class="wide">Network namespace · optional<input name="netns" id="netns" spellcheck="false" placeholder="Automatic discovery"></label></div><p id="interface-note" class="muted" role="status"></p></details>
     <div id="form-error" class="notice error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="cancel-bottom" class="button secondary">Cancel</button><button type="submit" id="start-submit" class="button primary">Start session</button></div>
   </form></dialog>
 </body>

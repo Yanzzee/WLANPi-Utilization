@@ -146,7 +146,7 @@ Apps
   Utilization
     <band>
       <channel and center frequency>
-        Start Session | Start + Log | Start Logging | Stop Logging
+        Start Session | Start + Log | Start Logging
 ```
 
 - `Start Session` starts capture and opens the graphical screens.
@@ -175,7 +175,7 @@ idle, the menu offers band/channel selection. When active, it starts with
 **Connect Session**, followed by **Stop Session** and either **Start Logging**
 or **Stop Logging**, according to the shared owner's state.
 Connect Session loads the existing display without changing its source or history.
-An attachment notice appears once when opening an existing session, with no
+The current band/channel appears briefly when connecting, with no
 repeated popups during display refresh. Left detaches that managed display;
 **Stop Session** explicitly ends capture. The visible menu updates after web/CLI
 session or logging changes, normally within a few seconds. During cleanup it

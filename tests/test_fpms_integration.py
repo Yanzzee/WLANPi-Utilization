@@ -34,6 +34,7 @@ def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
     assert menu["name"] == "Utilization"
     assert [item["name"] for item in menu["action"]] == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
     assert "Stop Session" not in [item["name"] for item in menu["action"][0]["action"][0]["action"]]
+    assert [item["name"] for item in menu["action"][0]["action"][0]["action"]] == ["Start Session", "Start + Log", "Start Logging"]
 
 
 def test_new_fpms_install_defaults_to_managed_but_preserves_explicit_standalone():
@@ -304,7 +305,7 @@ def test_fpms_opens_existing_tuning_preserves_logging_and_reports_attachment(mon
     assert command[command.index("--logging-initial-state") + 1] == "disabled"
     assert ("--attach" in command) is resume
     assert state["channel_utilization_session"].logging_enabled
-    assert any("Session already running" in message for message in messages)
+    assert messages == ["6 GHz · Ch 5"]
     before = channel_utilization._logging_control_path().read_bytes()
     state["page_exit_handler"]()
     assert channel_utilization._logging_control_path().read_bytes() == before
