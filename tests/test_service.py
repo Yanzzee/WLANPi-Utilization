@@ -312,8 +312,11 @@ def test_native_fpms_menu_stop_ends_shared_owner_and_logging_but_keeps_broker_an
     messages = []
     monkeypatch.setattr(fpms, "_display_status", lambda state, text: messages.append(text))
     monkeypatch.setattr(fpms, "_display_error", lambda state, text: pytest.fail(text))
-    menu = fpms.build_channel_utilization_menu({})
-    stop = menu["action"][1]["action"][0]["action"][-1]["action"]
+    menu_state = {}
+    menu = fpms.build_channel_utilization_menu(menu_state)
+    menu_state["option_selected"] = menu["action"]
+    menu_state["channel_utilization_menu_enter"]()
+    stop = next(item["action"] for item in menu["action"] if item["name"] == "Stop Session")
     # Execute the actual FunctionType gate from the pinned native dispatcher.
     fixture = Path(__file__).parent / "fixtures/fpms_1_4_24/fpms.py"
     tree = ast.parse(fixture.read_text())

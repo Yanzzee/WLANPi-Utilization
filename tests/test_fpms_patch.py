@@ -20,6 +20,12 @@ def test_button_patch_adds_idempotent_page_navigation_handlers(
         "    def menu_down(self, g_vars, menu):\n"
         "        return 'down'\n"
         "\n"
+        "    def menu_right(self, g_vars, menu):\n"
+        "        return 'right'\n"
+        "\n"
+        "    def menu_center(self, g_vars, menu):\n"
+        "        return 'center'\n"
+        "\n"
         "    def menu_left(self, g_vars, menu):\n"
         f"        if g_vars[{quote}display_state{quote}] == {quote}page{quote}:\n"
         "            return 'left'\n",

@@ -44,10 +44,16 @@ owner atomically, including concurrent opens with different requested channels.
 
 Exiting a managed CLI view with Q/Ctrl+C or leaving the FPMS display detaches
 that renderer. Capture and active logging continue with zero renderers. FPMS
-managed mode adds **Open Running Session** above band selection and **Stop
-Session** to each channel menu. Opening a display through a different channel
-choice still loads the current source and reports that it is already running.
-The resume-only entry cannot create a replacement session. **Stop Logging**
+managed mode checks status when entering Utilization with Right or Center.
+Idle sessions offer band/channel selection; active sessions show status and
+current tuning above **Connect**, **Stop Session**, **Start Logging** and
+**Stop Logging**. Reopen the menu to refresh it after another consumer changes
+the session. This is an entry-time check, not continuous background polling.
+Connect cannot create a replacement session. An existing-session notice shows
+once per display connection, never on periodic FPMS refresh. Starting the
+display from idle FPMS, or joining its active logging-only proxy, does not show
+that notice. Even a stale channel menu adopts the current active source.
+**Stop Logging**
 disables logging without ending capture. CLI controls require the actual
 `session_id` value from status, not the literal placeholder `SESSION_ID`.
 While a session is active, read its ID automatically before using the desired
@@ -71,8 +77,8 @@ another owner. The final publication can precede process reaping by a short
 interval; a new start remains blocked until cleanup and reaping finish. Final
 history stays readable until a new explicit start. Stale control IDs fail.
 
-**Stop Session** in any channel menu targets the current shared owner, not
-that menu's channel. It closes logging and requests normal radio cleanup. The
+**Stop Session** in the active-session menu targets the current shared owner.
+It closes logging and requests normal radio cleanup. The
 broker and web services keep running; the session ID and final graphs remain
 visible with phase `stopped` and logging inactive. Leaving a managed display
 with Left only detaches it and is a different operation.

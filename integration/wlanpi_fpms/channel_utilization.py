@@ -178,7 +178,34 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
         ],
     }
     if configured_runtime_mode() == "managed":
-        menu["action"].insert(0, {"name": "Open Running Session", "action": _resume_action(app)})
+        idle_actions = list(menu["action"])
+
+        def refresh_menu() -> None:
+            try:
+                running = _managed_session_status()
+                if running is None:
+                    menu["action"][:] = idle_actions
+                else:
+                    band, channel = _session_channel(running)
+                    menu["action"][:] = [
+                        {"name": f"Session {running['phase']}: Ch {channel} {band} GHz", "action": _resume_action(app)},
+                        {"name": "Connect", "action": _resume_action(app)},
+                        {"name": "Stop Session", "action": _stop_session_action(app)},
+                        {"name": "Start Logging", "action": _logging_only_action(app, band, channel)},
+                        {"name": "Stop Logging", "action": _stop_logging_action(app)},
+                    ]
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                LOGGER.exception("Unable to refresh Utilization menu")
+                # Do not offer a new capture when the shared owner is unknown.
+                menu["action"][:] = [{"name": "Session unavailable", "action": _resume_action(app)}]
+
+        def menu_enter() -> None:
+            # Native FPMS keeps this exact list as option_selected. Mutate it
+            # only on entry, before its new selection index is appended.
+            if g_vars.get("option_selected") is menu["action"]:
+                refresh_menu()
+
+        g_vars["channel_utilization_menu_enter"] = menu_enter
     return menu
 
 
@@ -217,8 +244,6 @@ def _band_menu(
                 ],
             }
         )
-        if configured_runtime_mode() == "managed":
-            actions[-1]["action"].append({"name": "Stop Session", "action": _stop_session_action(app)})
     return {"name": name, "action": actions}
 
 
@@ -321,6 +346,13 @@ class ChannelUtilizationApp:
     def launch(self, *, band: str, channel: int, logging: bool, resume_only: bool = False) -> None:
         if self.g_vars.get("channel_utilization_recovering"):
             return
+        session = self.g_vars.get("channel_utilization_session")
+        if isinstance(session, _DisplaySession):
+            # FPMS reruns the current page action every refresh. It is not a
+            # new connection or a request to change logging/source settings.
+            if session.finished:
+                session.report_exit()
+            return
         running = None
         if configured_runtime_mode() == "managed":
             try:
@@ -400,7 +432,9 @@ class ChannelUtilizationApp:
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
-        if running is not None:
+        if new_session and running is not None and not (
+            isinstance(logging_only_session, _LoggingOnlySession) and not logging_only_session.finished
+        ):
             session.show_status(f"Session already running: Ch {channel} {band} GHz. Loading display.")
         elif logging_started:
             session.show_logging_status("Logging started")

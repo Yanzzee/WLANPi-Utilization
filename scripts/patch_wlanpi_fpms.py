@@ -343,6 +343,19 @@ def _patch_buttons(text: str, path: Path) -> str:
         handler_name="page_down_handler",
         path=path,
     )
+    # Refresh only while entering a menu, never during the periodic display
+    # action. The adapter checks list identity so other apps are unaffected.
+    for name in ("menu_right", "menu_center"):
+        handler = (
+            "        if g_vars.get('display_state') == 'menu':\n"
+            "            menu_enter = g_vars.get('channel_utilization_menu_enter')\n"
+            "            if callable(menu_enter):\n"
+            "                menu_enter()\n"
+        )
+        method = _find_function(text, name, path)
+        if handler not in ast.get_source_segment(text, method):
+            insertion = _line_offset(text, method.body[0].lineno)
+            text = text[:insertion] + handler + text[insertion:]
     return text
 
 

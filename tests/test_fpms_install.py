@@ -161,6 +161,60 @@ def test_trixie_buttons_dispatch_and_exit_return_to_menu(package: Path) -> None:
     assert "page_exit_handler" not in state
 
 
+@pytest.mark.parametrize("entry_button", ["menu_right", "menu_center"])
+def test_native_menu_refreshes_on_entry_without_changing_other_apps(package, tmp_path, monkeypatch, entry_button):
+    from integration.wlanpi_fpms import channel_utilization as adapter
+    from types import FunctionType
+    patcher.install_fpms(package, ADAPTER)
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.delenv("WLANPI_UTILIZATION_RUNTIME_MODE", raising=False)
+    monkeypatch.setattr(adapter, "BACKEND_CONFIG", settings)
+    current, reads = None, []
+    def status():
+        reads.append(True)
+        return current
+    monkeypatch.setattr(adapter, "_managed_session_status", status)
+    tree = ast.parse((package / "modules/nav/buttons.py").read_text())
+    button_class = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    namespace = {}
+    exec(compile(ast.Module(body=[button_class], type_ignores=[]), "native_buttons", "exec"), namespace)
+    button = object.__new__(namespace["Button"])
+    state = {"display_state": "menu", "current_menu_location": [0, 0]}
+    app = adapter.build_channel_utilization_menu(state)
+    other = {"name": "Other", "action": [{"name": "Other child", "action": lambda: None}]}
+    menu = [{"name": "Apps", "action": [app, other]}]
+    class Page:
+        def draw_page(self, g_vars, menu):
+            level = menu
+            for index in g_vars["current_menu_location"][:-1]:
+                level = level[index]["action"]
+            g_vars["option_selected"] = level[g_vars["current_menu_location"][-1]]["action"]
+    button.page_obj = Page()
+    enter = getattr(button, entry_button)
+    for phase in (None, "starting", "running", "stopping", None):
+        current = None if phase is None else {
+            "phase": phase, "config": {"band": "6", "channel": "5"},
+        }
+        state["current_menu_location"] = [0, 0]
+        state["option_selected"] = app["action"]
+        enter(state, menu)
+        assert state["current_menu_location"] == [0, 0, 0]
+        names = [item["name"] for item in app["action"]]
+        if phase is None:
+            assert names == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
+        else:
+            assert names == [f"Session {phase}: Ch 5 6 GHz", "Connect", "Stop Session", "Start Logging", "Stop Logging"]
+            assert all(isinstance(item["action"], FunctionType) for item in app["action"])
+    assert len(reads) == 5
+    state["current_menu_location"] = [0, 1]
+    state["option_selected"] = other["action"]
+    enter(state, menu)
+    assert len(reads) == 5
+    assert state["current_menu_location"] == [0, 1, 0]
+    assert state["option_selected"] is other["action"][0]["action"]
+
+
 @pytest.mark.parametrize(
     "failure", ["branch", "dispatcher", "import", "menu", "rotation", "adapter_syntax"]
 )

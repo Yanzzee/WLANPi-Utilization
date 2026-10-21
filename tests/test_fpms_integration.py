@@ -30,8 +30,15 @@ def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
     assert "--managed" in command
     menu = channel_utilization.build_channel_utilization_menu({})
     assert menu["name"] == "Utilization"
-    assert menu["action"][0]["name"] == "Open Running Session"
-    assert menu["action"][1]["action"][0]["action"][-1]["name"] == "Stop Session"
+    assert [item["name"] for item in menu["action"]] == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
+    assert "Stop Session" not in [item["name"] for item in menu["action"][0]["action"][0]["action"]]
+
+
+def _open_managed_menu(state):
+    menu = channel_utilization.build_channel_utilization_menu(state)
+    state["option_selected"] = menu["action"]
+    state["channel_utilization_menu_enter"]()
+    return menu
 
 
 def test_all_managed_menu_leaves_are_functions_accepted_by_native_fpms():
@@ -53,6 +60,9 @@ def test_native_fpms_stop_menu_action_sends_current_session_id_and_reports_failu
     channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
     calls, messages, errors = [], [], []
     identifier = "a" * 32
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: {
+        "phase": "running", "session_id": identifier, "config": {"band": "5", "channel": "36"},
+    })
     def run(command, **kwargs):
         calls.append(command)
         if command[1:3] == ["session", "status"]:
@@ -61,8 +71,8 @@ def test_native_fpms_stop_menu_action_sends_current_session_id_and_reports_failu
     monkeypatch.setattr(channel_utilization.subprocess, "run", run)
     monkeypatch.setattr(channel_utilization, "_display_status", lambda state, text: messages.append(text))
     monkeypatch.setattr(channel_utilization, "_display_error", lambda state, text: errors.append(text))
-    menu = channel_utilization.build_channel_utilization_menu({})
-    action = menu["action"][1]["action"][0]["action"][-1]["action"]
+    menu = _open_managed_menu({})
+    action = next(item["action"] for item in menu["action"] if item["name"] == "Stop Session")
     # Match FPMS's native dispatcher, not a direct method call that bypasses it.
     if isinstance(action, FunctionType):
         action()
@@ -74,8 +84,11 @@ def test_native_fpms_stop_menu_action_sends_current_session_id_and_reports_failu
 def test_native_fpms_resume_menu_action_opens_existing_session(monkeypatch):
     channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
     calls = []
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: {
+        "phase": "running", "config": {"band": "5", "channel": "36"},
+    })
     monkeypatch.setattr(channel_utilization.ChannelUtilizationApp, "resume", lambda self: calls.append("resume"))
-    action = channel_utilization.build_channel_utilization_menu({})["action"][0]["action"]
+    action = _open_managed_menu({})["action"][1]["action"]
     if isinstance(action, FunctionType):
         action()
     assert calls == ["resume"]
@@ -161,6 +174,59 @@ def test_fpms_resume_with_no_session_does_not_start_capture(monkeypatch):
     app = channel_utilization.ChannelUtilizationApp({}, popen=lambda *args: pytest.fail("started a session"))
     app.resume()
     assert "No running session" in messages[0]
+
+
+@pytest.mark.parametrize("origin", ["fpms", "external", "fpms_logging"])
+def test_managed_page_refresh_is_not_another_connection(monkeypatch, tmp_path, origin):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    monkeypatch.setattr(channel_utilization._DisplaySession, "start_display", lambda self: None)
+    running = {"session_id": "a" * 32, "phase": "running",
+               "config": {"band": "6", "channel": "5"}, "logging": {"active": True}}
+    current = running if origin == "external" else None
+    reads, messages, processes = [], [], []
+    def status():
+        reads.append(True)
+        return current
+    def popen(command, **kwargs):
+        process = _FakeProcess(command)
+        processes.append(process)
+        return process
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", status)
+    monkeypatch.setattr(channel_utilization._DisplaySession, "show_status", lambda self, message: messages.append(message))
+    state = {}
+    app = channel_utilization.ChannelUtilizationApp(state, popen=popen)
+    if origin == "fpms_logging":
+        app.start_logging_only(band="6", channel=5)
+        current = running
+    app.launch(band="6", channel=5, logging=False)
+    current = running
+    session = state["channel_utilization_session"]
+    handlers = {key: value for key, value in state.items() if key.startswith("page_")}
+    controls_before = channel_utilization._logging_control_path().read_bytes()
+    read_count = len(reads)
+    for _ in range(10):
+        # Native FPMS reruns both channel actions and Connect actions.
+        app.launch(band="2.4", channel=11, logging=True)
+        app.resume()
+    assert len(reads) == read_count
+    assert len(messages) == (1 if origin == "external" else 0)
+    assert len(processes) == (2 if origin == "fpms_logging" else 1)
+    assert state["channel_utilization_session"] is session
+    assert {key: value for key, value in state.items() if key.startswith("page_")} == handlers
+    assert channel_utilization._logging_control_path().read_bytes() == controls_before
+    session.stop()
+    if origin == "fpms_logging":
+        state["channel_utilization_logging_session"].stop()
+
+
+def test_managed_menu_status_failure_does_not_offer_new_capture(monkeypatch):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    def unavailable():
+        raise OSError("broker unavailable")
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", unavailable)
+    menu = _open_managed_menu({})
+    assert [item["name"] for item in menu["action"]] == ["Session unavailable"]
 
 
 @pytest.mark.parametrize("mode", [None, [], "invalid"])

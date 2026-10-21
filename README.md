@@ -163,11 +163,15 @@ While a display is open:
   changing the active screen.
 
 Changing screens never restarts capture or clears graph history.
-In managed FPMS mode, **Open Running Session** loads the existing display
-without band/channel selection. A channel's **Display** action also adopts an
-active session and reports its current tuning. Left detaches that managed
-display; **Stop Session** explicitly ends capture. Foreground FPMS mode keeps
-the stop-on-exit behavior described above.
+In managed FPMS mode, opening Utilization checks the current session. When
+idle, the menu offers band/channel selection. When active, it shows session
+status, **Connect**, **Stop Session**, **Start Logging** and **Stop Logging**.
+Connect loads the existing display without changing its source or history.
+An attachment notice appears once when opening an existing session, with no
+repeated popups during display refresh. Left detaches that managed display;
+**Stop Session** explicitly ends capture. Reopen Utilization to refresh menu
+status after another consumer starts/stops a session. Foreground FPMS mode
+keeps the stop-on-exit behavior described above.
 
 ## Use the command line
 

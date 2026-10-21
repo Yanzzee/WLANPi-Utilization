@@ -656,3 +656,50 @@ The current offline helper is not a web download or live export toggle.
 WiFi-Beacon-analysis validation with AP/classroom/schedule/timezone context is
 still milestone 6. Grafana/touchscreen integration remain deferred and release
 metadata remains `2.1.0.dev0`.
+
+## FPMS refresh and session menu — October 21, 2026
+
+The user confirms that the installed FPMS Stop Session action now works.
+This accepts the reported menu action on the tested Pi; independent physical
+radio-restoration evidence remains part of the broader acceptance checklist.
+Testing also exposed repeated attachment popups, including after FPMS itself
+started capture. Native FPMS reruns its current page action every refresh;
+the adapter was querying status and presenting every invocation as a new join.
+
+**Completed locally:** an existing display action now returns immediately,
+reporting a finished child through the existing recovery path if needed.
+Refreshes do not query the broker, reset handlers, change logging, relaunch the
+renderer or repeat notifications. Joining an existing session shows one notice
+per display connection. Starting from idle FPMS, or opening its live logging-only
+proxy's session, does not show an attachment notice.
+
+The managed menu now refreshes when entered with Right or Center. Idle menus
+show band/channel choices. Active menus show session phase/current tuning,
+Connect, Stop Session, Start Logging and Stop Logging. Connect is attach-only;
+a session stopped elsewhere cannot be restarted by a stale Connect action.
+Status failure shows Session unavailable rather than offering a new capture.
+The adapter mutates its existing menu list before native FPMS enters it, keeping
+native selection paths intact. Only the Utilization list triggers a service
+check, and other applications retain their navigation. Standalone menus stay
+unchanged. Menu status refreshes on entry, not continuously while left open;
+reopen Utilization after another consumer changes a session.
+
+**Evidence:** full Python 3.13.3 regression passes **819 tests with one optional
+Core transport skip in 20.16 seconds**, including real broker/CLI lifecycle and
+TLS Nginx authentication checks. New regression cases cover repeated managed
+page actions after FPMS/external/logging-only starts, one attachment notice,
+unchanged controls/handlers and one renderer. Both patched native entry buttons
+exercise idle/starting/running/stopping/idle transitions and unchanged navigation
+for another app. Native callback dispatch, real broker stop/log closure/history,
+installer idempotence and rollback checks also pass.
+
+**Device follow-up:** sync and reinstall with
+`sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web`.
+This restarts the broker and FPMS, ending any active capture. Check idle menu →
+start Display → leave it open without popups → Left → reopen → Connect/Stop.
+Then start through web/CLI, open FPMS Connect and confirm one attachment popup
+and matching tuning/history. Reopen after stopping to verify band choices
+return. Updated menu rendering still needs this hardware check. The next
+implementation milestone remains 5b (live export fan-out, rotation and disk
+limits); WiFi-Beacon-analysis context/validation remains milestone 6. Release
+metadata stays `2.1.0.dev0`.
