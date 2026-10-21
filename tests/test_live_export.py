@@ -323,7 +323,7 @@ def test_exclusive_writer_lease_prevents_cleanup_of_an_active_segment(tmp_path):
 
 
 @pytest.mark.parametrize("changes", [
-    {"segment_bytes": 0}, {"retained_bytes": 1}, {"retained_files": 0},
+    {"segment_bytes": 0}, {"retained_bytes": 1}, {"retained_files": -1},
     {"rotation_seconds": 0}, {"rotation_seconds": float("nan")},
     {"rotation_seconds": float("inf")}, {"min_free_bytes": -1},
     {"queue_records": 5000}, {"queue_bytes": 300 * 1024 * 1024},
@@ -390,3 +390,86 @@ def test_unexpected_export_worker_death_does_not_stop_original_delivery(tmp_path
         assert output.getvalue() == raw
     finally:
         exporter.close()
+
+
+class GatedWriter(RotatingBeaconWriter):
+    def write(self, context, packet):
+        if not (self.directory / "entered").exists():
+            (self.directory / "entered").touch()
+            deadline = time.monotonic() + 5
+            while not (self.directory / "release").exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+        super().write(context, packet)
+
+
+class ReserveWriter(RotatingBeaconWriter):
+    def __init__(self, directory, policy):
+        super().__init__(directory, policy, disk_usage=lambda _: SimpleNamespace(free=1024**3))
+
+    def write(self, context, packet):
+        super().write(context, packet)
+        self.disk_usage = lambda _: SimpleNamespace(free=0)
+
+
+def test_stop_export_drains_already_accepted_packets_and_saves_buffered_output(tmp_path):
+    exporter = BeaconExport(tmp_path, enabled=True, limits=limits(), writer_factory=GatedWriter)
+    try:
+        offer(exporter, section() + interface() + packet() * 12)
+        deadline = time.monotonic() + 5
+        while not (tmp_path / "entered").exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert (tmp_path / "entered").exists()
+        exporter.set_enabled(False)
+        (tmp_path / "release").touch()
+        status = until(exporter, lambda state: not state.active and state.exported_beacons == 12)
+        assert status.skipped_beacons == 0 and status.queued_bytes == 0
+        assert sum(len([block for block in blocks(log.path.read_bytes()) if block.kind == ENHANCED_PACKET])
+                   for log in exporter.closed_logs) == 12
+    finally:
+        exporter.close()
+
+
+def test_low_space_reserve_closes_valid_buffered_file_without_deleting_exports(tmp_path):
+    exporter = BeaconExport(tmp_path, enabled=True, limits=limits(min_free_bytes=1024), writer_factory=ReserveWriter)
+    try:
+        offer(exporter, section() + interface() + packet() * 2)
+        state = until(exporter, lambda state: state.error is not None)
+        assert "low disk" in state.error and not state.active
+        assert state.exported_beacons == 1 and state.skipped_beacons == 1
+        assert len(exporter.closed_logs) == 1
+        assert blocks(exporter.closed_logs[0].path.read_bytes())[-1].raw == packet()
+        assert not list(tmp_path.glob("*.partial"))
+    finally:
+        exporter.close()
+
+
+def test_default_policy_keeps_all_completed_files_beyond_previous_count_and_byte_limits(tmp_path):
+    # Sparse files exercise the old 512 MiB boundary without writing 600 MiB.
+    for index in range(20):
+        path = tmp_path / f"utilization_beacons_{'a' * 32}_{index:06d}.pcapng"
+        with path.open("wb") as stream:
+            stream.truncate(30 * 1024 * 1024)
+    context = (section(), interface())
+    policy = limits(segment_bytes=sum(map(len, context)) + len(packet()))
+    assert policy.retained_bytes == policy.retained_files == 0
+    writer = RotatingBeaconWriter(tmp_path, policy)
+    for _ in range(300):
+        writer.write(context, packet())
+    writer.close()
+    assert len(list(tmp_path.glob("*.pcapng"))) == 320
+    assert writer.deleted_segments == 0 and writer.retained_bytes > 512 * 1024 * 1024
+    assert not writer.retained  # Default policy retains no unbounded per-file index.
+    assert len(writer.closed) == 256  # The publication catalog remains bounded.
+    replacement = RotatingBeaconWriter(tmp_path, policy)
+    replacement.write(context, packet())
+    replacement.close()
+    assert len(list(tmp_path.glob("*.pcapng"))) == 321
+    assert replacement.deleted_segments == 0
+
+
+def test_default_rotation_is_hourly_with_larger_files_and_no_retention_caps():
+    policy = ExportLimits()
+    assert policy.rotation_seconds == 3600
+    assert policy.segment_bytes == 256 * 1024 * 1024
+    assert policy.retained_files == policy.retained_bytes == 0
+    policy.validate()

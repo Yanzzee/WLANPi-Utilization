@@ -448,14 +448,14 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--beacon-pcapng", action="store_true",
                         help="Start beacon-only pcapng export in --log-dir/beacons from the shared full-packet source.")
-    parser.add_argument("--beacon-segment-mb", type=int, default=64,
-                        help="Maximum beacon pcapng segment size in MiB. Default: 64.")
-    parser.add_argument("--beacon-rotation-seconds", type=float, default=300,
-                        help="Rotate beacon pcapng after this many seconds. Default: 300.")
-    parser.add_argument("--beacon-retained-mb", type=int, default=512,
-                        help="Maximum retained beacon pcapng bytes in MiB. Default: 512.")
-    parser.add_argument("--beacon-retained-files", type=int, default=16,
-                        help="Maximum retained beacon pcapng segments. Default: 16.")
+    parser.add_argument("--beacon-segment-mb", type=int, default=256,
+                        help="Maximum beacon pcapng segment size in MiB. Default: 256.")
+    parser.add_argument("--beacon-rotation-seconds", type=float, default=3600,
+                        help="Rotate beacon pcapng after this many seconds. Default: 3600.")
+    parser.add_argument("--beacon-retained-mb", type=int, default=0,
+                        help="Optional retained beacon pcapng limit in MiB; 0 disables deletion by size (default).")
+    parser.add_argument("--beacon-retained-files", type=int, default=0,
+                        help="Optional retained beacon pcapng file limit; 0 disables deletion by count (default).")
     parser.add_argument(
         "--logging-only",
         action="store_true",

@@ -11,8 +11,16 @@ After syncing, install/update with `sudo ./scripts/install_wlanpi_fpms.sh`
 (the installer restarts services and ends an active session). Open the protected
 `/utilization/` page, start a new session and select **Start beacon pcapng
 export**, or use **Start beacon export** under **Log files** during the session.
-Stop export to close the current segment immediately; analysis continues.
+Stop export to drain accepted packets and flush/close the current segment; analysis continues.
 CSV/JSONL logging and beacon export have independent controls.
+
+In managed FPMS, a channel submenu offers **Start Export** to start a session
+with beacon export and CSV/JSONL logging off. During a session, the root offers
+only **Start Export** or **Stop Export**, independently of Start/Stop Logging.
+These controls target the current session ID and return to the refreshed menu.
+The existing two-second background status check also follows web/CLI changes.
+Stop Export remains visible while accepted packets drain and the file closes.
+Legacy standalone FPMS menus retain their existing controls.
 
 A managed CLI/FPMS start configures the full-packet source even when export is
 off, allowing a later web/CLI export request. CLI examples:
@@ -40,16 +48,16 @@ downloads with the same identity/symlink/race checks as CSV/JSONL. Active
 opened (reported unavailable/404); an already opened descriptor remains usable.
 The broker catalog remains bounded and in memory, like existing CSV/JSONL
 inventory; a broker restart does not reconstruct historical download entries.
-Files remain on disk until the export retention policy removes them.
+Completed files remain on disk unless manually removed or an explicit opt-in retention policy removes them.
 
 ## Rotation, retention and storage failure
 
 | Setting | Default | CLI option |
 | --- | --- | --- |
-| Segment size | 64 MiB | `--beacon-segment-mb` |
-| Segment duration | 300 seconds | `--beacon-rotation-seconds` |
-| Retained bytes, including active segment | 512 MiB | `--beacon-retained-mb` |
-| Retained files, including active segment | 16 | `--beacon-retained-files` |
+| Segment size | 256 MiB | `--beacon-segment-mb` |
+| Segment duration | 3600 seconds (one hour) | `--beacon-rotation-seconds` |
+| Retained bytes, including active segment | Unlimited (0) | `--beacon-retained-mb` |
+| Retained files, including active segment | Unlimited (0) | `--beacon-retained-files` |
 | Free-space reserve | 256 MiB | `--min-free-mb` (also applies to CSV/JSONL) |
 | Pending export bytes / records | 8 MiB / 64 records | Python `ExportLimits` |
 
@@ -60,11 +68,23 @@ context and can be decoded independently. A section or interface-context change
 also closes the preceding segment. A beacon plus context exceeding the segment
 limit fails export explicitly rather than producing an oversized file.
 
-Retention deletes oldest **owned closed export files** in the dedicated export
-directory to satisfy the byte/file limits. Its reserved UUID/sequence naming
-pattern, regular-file type, current UID and descriptor identity checks exclude
-unrelated names, symlinks and foreign owners. Do not store unrelated files under
-that reserved naming pattern. Retention continues across export/session restarts.
+There is no default file-count or total-output-size limit, and no automatic
+deletion of completed captures. Export stops at the free-space reserve, closes
+valid buffered output and leaves existing files intact while analysis continues.
+For operators who explicitly need a ring buffer, positive `--beacon-retained-mb`
+or `--beacon-retained-files` values enable the existing oldest-owned-file deletion
+policy; zero disables each cap. Unrelated names, symlinks and foreign owners are
+never candidates. Do not store unrelated files under the reserved export naming
+pattern. Explicit retention applies across export/session restarts.
+
+Hourly rotation with a 256 MiB per-file fallback is a practical default for
+long captures; busy channels can still produce multiple files per hour. Output
+is streamed to disk, so a larger file does not allocate that size in RAM or
+increase the 8 MiB pending queue. This is an application default, not a microSD
+or Raspberry Pi requirement. The duration and per-file size remain configurable.
+Without explicit retention, storage accounting keeps byte totals rather than an
+unbounded in-memory file list; publication/download catalogs remain bounded.
+
 An exclusive directory writer lease prevents concurrent writers; after obtaining
 it, a new writer removes only owned reserved-name partials left by a crashed
 worker. Closed files are published with an atomic no-replace hard link after
@@ -86,7 +106,7 @@ worker exit, in which case its lease prevents unsafe concurrent cleanup.
 Status publishes requested/active state, current path, successfully closed
 beacon count, active-file count, skipped beacons, queue pressure/queued bytes,
 retained bytes/deletions, container selection counts and errors/incomplete
-output. Closed counts include segments subsequently removed by retention; they
+output. Closed counts include segments subsequently removed manually or by opt-in retention; they
 are cumulative export progress, not the number of currently downloadable
 beacons. After a storage fault, turn export off, resolve storage availability,
 and turn it back on. Unsupported/truncated/malformed packet counts remain
@@ -213,7 +233,7 @@ Live integration now connects the shared source, bounded worker, rotation,
 retention, status and downloads. Device acceptance remains: install on Pi 4/5,
 start a fresh session, toggle export and CSV/JSONL independently while several
 consumers attach, wait for a time rollover, stop export and download at least
-two closed segments. Decode every segment with TShark and check beacon-only
+two closed segments (use a shorter explicit rotation for a quick test). Decode every segment with TShark and check beacon-only
 contents, original times/radiotap and continuity of retry/client history during
 busy traffic. Exercise supported direct/Core lifecycle, stop during startup,
 service restart and radio restoration. Use a disposable/test filesystem for

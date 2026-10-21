@@ -22,28 +22,32 @@ from beacon_live.pcapng import BeaconFilter, ExportStats, SHB, IDB
 
 MIB = 1024 * 1024
 MAX_CONTEXT_BYTES = 256 * 1024
-OWNED_NAME = re.compile(r"utilization_beacons_[0-9a-f]{32}_[0-9]{6}\.pcapng\Z")
-PARTIAL_NAME = re.compile(r"utilization_beacons_[0-9a-f]{32}_[0-9]{6}\.pcapng\.partial\Z")
+OWNED_NAME = re.compile(r"utilization_beacons_[0-9a-f]{32}_[0-9]{6,}\.pcapng\Z")
+PARTIAL_NAME = re.compile(r"utilization_beacons_[0-9a-f]{32}_[0-9]{6,}\.pcapng\.partial\Z")
 
 
 @dataclass(frozen=True)
 class ExportLimits:
-    segment_bytes: int = 64 * MIB
-    rotation_seconds: float = 300.0
-    retained_bytes: int = 512 * MIB
-    retained_files: int = 16
+    segment_bytes: int = 256 * MIB
+    rotation_seconds: float = 3600.0
+    retained_bytes: int = 0  # Disabled unless an operator explicitly opts in.
+    retained_files: int = 0
     min_free_bytes: int = 256 * MIB
     queue_bytes: int = 8 * MIB
     queue_records: int = 64
 
     def validate(self):
-        if (min(self.segment_bytes, self.retained_bytes, self.retained_files,
-                self.queue_bytes, self.queue_records) <= 0 or self.rotation_seconds <= 0
-                or self.min_free_bytes < 0 or self.segment_bytes > self.retained_bytes
+        if (min(self.segment_bytes, self.queue_bytes, self.queue_records) <= 0 or self.rotation_seconds <= 0
+                or min(self.min_free_bytes, self.retained_bytes, self.retained_files) < 0
+                or (self.retained_bytes > 0 and self.segment_bytes > self.retained_bytes)
                 or not math.isfinite(self.rotation_seconds)
                 or self.retained_files > 256 or self.queue_records > 4096
                 or self.queue_bytes > 256 * MIB):
             raise ValueError("Invalid beacon export limits")
+
+
+class LowDiskError(OSError):
+    """Reserve reached before a new write; buffered valid output can close."""
 
 
 @dataclass(frozen=True)
@@ -93,6 +97,8 @@ class RotatingBeaconWriter:
         self.deleted_segments = 0
         self.closed: list[ClosedLog] = []
         self.retained = []
+        self.retention_enabled = bool(limits.retained_bytes or limits.retained_files)
+        self.closed_bytes = 0
         for path in directory.iterdir():
             if PARTIAL_NAME.fullmatch(path.name):
                 info = path.lstat()
@@ -101,35 +107,39 @@ class RotatingBeaconWriter:
             if OWNED_NAME.fullmatch(path.name):
                 info = path.lstat()
                 if stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid():
-                    self.retained.append((path, info))
+                    self.closed_bytes += info.st_size
+                    if self.retention_enabled:
+                        self.retained.append((path, info))
         self.retained.sort(key=lambda item: (item[1].st_mtime_ns, item[0].name))
         self.started = self.clock()
         self._budget(0, opening=False)
 
     @property
     def retained_bytes(self):
-        return sum(info.st_size for _, info in self.retained) + self.size
+        return self.closed_bytes + self.size
 
     def _budget(self, incoming, *, opening):
         while self.retained and (
-            self.retained_bytes + incoming > self.limits.retained_bytes
-            or len(self.retained) + int(self.stream is not None or opening) > self.limits.retained_files
+            (self.limits.retained_bytes > 0 and self.retained_bytes + incoming > self.limits.retained_bytes)
+            or (self.limits.retained_files > 0 and len(self.retained) + int(self.stream is not None or opening) > self.limits.retained_files)
         ):
             path, expected = self.retained.pop(0)
             try:
                 current = path.lstat()
             except FileNotFoundError:
+                self.closed_bytes -= expected.st_size
                 continue
             if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino, current.st_uid) != (
                     expected.st_dev, expected.st_ino, os.geteuid()):
                 raise OSError("Retained beacon file identity changed")
             path.unlink()
+            self.closed_bytes -= expected.st_size
             self.closed = [item for item in self.closed if item.path != path]
             self.deleted_segments += 1
-        if self.retained_bytes + incoming > self.limits.retained_bytes:
+        if self.limits.retained_bytes > 0 and self.retained_bytes + incoming > self.limits.retained_bytes:
             raise OSError("Beacon export retention byte limit reached")
         if self.disk_usage(self.directory).free - incoming < self.limits.min_free_bytes:
-            raise OSError("Beacon export stopped: low disk space")
+            raise LowDiskError("Beacon export stopped: low disk space")
 
     def maintain(self):
         if self.stream is not None and self.clock() - self.started >= self.limits.rotation_seconds:
@@ -145,8 +155,6 @@ class RotatingBeaconWriter:
         self._budget(header_size + len(packet), opening=self.stream is None)
         if self.stream is None:
             self.sequence += 1
-            if self.sequence > 999999:
-                raise OSError("Beacon export segment sequence exhausted")
             final = self.directory / f"utilization_beacons_{self.run}_{self.sequence:06d}.pcapng"
             self.path = final.with_suffix(".pcapng.partial")
             fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -180,7 +188,9 @@ class RotatingBeaconWriter:
         self.closed.append(ClosedLog(final, info.st_dev, info.st_ino, info.st_size,
                                      info.st_mtime_ns, self.wall_clock()))
         self.closed = self.closed[-256:]
-        self.retained.append((final, info))
+        self.closed_bytes += info.st_size
+        if self.retention_enabled:
+            self.retained.append((final, info))
         self.exported_beacons += self.active_beacons
         self.path = None
         self.size = self.active_beacons = 0
@@ -224,7 +234,7 @@ def _export_worker(records, reports, control, pending_bytes, directory, limits, 
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     writer = None
-    generation = -1
+    generation = writer_generation = failed_generation = -1
     enabled = False
     error = None
     incomplete = False
@@ -250,7 +260,7 @@ def _export_worker(records, reports, control, pending_bytes, directory, limits, 
         nonlocal last_report
         if force or time.monotonic() - last_report >= 0.1:
             _latest(reports, (BeaconExportStatus(
-                active=enabled and error is None, path=writer.path if writer else None,
+                active=(enabled or writer is not None) and error is None, path=writer.path if writer else None,
                 exported_beacons=committed + (writer.exported_beacons if writer else 0),
                 active_beacons=writer.active_beacons if writer else 0,
                 skipped_beacons=skipped + (writer.skipped_beacons if writer else 0),
@@ -261,18 +271,18 @@ def _export_worker(records, reports, control, pending_bytes, directory, limits, 
             last_report = time.monotonic()
 
     def synchronize():
-        nonlocal generation, enabled, error, writer
+        nonlocal generation, enabled, error
         with control.get_lock():
             desired_generation, desired_enabled, stopping = control[:]
         if desired_generation != generation:
-            finish()
-            generation, enabled, error = desired_generation, bool(desired_enabled), None
+            generation, enabled = desired_generation, bool(desired_enabled)
             if enabled:
-                writer = writer_factory(directory, limits)
+                error = None
         return stopping
 
     try:
         while True:
+            epoch = writer_generation
             try:
                 stopping = synchronize()
                 orphaned = os.getppid() != parent_pid
@@ -281,31 +291,43 @@ def _export_worker(records, reports, control, pending_bytes, directory, limits, 
                 except queue.Empty:
                     with pending_bytes.get_lock():
                         drained = pending_bytes.value == 0
+                    if drained and not enabled:
+                        finish()
                     if orphaned or (stopping and drained):
                         break
                 else:
                     with pending_bytes.get_lock():
                         pending_bytes.value -= size
-                    # A control may change while get() waits. Admit a packet
-                    # from the new generation rather than discard its first
-                    # beacon using a stale pre-wait control value.
                     synchronize()
-                    if enabled and error is None and epoch == generation:
+                    # All queued packets were accepted while export was on.
+                    # Drain them even after Stop; a later Start epoch opens a
+                    # fresh writer only after earlier accepted packets finish.
+                    if epoch <= failed_generation:
+                        skipped += 1
+                    else:
                         try:
+                            if writer is None or epoch != writer_generation:
+                                finish()
+                                writer = writer_factory(directory, limits)
+                                writer_generation = epoch
                             writer.write(context, packet)
                         except OSError:
                             skipped += 1
                             raise
-                    else:
-                        skipped += 1
                 if writer is not None:
                     writer.maintain()
             except OSError as exc:
-                error, incomplete, enabled = str(exc), True, False
+                error, incomplete = str(exc), True
+                failed_generation = max(failed_generation, epoch)
                 try:
-                    finish(abort=True)
+                    # A reserve check precedes writes. Preserve valid buffered
+                    # output; actual write failures still discard partials.
+                    finish(abort=not isinstance(exc, LowDiskError))
                 except OSError:
-                    writer = None
+                    try:
+                        finish(abort=True)
+                    except OSError:
+                        writer = None
             report()
         try:
             finish()

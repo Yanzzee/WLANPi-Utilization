@@ -535,3 +535,39 @@ def test_export_and_logging_controls_share_owner_without_resetting_analysis(serv
     final = until(client, lambda pub: pub.phase is SessionPhase.STOPPED)
     assert not final.beacon_export.active and final.closed_exports
     assert final.snapshot == before.snapshot
+
+
+def test_fpms_export_menu_controls_real_cli_and_existing_service_owner(service, tmp_path, monkeypatch):
+    from integration.wlanpi_fpms import channel_utilization as fpms
+    from beacon_live.beacon_export import ExportLimits
+    from test_pcapng import section, interface, packet
+    client, _ = service
+    directory = tmp_path / "beacons"
+    directory.mkdir()
+    (directory / "fixture_source.pcapng").write_bytes(section() + interface() + packet())
+    started = client.ensure(config(tmp_path, export_directory=directory, export_limits=ExportLimits(min_free_bytes=0)))
+    before = until(client, lambda pub: pub.phase is SessionPhase.RUNNING)
+    settings = tmp_path / "fpms.json"
+    settings.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.delenv("WLANPI_UTILIZATION_RUNTIME_MODE", raising=False)
+    monkeypatch.setattr(fpms, "BACKEND_CONFIG", settings)
+    monkeypatch.setattr(fpms, "_display_status", lambda *args: None)
+    real_run = subprocess.run
+    monkeypatch.setattr(fpms.subprocess, "run", lambda command, **options: real_run(
+        [sys.executable, "-m", "beacon_live.device", *command[1:], "--socket", str(client.socket_path)], **options))
+    state = {"display_state": "menu"}
+    menu = fpms.build_channel_utilization_menu(state)
+    state["option_selected"] = menu["action"]
+    state["channel_utilization_menu_enter"]()
+    next(item["action"] for item in menu["action"] if item["name"] == "Start Export")()
+    until(client, lambda pub: pub.beacon_export.active_beacons > 0)
+    state["channel_utilization_menu_enter"]()
+    assert "Start Export" not in [item["name"] for item in menu["action"]]
+    next(item["action"] for item in menu["action"] if item["name"] == "Stop Export")()
+    closed = until(client, lambda pub: not pub.beacon_export.active and bool(pub.closed_exports))
+    state["channel_utilization_menu_enter"]()
+    assert "Start Export" in [item["name"] for item in menu["action"]]
+    assert "Stop Export" not in [item["name"] for item in menu["action"]]
+    assert closed.session_id == started.session_id and closed.snapshot == before.snapshot
+    assert not closed.logging.active
+    assert len((tmp_path / "stats.owners").read_text().splitlines()) == 1

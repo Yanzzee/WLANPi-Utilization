@@ -125,6 +125,8 @@ export async function checkWebUi({html, source, status}) {
     await settle();
     assert.equal(calls.some(call => call.url === "/apps" || call.options.method === "POST"), false);
     assert.equal(calls.some(call => call.url.endsWith("interfaces")), false);
+    assert.match(elements.get("export-policy").textContent, /no file-count limit.*no total-size limit/);
+    assert.match(elements.get("export-policy").textContent, /1 hour or 256 MiB/);
     assert.ok(html.includes("Strongest radio"));
     assert.ok(!html.includes("Strongest estimated radio"));
     assert.equal(elements.get("channel-width").children[0].textContent, "Band default (20 MHz)");

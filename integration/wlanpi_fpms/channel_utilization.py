@@ -225,12 +225,16 @@ class _SessionMenu:
         else:
             band, channel = _session_channel(state)
             logging_active = bool(state.get("logging", {}).get("active"))
-            signature = ("active", state.get("session_id"), band, channel, logging_active)
+            exported = state.get("beacon_export") or {}
+            export_active = bool(exported.get("requested") or exported.get("active"))
+            signature = ("active", state.get("session_id"), band, channel, logging_active, export_active)
             actions = [
                 {"name": "Connect Session", "action": _resume_action(self.app)},
                 {"name": "Stop Session", "action": _stop_session_action(self.app)},
                 {"name": "Stop Logging" if logging_active else "Start Logging",
                  "action": _stop_logging_action(self.app) if logging_active else _logging_only_action(self.app, band, channel)},
+                {"name": "Stop Export" if export_active else "Start Export",
+                 "action": _export_action(self.app, not export_active)},
             ]
         if signature == self.signature:
             return False
@@ -336,6 +340,8 @@ def _band_menu(
         if configured_runtime_mode() == "standalone":
             # Preserve the explicit legacy background-logging exit control.
             actions[-1]["action"].append({"name": "Stop Logging", "action": _stop_logging_action(app)})
+        else:
+            actions[-1]["action"].append({"name": "Start Export", "action": _export_action(app, True, band, channel)})
     return {"name": name, "action": actions}
 
 
@@ -380,6 +386,13 @@ def _resume_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
         app.resume()
 
     return resume
+
+
+def _export_action(app, enabled, band=None, channel=None):
+    def control_export():
+        app.set_beacon_export(enabled, band=band, channel=channel)
+        _return_to_menu(app.g_vars)
+    return control_export
 
 
 def _stop_session_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
@@ -431,6 +444,16 @@ def _set_managed_logging(state, enabled: bool) -> None:
     )
     if result.returncode != 0:
         raise OSError(result.stderr.strip() or "Utilization logging control failed")
+
+
+def _set_managed_export(state, enabled: bool) -> None:
+    result = subprocess.run(
+        [EXECUTABLE, "session", "export", "--session-id", state["session_id"],
+         "--enabled", "yes" if enabled else "no", "--summary"],
+        capture_output=True, text=True, timeout=6,
+    )
+    if result.returncode != 0:
+        raise OSError(result.stderr.strip() or "Utilization export control failed")
 
 
 class ChannelUtilizationApp:
@@ -612,6 +635,35 @@ class ChannelUtilizationApp:
             band=band,
             channel=channel,
         )
+
+    def set_beacon_export(self, enabled: bool, *, band=None, channel=None) -> None:
+        try:
+            running = _managed_session_status()
+            if running is None:
+                if not enabled:
+                    _display_status(self.g_vars, "Beacon export already stopped")
+                    return
+                if band is None or channel is None:
+                    _display_status(self.g_vars, "No session. Select a channel first.")
+                    return
+                command = build_launch_command(band=band, channel=channel, logging=False)
+                result = subprocess.run(command + ["--start-only", "--beacon-pcapng"],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode != 0:
+                    raise OSError(result.stderr.strip() or "Unable to start beacon export")
+            else:
+                if running["phase"] == "stopping":
+                    _display_status(self.g_vars, "Session stopping. Please wait.")
+                    return
+                state = running.get("beacon_export") or {}
+                if enabled == bool(state.get("requested") or state.get("active")):
+                    _display_status(self.g_vars, "Beacon export already requested" if enabled else "Beacon export already stopped")
+                    return
+                _set_managed_export(running, enabled)
+            _display_status(self.g_vars, "Beacon export requested" if enabled else "Export stopping; saving file")
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization beacon export control failed")
+            _display_error(self.g_vars, "Export control failed. Check journal.")
 
     def stop_capture(self) -> None:
         try:

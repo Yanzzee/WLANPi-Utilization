@@ -50,14 +50,16 @@ that renderer. Capture and active logging continue with zero renderers. FPMS
 managed mode checks status when entering Utilization with Right or Center.
 Idle sessions offer band/channel selection. Active sessions show **Connect
 Session**, **Stop Session**, and only the applicable **Start Logging** or
-**Stop Logging** action; no separate running-status item is shown. Left from the
+**Stop Logging** action, plus only **Start Export** or **Stop Export** according
+to the shared beacon-export state; no separate running-status item is shown. Left from the
 managed display refreshes this menu and returns directly to these controls,
 even when capture started from a channel submenu. Connect Session cannot create
 a replacement session. A brief band/channel popup shows
 once per display connection, never on periodic FPMS refresh. Starting the
 display from idle FPMS, or joining its active logging-only proxy, does not show
 that notice. Even a stale channel menu adopts the current active source.
-Idle managed channel submenus offer Start Session, Start + Log and Start Logging;
+Idle managed channel submenus offer Start Session, Start + Log, Start Logging
+and Start Export (a session with pcapng export enabled and CSV/JSONL off);
 Stop Logging belongs only to an active session with logging enabled. The explicit
 legacy standalone mode retains its background-logging stop control.
 Start Session and Start + Log are the idle channel actions. Start Logging and
@@ -75,7 +77,7 @@ at most every two seconds. The normal FPMS menu loop consumes changes and
 redraws only when needed, so web/CLI changes normally appear within a few seconds.
 There is no polling in other apps, the parent Apps menu, or the active display.
 An external start/stop returns a stale channel submenu to the appropriate root
-menu; logging changes preserve a valid highlighted row. Reads pending before a
+menu; logging/export changes preserve a valid highlighted row. Reads pending before a
 new local action cannot overwrite its refreshed state. Unavailable status shows
 Session unavailable and recovers when the service returns.
 

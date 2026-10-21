@@ -34,7 +34,7 @@ def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
     assert menu["name"] == "Utilization"
     assert [item["name"] for item in menu["action"]] == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
     assert "Stop Session" not in [item["name"] for item in menu["action"][0]["action"][0]["action"]]
-    assert [item["name"] for item in menu["action"][0]["action"][0]["action"]] == ["Start Session", "Start + Log", "Start Logging"]
+    assert [item["name"] for item in menu["action"][0]["action"][0]["action"]] == ["Start Session", "Start + Log", "Start Logging", "Start Export"]
 
 
 def test_new_fpms_install_defaults_to_managed_but_preserves_explicit_standalone():
@@ -77,12 +77,12 @@ def test_visible_menu_tracks_external_session_and_logging_changes_and_keeps_sele
     current = {"session_id": "a" * 32, "phase": "running", "config": {"band": "5", "channel": "36"},
                "logging": {"active": False}}
     assert _poll_menu(root, controller, now)
-    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Start Logging"]
+    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Start Logging", "Start Export"]
     assert state["current_menu_location"] == [0, 0, 0]
     state["current_menu_location"][-1] = 2
     current = dict(current, logging={"active": True})
     assert _poll_menu(root, controller, now)
-    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Stop Logging"]
+    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Stop Logging", "Start Export"]
     assert state["current_menu_location"][-1] == 2
     assert not _poll_menu(root, controller, now)  # No unnecessary redraws.
     current = None
@@ -172,7 +172,7 @@ def test_managed_stop_logging_targets_external_owner_and_reports_request(monkeyp
     monkeypatch.setattr(channel_utilization, "_set_managed_logging", lambda state, enabled: calls.append((state["session_id"], enabled)))
     monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
     menu = _open_managed_menu({})
-    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Stop Logging"]
+    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Stop Logging", "Start Export"]
     menu["action"][2]["action"]()
     assert calls == [(current["session_id"], False)]
     assert messages == [f"Logging stop requested: Ch 5 5975 MHz Log folder: {channel_utilization.LOG_DIR}"]
@@ -1543,3 +1543,57 @@ def test_scanner_font_candidates_reuses_loaded_fonts() -> None:
         ("unique-scanner-cache-test.ttf", 9),
         ("unique-scanner-cache-test.ttf", 8),
     ]
+
+
+def test_visible_menu_tracks_external_export_start_stop_independently_of_logging(monkeypatch):
+    state, menu, root, controller, now = _live_menu()
+    current = {"session_id": "a" * 32, "phase": "running", "config": {"band": "5", "channel": "36"},
+               "logging": {"active": True}, "beacon_export": {"requested": False, "active": False}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: current)
+    assert _poll_menu(root, controller, now)
+    assert [item["name"] for item in menu["action"]][-2:] == ["Stop Logging", "Start Export"]
+    state["current_menu_location"][-1] = 3
+    current = dict(current, beacon_export={"requested": True, "active": True})
+    assert _poll_menu(root, controller, now)
+    assert [item["name"] for item in menu["action"]][-2:] == ["Stop Logging", "Stop Export"]
+    assert state["current_menu_location"][-1] == 3
+    current = dict(current, beacon_export={"requested": False, "active": True})
+    assert not _poll_menu(root, controller, now)  # Still saving the current file.
+    current = dict(current, beacon_export={"requested": False, "active": False})
+    assert _poll_menu(root, controller, now)
+    assert menu["action"][3]["name"] == "Start Export"
+    current = None
+    assert _poll_menu(root, controller, now)
+    assert menu["action"][0]["name"] == "2.4 GHz"
+
+
+@pytest.mark.parametrize("enabled,requested", [(True, False), (False, True), (True, True), (False, False)])
+def test_fpms_export_controls_existing_owner_and_does_not_duplicate_requests(monkeypatch, enabled, requested):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    current = {"session_id": "a" * 32, "phase": "running", "config": {"band": "6", "channel": "5"},
+               "logging": {"active": True}, "beacon_export": {"requested": requested, "active": requested}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: current)
+    calls, messages = [], []
+    monkeypatch.setattr(channel_utilization, "_set_managed_export", lambda state, value: calls.append((state["session_id"], value)))
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
+    app = channel_utilization.ChannelUtilizationApp({})
+    app.set_beacon_export(enabled)
+    assert calls == ([(current["session_id"], enabled)] if enabled != requested else [])
+    assert current["logging"]["active"] is True
+    assert messages and "export" in messages[0].lower()
+
+
+def test_idle_fpms_export_starts_managed_session_without_renderer_or_csv_logging(monkeypatch):
+    from types import SimpleNamespace
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    calls = []
+    monkeypatch.setattr(channel_utilization.subprocess, "run", lambda command, **kwargs: (
+        calls.append(command) or SimpleNamespace(returncode=0, stdout="", stderr="")))
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda *args: None)
+    menu = channel_utilization.build_channel_utilization_menu({})
+    action = next(item["action"] for item in menu["action"][0]["action"][0]["action"] if item["name"] == "Start Export")
+    action()
+    assert len(calls) == 1
+    assert "--managed" in calls[0] and "--start-only" in calls[0] and "--beacon-pcapng" in calls[0]
+    assert calls[0][calls[0].index("--logging-initial-state") + 1] == "disabled"
+    assert calls[0][calls[0].index("--channel") + 1] == "1"

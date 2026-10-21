@@ -208,8 +208,9 @@ Only successfully closed CSV/JSONL and beacon pcapng segments registered by the
 capture owner are offered. CSV/JSONL hourly rollover, explicit logging stop, capture stop, and normal
 low-disk close register completed files. Active segments remain excluded;
 stop logging to download them while capture/history continue.
-Beacon pcapng defaults to 5-minute/64-MiB rotation and a 16-file/512-MiB budget;
-stop export to close its current file. Partial/failed output is never offered.
+Beacon pcapng defaults to hourly/256-MiB rotation with no file-count or total-size
+cap; a 256 MiB free-space reserve stops export without deleting completed files.
+Stop export drains accepted packets and closes its current file. Partial/failed output is never offered.
 
 The logging owner records device/inode, size, and modification time from the
 original open descriptor after flushing. A bounded broker catalog keeps the
@@ -223,9 +224,9 @@ The web process refuses symlinks, traversal, changed/replaced files, and active
 paths. Removed or changed records show **Unavailable** and return 404. A
 download whose descriptor is already open can finish if its name is later
 removed by retention. File reads/HTTP backpressure stay in the web process,
-independent of capture and ordered analysis. Export retention applies only to
-owned reserved-name pcapng segments in its dedicated directory, including across
-sessions. See [export limits and storage failure](beacon-export.md#rotation-retention-and-storage-failure).
+independent of capture and ordered analysis. Optional, explicitly enabled export retention applies only to owned reserved-name
+pcapng segments in its dedicated directory, including across sessions. Default
+sessions do not delete completed files. See [export limits and storage failure](beacon-export.md#rotation-retention-and-storage-failure).
 
 ## Pi browser acceptance
 

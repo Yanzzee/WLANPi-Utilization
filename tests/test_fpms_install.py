@@ -206,7 +206,7 @@ def test_native_menu_refreshes_on_entry_without_changing_other_apps(package, tmp
         elif phase == "stopping":
             assert names == ["Stopping Session"]
         else:
-            assert names == ["Connect Session", "Stop Session", "Start Logging"]
+            assert names == ["Connect Session", "Stop Session", "Start Logging", "Start Export"]
             assert all(isinstance(item["action"], FunctionType) for item in app["action"])
     assert len(reads) == 5
     state["current_menu_location"] = [0, 1]

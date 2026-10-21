@@ -250,9 +250,10 @@ session/logging/export controls, and closed CSV/JSONL/pcapng downloads. One sess
 switches between Start session and Stop session. The start dialog has a logging
 checkbox; Start logging/Stop logging remains a separate button during a session.
 Beacon pcapng export has its own start-dialog checkbox and live control under
-Log files. It retains original beacon bytes/times/radiotap from the shared source,
-rotates every 5 minutes or 64 MiB, and keeps up to 16 files / 512 MiB with a
-256 MiB free-space reserve. See [export controls and policy](docs/beacon-export.md).
+Log files. Managed FPMS also offers dynamic Start Export/Stop Export actions.
+Export retains original beacon bytes/times/radiotap from the shared source,
+rotates every hour or 256 MiB, and saves files without a default count/total-size
+cap. It stops export at a 256 MiB free-space reserve and closes buffered output. See [export controls and policy](docs/beacon-export.md).
 Opening, refreshing, or closing the page leaves capture running. The manual
 development server listens on loopback.
 See [protected deployment and Pi acceptance](docs/web-deployment.md)

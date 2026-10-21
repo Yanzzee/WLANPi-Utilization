@@ -194,8 +194,9 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   unchanged mixed-frame analyzer results. **5b implementation and local checks
   complete October 21:** same-source direct/Core fan-out, bounded spawned
   writer, rotation/retention/free-space limits, independent controls, health
-  and closed pcapng downloads. Physical Pi/busy-channel acceptance remains
-  pending; see the 5b evidence and device checks below. See
+  and closed pcapng downloads. Initial Pi export/download and Wireshark opening
+  confirmed October 21. Updated FPMS controls/hourly policy and broader physical
+  Pi/busy-channel acceptance remain pending; see the 5b evidence and device checks below. See
   [export foundation](beacon-export.md).
 - [ ] **6. Offline analysis and release acceptance.** Run the end-to-end
   workflow below with exported segments, record evidence, complete device and
@@ -1056,3 +1057,56 @@ supported AP-name, AP/classroom/schedule and date/timezone context, then close
 broader release checks. Export readability alone does not complete that gate.
 Version remains `2.1.0.dev0`; no tag or release is published. Operation details
 and remaining checks are in [beacon export](beacon-export.md).
+
+## Export controls and long capture policy — October 21, 2026
+
+**Device evidence:** the user reports milestone 5b functioning, with successful
+web download and opening of exported pcapng in Wireshark. This accepts the
+initial functional export/download path; busy-channel, broader Pi/Core and
+failure/release acceptance remain separate gates.
+
+**Completed locally:** managed FPMS channel submenus now offer Start Export,
+starting a managed session with beacon pcapng enabled and CSV/JSONL off. An
+active session offers exactly one Start Export/Stop Export action, independently
+of logging, and refreshes through the existing menu-return and two-second
+external-state polling paths. CLI export controls use the inspected current
+session ID; duplicate requests are acknowledged without another owner/writer.
+Stop Export remains present while accepted work drains and the file closes.
+CLI already provides `--beacon-pcapng`; no redundant flag was introduced.
+
+Defaults now rotate every **one hour or 256 MiB**, with **no file-count or
+total-output-size cap** and no deletion of completed files. The 256 MiB free-space
+reserve stops export while analysis continues. Explicit positive retention
+options remain opt-in for operators who want a ring buffer; zero is the default
+for both caps. Larger segments do not enlarge the bounded raw queue or buffer
+an entire file in RAM. Default storage accounting avoids retaining an unbounded
+file index; the existing bounded web download catalog is not a disk file limit.
+
+Stop Export now drains all accepted packets before closing its output rather
+than discarding queued records after the control generation changes. A later
+Start opens a new writer after older accepted records finish. Low-space reserve
+checks close valid buffered output; actual write failures still reject partial
+files. The existing bounded shutdown/error accounting remains for stalled or
+failed storage. The filename sequence no longer imposes a synthetic file-count
+ceiling.
+
+**Evidence:** full Python 3.13.3 regression passes **949 tests in 35.12 seconds**,
+including all four Core transport tests, native FPMS menu dispatch, real
+FPMS → CLI → broker/owner export controls and protected download checks. Two
+existing direct-worker fork deprecation warnings remain; fan-out/Core paths
+use spawn. New tests verify external export menu updates, preservation of
+logging/source/history, duplicate controls, idle Start Export, draining twelve
+accepted packets at Stop, low-space closure of valid output, retaining 320 files
+and more than 512 MiB of apparent data without default deletion, and retention
+across another writer start. Protected/local simulated-DOM checks confirm the
+hourly/256 MiB/unlimited policy display and existing web controls.
+
+**Next Pi check:** reinstall with `sudo ./scripts/install_wlanpi_fpms.sh`, then
+start export from an idle FPMS channel menu. Confirm Start/Stop Export follows
+web/CLI toggles without reopening the menu, and logging remains independent.
+Stop export before the hour boundary and download the closed buffered segment.
+For quick rotation acceptance, use an explicit shorter CLI rotation; default
+sessions now target longer projects. Record busy-channel continuity and normal
+session/radio cleanup. Milestone 6 offline-analysis context/end-to-end checks
+remain next; the Hosts tab is discussed only and remains unimplemented.
+Version remains `2.1.0.dev0`.
