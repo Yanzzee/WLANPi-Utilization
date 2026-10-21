@@ -311,15 +311,16 @@
     filesAt = 0;
   });
   ["cancel-start", "cancel-bottom"].forEach(id => $(id).addEventListener("click", () => $("start-dialog").close()));
-  const channelChoices = JSON.parse($("channel").dataset.channels);
   const captureOptions = JSON.parse($("capture-options").textContent);
+  const channelPlan = () => captureOptions[$("band").value];
+  const selectedChannel = () => channelPlan().channels[$("channel-width").value].find(choice => choice.value === $("channel").value);
   function optionsFor(select, entries, fallback) {
     const previous = select.value;
     select.replaceChildren(...entries.map(([value, label]) => {const option = node("option", "", label); option.value = String(value); return option;}));
     select.value = entries.some(([value]) => String(value) === previous) ? previous : String(fallback ?? entries[0]?.[0] ?? "");
   }
   function primaryCenters(width) {
-    const plan = captureOptions[$("band").value], primary = plan.defaults[$("channel").value]?.frequency;
+    const plan = channelPlan(), primary = plan.defaults[selectedChannel()?.primary]?.frequency;
     const size = width === "80+80" ? 80 : Number(width);
     return (plan.centers[width === "80+80" ? "80" : width] || []).filter(center => {
       const offset = primary - (center.frequency - size / 2 + 10);
@@ -328,32 +329,38 @@
   }
   function syncCenters() {
     const width = $("channel-width").value, wide = width && width !== "20";
-    $("centers").hidden = !wide; $("center-two").hidden = width !== "80+80";
-    $("center-one").required = Boolean(wide); $("center-two-choice").required = width === "80+80";
     const entries = centers => centers.map(c => [c.frequency, `${c.frequency} MHz (Ch ${c.channel})`]);
-    optionsFor($("center-one"), wide ? entries(primaryCenters(width)) : []);
-    const second = width === "80+80" ? captureOptions[$("band").value].centers["80"].filter(c => Math.abs(c.frequency - Number($("center-one").value)) > 80) : [];
+    const combinedCenter = selectedChannel()?.center;
+    const first = wide ? primaryCenters(width).filter(c => !combinedCenter || c.frequency === combinedCenter) : [];
+    optionsFor($("center-one"), entries(first));
+    const second = width === "80+80" ? channelPlan().centers["80"].filter(c => Math.abs(c.frequency - Number($("center-one").value)) > 80) : [];
     optionsFor($("center-two-choice"), entries(second));
+    $("center-one-field").hidden = first.length <= 1;
+    $("center-two").hidden = second.length <= 1;
+    $("centers").hidden = first.length <= 1 && second.length <= 1;
+    $("center-one").required = first.length > 1;
+    $("center-two-choice").required = second.length > 1;
   }
-  function syncWidths() {
-    const plan = captureOptions[$("band").value], defaultWidth = plan.defaults[$("channel").value]?.width || "20";
-    optionsFor($("channel-width"), [["", `Band default (${defaultWidth} MHz)`], ...plan.widths.filter(width => width === "20" || primaryCenters(width).length).map(width => [width, `${width === "80+80" ? "80 + 80" : width} MHz`])], "");
+  function syncChannels() {
+    const previousPrimary = Number($("channel").value.split(":")[0]);
+    const choices = channelPlan().channels[$("channel-width").value];
+    const preferred = choices.find(choice => choice.primary === previousPrimary)
+      || choices.find(choice => choice.primary === {"2.4": 1, "5": 36, "6": 5}[$("band").value]);
+    optionsFor($("channel"), choices.map(choice => [choice.value, choice.label]), preferred?.value);
+    $("channel-label").textContent = $("band").value === "2.4" && $("channel-width").value === "40" ? "Primary + secondary channel" : "Primary channel";
     syncCenters();
   }
-  $("band").addEventListener("change", () => {
-    $("channel").replaceChildren(...channelChoices[$("band").value].map(channel => {
-      const psc = $("band").value === "6" && channel >= 5 && (channel - 5) % 16 === 0;
-      const option = node("option", "", `${channel}${psc ? " (PSC)" : ""}`); option.value = String(channel); return option;
-    }));
-    $("channel").value = {"2.4": "1", "5": "36", "6": "5"}[$("band").value];
-    syncWidths();
-  });
-  $("channel").addEventListener("change", syncWidths);
-  $("channel-width").addEventListener("change", syncCenters);
-  $("center-one").addEventListener("change", () => {
-    syncCenters();
-  });
-  syncWidths();
+  function syncBand() {
+    const plan = channelPlan();
+    optionsFor($("channel-width"), [["", `Band default (${plan.default_width} MHz)`], ...plan.widths.map(width => [width, `${width === "80+80" ? "80 + 80" : width} MHz`])], "");
+    $("channel").value = "";
+    syncChannels();
+  }
+  $("band").addEventListener("change", syncBand);
+  $("channel").addEventListener("change", syncCenters);
+  $("channel-width").addEventListener("change", syncChannels);
+  $("center-one").addEventListener("change", syncCenters);
+  syncBand();
   function syncInterface() {
     const target = interfacesById.get($("iface").value);
     $("netns").readOnly = Boolean(target);
@@ -382,7 +389,9 @@
     event.preventDefault();
     if (!online || busy || (publication && activeSession(publication))) return;
     const data = new FormData(event.currentTarget), width = data.get("channel_width");
-    const body = {band: data.get("band"), channel: data.get("channel"), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled")};
+    const choice = selectedChannel();
+    if (!choice) {message("form-error", "Select a valid primary channel for this capture width."); return;}
+    const body = {band: data.get("band"), channel: String(choice.primary), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled")};
     const target = interfacesById.get(body.iface);
     if (body.iface !== "auto" && !target) {message("form-error", "Refresh interfaces and select an available interface."); return;}
     if (target) {body.iface = target.interface; body.netns = target.namespace;}

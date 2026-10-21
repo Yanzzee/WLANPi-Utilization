@@ -68,8 +68,26 @@ def web_channel_plan():
         for channel in PRIMARY_CHANNELS[band]:
             definition = default_channel_definition(primary_frequency_mhz=frequency(band, channel), band=band)
             defaults[str(channel)] = {"width": definition.width.value, "frequency": definition.primary_frequency_mhz}
+        default_width = defaults[str(PRIMARY_CHANNELS[band][0])]["width"]
+        choices = {}
+        for width in ("", *widths):
+            entries = []
+            for primary in PRIMARY_CHANNELS[band]:
+                centers = center_choices(band, primary, width or default_width)
+                if not centers:
+                    continue
+                label = f"{primary}" + (" (PSC)" if band == "6" and (primary - 5) % 16 == 0 else "")
+                if band == "2.4" and width == "40":
+                    for center in centers:
+                        center_channel = (center - 2407) // 5
+                        secondary = 2 * center_channel - primary
+                        entries.append({"value": f"{primary}:{center}", "primary": primary, "center": center,
+                                        "label": f"{primary} + {secondary} · center {center} MHz (Ch {center_channel})"})
+                else:
+                    entries.append({"value": str(primary), "primary": primary, "label": label})
+            choices[width] = entries
         result[band] = {
-            "widths": widths, "defaults": defaults,
+            "widths": widths, "defaults": defaults, "default_width": default_width, "channels": choices,
             "centers": {width: [{"frequency": frequency(band, c), "channel": c} for c in channels]
                         for width, channels in CENTERS[band].items()},
         }

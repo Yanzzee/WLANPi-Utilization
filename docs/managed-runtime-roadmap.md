@@ -938,3 +938,37 @@ capture checks. This UI refinement does not advance live export: milestone 5b
 (same-source full-packet fan-out, beacon worker, rotation/disk limits/status/
 downloads) remains next, followed by milestone 6 offline-analysis/release checks.
 Version remains `2.1.0.dev0`.
+
+## Width-first web session setup — October 21, 2026
+
+**Completed locally:** setup now follows Band → Capture width → Primary channel.
+The shared static plan supplies only primaries valid for that width. Changing
+width preserves a valid primary or replaces an invalid one. Band default filters
+to the width shown in its label (20 MHz on 2.4 GHz, 80 MHz on 5/6 GHz); select
+20 MHz explicitly for upper 6 GHz edge primaries. Runtime and CLI defaults,
+including their edge fallback, remain unchanged.
+
+At 2.4 GHz 40 MHz, the channel dropdown combines primary/secondary and bonded
+center choices. For example, primary 6 offers secondary 2 with center 2427 MHz
+(channel 4), or secondary 10 with center 2447 MHz (channel 8). Requests retain
+primary 6 and submit the chosen bonded center separately. There is no separate
+center selector for these pairings. Other unique centers are derived and hidden;
+selectors appear only for genuine choices, including overlapping 6 GHz 320 MHz
+placements and the second nonadjacent 80+80 segment. Hardware/regulatory checks
+and shared-session capture/analysis behavior retain their existing contracts.
+
+**Evidence:** full Python 3.13.3 regression passes **901 tests with one optional
+Core transport skip in 25.27 seconds**. New checks cover every band's width
+choices, omitted invalid primaries, both 2.4 GHz secondary directions and default
+edge filtering. Protected/local simulated-DOM checks pass, including valid
+primary preservation/replacement, PSC labels, hidden unique centers, visible
+320/80+80 choices and actual start-request payloads for both 2.4 GHz pairings,
+an automatically derived 5 GHz center and a selected 320 MHz placement.
+
+**Next device check:** reinstall with `sudo ./scripts/install_wlanpi_fpms.sh`,
+reload the web page and exercise Band → Width → Channel. Verify both 2.4 GHz
+40 MHz pairings where supported, hidden unique centers, wider-channel filtering,
+PSC labels and actual tuning in the running-session header. Native rendered
+dropdown and adapter/regulatory acceptance remain pending. Milestone 5b live
+beacon export remains next; this refinement does not advance its completion.
+Version remains `2.1.0.dev0`.

@@ -132,6 +132,7 @@ export async function checkWebUi({html, source, status}) {
     assert.match(text(elements.get("bssid-rows").children[0]), new RegExp(qbss.bssid));
     assert.equal(value.publication.snapshot.selected_bssid, qbss.bssid);
     elements.get("band").value = "6"; elements.get("band").events.change();
+    elements.get("channel-width").value = "20"; elements.get("channel-width").events.change();
     const choices = elements.get("channel").children;
     assert.equal(choices.length, 59);
     assert.equal(choices.find(option => option.value === "5").textContent, "5 (PSC)");
@@ -139,26 +140,48 @@ export async function checkWebUi({html, source, status}) {
     assert.equal(choices.filter(option => option.textContent.includes("PSC")).length, 15);
     elements.get("band").value = "2.4"; elements.get("band").events.change();
     assert.equal(elements.get("channel").children.some(option => option.textContent.includes("PSC")), false);
-    elements.get("channel").value = "5"; elements.get("channel").events.change();
+    elements.get("channel").value = "6"; elements.get("channel").events.change();
     elements.get("channel-width").value = "40"; elements.get("channel-width").events.change();
-    assert.deepEqual(elements.get("center-one").children.map(option => option.value), ["2422", "2442"]);
-    assert.equal(elements.get("center-one").children[0].textContent, "2422 MHz (Ch 3)");
+    assert.equal(elements.get("channel").value, "6:2427");
+    assert.equal(elements.get("channel-label").textContent, "Primary + secondary channel");
+    assert.equal(elements.get("channel").children.some(option => option.value === "14"), false);
+    assert.equal(elements.get("channel").children.find(option => option.value === "6:2447").textContent, "6 + 10 · center 2447 MHz (Ch 8)");
+    assert.equal(elements.get("centers").hidden, true);
+    assert.equal(elements.get("center-one").value, "2427");
+    elements.get("channel").value = "6:2447"; elements.get("channel").events.change();
+    assert.equal(elements.get("center-one").value, "2447");
+    assert.equal(elements.get("center-one-field").hidden, true);
+    elements.get("channel-width").value = "20"; elements.get("channel-width").events.change();
+    assert.equal(elements.get("channel").value, "6");
     elements.get("channel").value = "14"; elements.get("channel").events.change();
-    assert.deepEqual(elements.get("channel-width").children.map(option => option.value), ["", "20"]);
+    elements.get("channel-width").value = "40"; elements.get("channel-width").events.change();
+    assert.equal(elements.get("channel").value, "1:2422");
     elements.get("band").value = "5"; elements.get("band").events.change();
     assert.equal(elements.get("channel-width").children[0].textContent, "Band default (80 MHz)");
     assert.equal(elements.get("channel-width").children.some(option => option.value === "320"), false);
     elements.get("channel-width").value = "80"; elements.get("channel-width").events.change();
     assert.deepEqual(elements.get("center-one").children.map(option => option.value), ["5210"]);
+    assert.equal(elements.get("centers").hidden, true);
+    assert.equal(elements.get("channel-label").textContent, "Primary channel");
     elements.get("band").value = "6"; elements.get("band").events.change();
-    elements.get("channel").value = "65"; elements.get("channel").events.change();
     elements.get("channel-width").value = "320"; elements.get("channel-width").events.change();
+    elements.get("channel").value = "65"; elements.get("channel").events.change();
     assert.deepEqual(elements.get("center-one").children.map(option => option.value), ["6265", "6425"]);
+    assert.equal(elements.get("centers").hidden, false);
+    assert.equal(elements.get("center-one-field").hidden, false);
+    elements.get("channel").value = "1"; elements.get("channel").events.change();
+    assert.equal(elements.get("centers").hidden, true);
     elements.get("channel-width").value = "80+80"; elements.get("channel-width").events.change();
+    assert.equal(elements.get("center-one-field").hidden, true);
+    assert.equal(elements.get("center-two").hidden, false);
+    assert.equal(elements.get("centers").hidden, false);
     assert.ok(elements.get("center-two-choice").children.every(option => Math.abs(Number(option.value) - Number(elements.get("center-one").value)) > 80));
+    elements.get("channel-width").value = "20"; elements.get("channel-width").events.change();
     elements.get("channel").value = "233"; elements.get("channel").events.change();
-    assert.equal(elements.get("channel-width").children[0].textContent, "Band default (20 MHz)");
-    assert.deepEqual(elements.get("channel-width").children.map(option => option.value), ["", "20"]);
+    elements.get("channel-width").value = ""; elements.get("channel-width").events.change();
+    assert.equal(elements.get("channel-width").children[0].textContent, "Band default (80 MHz)");
+    assert.equal(elements.get("channel").children.some(option => option.value === "233"), false);
+    assert.equal(elements.get("channel").value, "5");
     elements.get("band").value = "2.4"; elements.get("band").events.change();
     elements.get("channel-width").value = "20"; elements.get("channel-width").events.change();
 
@@ -245,13 +268,31 @@ export async function checkWebUi({html, source, status}) {
     assert.match(elements.get("form-error").textContent, /Refresh interfaces/);
     interfaceInventory = availableInterfaces;
     await elements.get("refresh-interfaces").events.click();
+    for (const [band, width, channel, primary, center] of [
+      ["2.4", "40", "6:2427", "6", 2427],
+      ["2.4", "40", "6:2447", "6", 2447],
+      ["5", "80", "44", "44", 5210],
+    ]) {
+      elements.get("band").value = band; elements.get("band").events.change();
+      elements.get("channel-width").value = width; elements.get("channel-width").events.change();
+      elements.get("channel").value = channel; elements.get("channel").events.change();
+      assert.equal(elements.get("centers").hidden, true);
+      await elements.get("start-form").events.submit({preventDefault() {}, currentTarget: elements.get("start-form")});
+      const payload = JSON.parse(calls.findLast(call => call.url.endsWith("session/start")).options.body);
+      assert.equal(payload.channel, primary);
+      assert.equal(payload.center_frequency1_mhz, center);
+      assert.equal(payload.channel_width, width);
+      assert.equal(payload.center_frequency2_mhz, undefined);
+      value.publication.phase = "stopped"; value.publication.revision++; await poll();
+      elements.get("session-toggle").events.click(); await settle();
+    }
     elements.get("band").value = "6"; elements.get("band").events.change();
     elements.get("channel").value = "65"; elements.get("channel").events.change();
     elements.get("channel-width").value = "320"; elements.get("channel-width").events.change();
     elements.get("center-one").value = "6425"; elements.get("center-one").events.change();
     await elements.get("start-form").events.submit({preventDefault() {}, currentTarget: elements.get("start-form")});
     await settle();
-    const start = calls.find(call => call.url.endsWith("session/start"));
+    const start = calls.findLast(call => call.url.endsWith("session/start"));
     assert.equal(JSON.parse(start.options.body).logging_enabled, true);
     assert.equal(JSON.parse(start.options.body).iface, "mon0");
     assert.equal(JSON.parse(start.options.body).netns, "lab");

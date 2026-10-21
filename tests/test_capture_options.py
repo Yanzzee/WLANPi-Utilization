@@ -1,6 +1,7 @@
 import pytest
 
-from beacon_live.capture_options import CENTERS, center_choices, validate_selection, web_channel_plan
+from beacon_live.capture_options import CENTERS, WIDTHS, center_choices, validate_selection, web_channel_plan
+from beacon_live.channel import PRIMARY_CHANNELS
 
 
 @pytest.mark.parametrize("band,primary,width,expected", [
@@ -44,3 +45,37 @@ def test_web_defaults_match_runtime_including_edge_fallbacks():
     assert plan["5"]["defaults"]["36"]["width"] == "80"
     assert plan["6"]["defaults"]["5"]["width"] == "80"
     assert plan["6"]["defaults"]["233"]["width"] == "20"
+
+
+@pytest.mark.parametrize("band,width", [(band, width) for band, widths in WIDTHS.items() for width in ("", *widths)])
+def test_width_first_choices_offer_all_and_only_valid_primaries(band, width):
+    plan = web_channel_plan()[band]
+    choices = plan["channels"][width]
+    effective_width = width or plan["default_width"]
+    assert {choice["primary"] for choice in choices} == {
+        primary for primary in PRIMARY_CHANNELS[band] if center_choices(band, primary, effective_width)
+    }
+    assert len({choice["value"] for choice in choices}) == len(choices)
+    for choice in choices:
+        if "center" in choice:
+            validate_selection(band, choice["primary"], width, choice["center"], None)
+        else:
+            assert choice["value"] == str(choice["primary"])
+    if width == "":
+        assert all(plan["defaults"][str(choice["primary"])]["width"] == effective_width for choice in choices)
+
+
+def test_24ghz_combined_choices_preserve_primary_and_both_secondary_directions():
+    choices = web_channel_plan()["2.4"]["channels"]["40"]
+    assert [choice for choice in choices if choice["primary"] == 6] == [
+        {"value": "6:2427", "primary": 6, "center": 2427, "label": "6 + 2 · center 2427 MHz (Ch 4)"},
+        {"value": "6:2447", "primary": 6, "center": 2447, "label": "6 + 10 · center 2447 MHz (Ch 8)"},
+    ]
+    assert not any(choice["primary"] == 14 for choice in choices)
+
+
+def test_band_edge_primaries_require_explicit_20mhz_in_width_first_form():
+    plan = web_channel_plan()["6"]
+    assert "233" not in {choice["value"] for choice in plan["channels"][""]}
+    assert "233" in {choice["value"] for choice in plan["channels"]["20"]}
+    assert next(choice for choice in plan["channels"]["20"] if choice["primary"] == 229)["label"] == "229 (PSC)"

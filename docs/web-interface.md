@@ -88,21 +88,31 @@ channel remains the integer. Session tuning shows the primary frequency,
 width in MHz and center frequency/frequencies supplied by the owner. Requested
 or unverified tuning is labeled accordingly.
 
-The capture-width menu labels the existing runtime policy: **Band default
-(20 MHz)** on 2.4 GHz, **Band default (80 MHz)** on normal 5/6 GHz primaries.
-An edge primary without a standard 80 MHz block shows the actual **20 MHz**
-fallback instead. This corrects the label without changing capture defaults.
-2.4 GHz offers 20/40 MHz, 5 GHz offers 20/40/80/160/80+80, and 6 GHz also
-offers 320 MHz. Widths with no valid block containing the chosen primary are
-omitted, including bonded widths for channel 14 or the upper 6 GHz edge.
+Session setup follows **Band → Capture width → Primary channel**. The width
+menu labels **Band default (20 MHz)** on 2.4 GHz and **Band default (80 MHz)** on
+5/6 GHz. 2.4 GHz offers 20/40 MHz, 5 GHz offers 20/40/80/160/80+80, and 6 GHz
+also offers 320 MHz. The channel dropdown includes only primaries belonging to
+a valid block for the selected width. Band default also filters to its displayed
+width; select **20 MHz** explicitly to access upper 6 GHz edge channels without
+an 80 MHz block. The runtime/CLI edge fallback remains unchanged. A primary is
+preserved when changing width if it remains valid; otherwise a valid choice
+replaces it. 6 GHz PSC labels remain on available primary channels.
 
-Explicit bonded widths use center-frequency dropdowns labelled, for example,
-**5210 MHz (Ch 42)**. Choices depend on band, width and primary; no free-text
-center is accepted. The first 80+80 segment contains the primary, and the second
-must be a different, nonadjacent 80 MHz block. Overlapping standard 320 MHz
-placements are both offered when applicable. The web start endpoint validates
-the same fixed plan, including hand-edited requests. The standard channel plan
-does not override adapter capabilities or regional restrictions checked at start.
+At 20 MHz, the center equals the primary frequency. At 2.4 GHz 40 MHz, the
+center is 10 MHz above or below the primary. The channel dropdown combines each
+valid primary/secondary pairing with its bonded center: **6 + 10 · center
+2447 MHz (Ch 8)** and **6 + 2 · center 2427 MHz (Ch 4)**. The primary remains
+channel 6 in both requests; center channel 8 or 4 never replaces it. Channel 14
+is omitted at 40 MHz. No separate center selector appears for these pairings.
+
+Other unique centers are derived automatically and their selectors stay hidden.
+An explicit selector appears only when there is more than one valid choice,
+labelled, for example, **6265 MHz (Ch 63)**. This retains overlapping 6 GHz
+320 MHz placements and the second nonadjacent segment for 80+80 MHz. The first
+80+80 segment contains the primary. No free-text center is accepted. The web
+start endpoint validates the same fixed plan, including hand-edited requests.
+The standard channel plan does not override adapter capabilities or regional
+restrictions checked at start.
 
 Fixed center channels used by the form:
 
