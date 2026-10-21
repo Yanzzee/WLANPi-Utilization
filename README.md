@@ -26,7 +26,7 @@ The primary target is a WLAN Pi R4 running WLAN Pi OS 26.10 DeadEye
 - WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
 - Python 3.13 or newer (the Trixie target is Python 3.13);
 - a monitor-mode-capable Wi-Fi interface supporting the selected frequency;
-- `git`, `ip`, `iw`, and TShark 4.4 (verified with 4.4.19); and
+- `git`, `ip`, `iw`, Dumpcap and TShark 4.4 (verified with 4.4.19); and
 - root access through `sudo`.
 
 The adapter, driver, and regulatory domain must permit the selected channel
@@ -246,9 +246,13 @@ ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
 ```
 
 The responsive page provides metrics, shared history graphs, a BSSID table,
-session/logging controls, and closed CSV/JSONL downloads. One session button
+session/logging/export controls, and closed CSV/JSONL/pcapng downloads. One session button
 switches between Start session and Stop session. The start dialog has a logging
 checkbox; Start logging/Stop logging remains a separate button during a session.
+Beacon pcapng export has its own start-dialog checkbox and live control under
+Log files. It retains original beacon bytes/times/radiotap from the shared source,
+rotates every 5 minutes or 64 MiB, and keeps up to 16 files / 512 MiB with a
+256 MiB free-space reserve. See [export controls and policy](docs/beacon-export.md).
 Opening, refreshing, or closing the page leaves capture running. The manual
 development server listens on loopback.
 See [protected deployment and Pi acceptance](docs/web-deployment.md)
@@ -506,8 +510,8 @@ before copying the application into `/opt/wlanpi-beacon-live`.
   metadata is 2.1.0.dev0.
 - [Web interface](docs/web-interface.md) — installation, shared-session controls,
   closed log downloads, and browser acceptance checks.
-- [Beacon pcapng export](docs/beacon-export.md) — offline helper, packet fidelity
-  checks, and the boundary before live export/rotation integration.
+- [Beacon pcapng export](docs/beacon-export.md) — live/offline controls, packet
+  fidelity, rotation/retention limits, storage isolation and device acceptance.
 - [Busy-channel validation](docs/busy-channel-validation.md) — corrupt-frame
   identity guards, capture-quality evidence, and Pi performance/retest steps.
 - [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones

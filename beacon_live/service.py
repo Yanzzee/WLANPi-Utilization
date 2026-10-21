@@ -38,6 +38,7 @@ SOURCE_FIELDS = (
     "channel_width", "center_frequency1_mhz", "center_frequency2_mhz",
     "interval_seconds", "local_cu", "survey_debug", "raw_capture_path",
     "core_diagnostics_path",
+    "export_directory", "export_limits",
 )
 
 
@@ -46,6 +47,11 @@ def validate_config(config: LiveSessionConfig) -> None:
         SUPPORTED_BANDS, explicit_channel_definition, resolve_survey_target_frequency_mhz,
     )
 
+    config.export_limits.validate()
+    if config.initial_export_enabled and config.export_directory is None:
+        raise ValueError("Beacon export requires an export directory")
+    if config.export_directory is not None and config.raw_capture_path is not None:
+        raise ValueError("Use raw diagnostic capture or managed beacon export in a session")
     if config.capture_backend not in {"direct", "core"}:
         raise ValueError("Capture backend must be direct or core")
     if config.band is not None and config.band not in SUPPORTED_BANDS:
@@ -86,6 +92,7 @@ class ServiceBroker:
         self.owner = None
         self.control_path = None
         self.catalog = {}
+        self.logging_requested = self.export_requested = False
 
     def _update(self, **changes):
         self.publication = replace(
@@ -125,7 +132,7 @@ class ServiceBroker:
                 attached = True
             else:
                 self._start(config)
-        elif op in {"stop", "logging"}:
+        elif op in {"stop", "logging", "export"}:
             if request.get("session_id") != self.publication.session_id:
                 raise ValueError("Stale Utilization session ID")
             if self.process is None or self.publication.phase not in ACTIVE_PHASES:
@@ -143,9 +150,15 @@ class ServiceBroker:
                 if self.publication.phase is SessionPhase.STOPPING:
                     raise ValueError("Session is stopping")
                 config = self.publication.config
-                if enabled and config.stats_csv is None and config.beacons_jsonl is None:
+                if op == "export":
+                    if enabled and config.export_directory is None:
+                        raise ValueError("This session has no beacon export source configured; start a new session")
+                    self.export_requested = enabled
+                    self._write_logging(self.logging_requested)
+                elif enabled and config.stats_csv is None and config.beacons_jsonl is None:
                     raise ValueError("This session has no logging formats configured")
-                self._write_logging(enabled)
+                else:
+                    self._write_logging(enabled)
         else:
             raise ValueError("Unknown Utilization service operation")
         return {"version": PROTOCOL_VERSION, "ok": True, "publication": to_wire(self.publication),
@@ -155,6 +168,7 @@ class ServiceBroker:
         session_id = uuid4().hex
         self.control_path = self.directory / f"{session_id}.logging.json"
         config = replace(config, logging_control_path=self.control_path, logging_status_path=None)
+        self.export_requested = config.initial_export_enabled
         parent, child = socket.socketpair()
         self.publication = RuntimePublication(
             session_id, self.publication.revision + 1, SessionPhase.STARTING,
@@ -185,9 +199,10 @@ class ServiceBroker:
     def _write_logging(self, enabled):
         import json
 
+        self.logging_requested = enabled
         temporary = self.control_path.with_suffix(".tmp")
         try:
-            temporary.write_text(json.dumps({"logging_enabled": enabled}))
+            temporary.write_text(json.dumps({"logging_enabled": enabled, "export_enabled": self.export_requested}))
             temporary.replace(self.control_path)
         finally:
             temporary.unlink(missing_ok=True)
@@ -208,7 +223,7 @@ class ServiceBroker:
                 self.publication = replace(
                     publication, phase=phase, revision=self.publication.revision + 1,
                 )
-                for log in publication.closed_logs:
+                for log in publication.closed_logs + publication.closed_exports:
                     key = hashlib.sha256(
                         f"{publication.session_id}:{log.path}:{log.inode}:{log.closed_at}".encode()
                     ).hexdigest()[:32]
@@ -226,6 +241,7 @@ class ServiceBroker:
                     phase=SessionPhase.FAILED, exit_code=code,
                     error=f"Capture owner exited before final publication ({code})",
                     logging=replace(self.publication.logging, active=False),
+                    beacon_export=replace(self.publication.beacon_export, active=False),
                 )
             self.owner.sock.close()
             self.process, self.owner = None, None

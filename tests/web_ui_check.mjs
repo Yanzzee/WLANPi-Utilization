@@ -64,7 +64,7 @@ export async function checkWebUi({html, source, status}) {
           const id = {channel_width: "channel-width", center_frequency1_mhz: "center-one", center_frequency2_mhz: "center-two-choice"}[key] || key;
           return key === "capture_backend" ? "direct" : elements.get(id)?.value;
         }
-        has(key) {return key === "logging_enabled" && elements.get("start-logging").checked;}
+        has(key) {return key === "logging_enabled" ? elements.get("start-logging").checked : key === "export_enabled" && elements.get("start-export").checked;}
       },
       Date: class extends Date {
         constructor(...args) {super(...(args.length ? args : [Date.UTC(2026, 9, 21, 19, 4, 5)]));}
@@ -79,6 +79,12 @@ export async function checkWebUi({html, source, status}) {
         if (code === 200 && options.method === "POST" && url.endsWith("session/start")) {
           value.publication.phase = "starting"; value.publication.revision++;
           value.publication.logging.active = JSON.parse(options.body).logging_enabled;
+          value.publication.beacon_export.requested = JSON.parse(options.body).export_enabled;
+        }
+        if (code === 200 && options.method === "POST" && url.endsWith("/export")) {
+          value.publication.beacon_export.requested = JSON.parse(options.body).enabled;
+          value.publication.beacon_export.active = JSON.parse(options.body).enabled;
+          value.publication.revision++;
         }
         if (code === 200 && options.method === "POST" && url.endsWith("session/stop")) {
           value.publication.phase = "stopping"; value.publication.revision++;
@@ -232,6 +238,15 @@ export async function checkWebUi({html, source, status}) {
     assert.equal(elements.get("logging-toggle").textContent, "Stop logging");
     assert.match(elements.get("error").textContent, /Fixture service error/);
     statusCode = 200;
+    assert.equal(elements.get("export-toggle").disabled, false);
+    assert.equal(elements.get("export-toggle").textContent, "Start beacon export");
+    const beforeExport = value.publication.session_id;
+    await elements.get("export-toggle").events.click(); await settle();
+    assert.equal(elements.get("export-toggle").textContent, "Stop beacon export");
+    assert.match(elements.get("export-status").textContent, /Export active/);
+    assert.equal(value.publication.session_id, beforeExport);
+    await elements.get("export-toggle").events.click(); await settle();
+    assert.equal(elements.get("export-toggle").textContent, "Start beacon export");
     value.logging_available = false; await poll();
     assert.equal(elements.get("logging-toggle").disabled, true);
     value.logging_available = true;
@@ -253,6 +268,7 @@ export async function checkWebUi({html, source, status}) {
     assert.equal(elements.get("netns").value, "lab");
     assert.equal(elements.get("netns").readOnly, true);
     elements.get("start-logging").checked = true;
+    elements.get("start-export").checked = true;
     await poll();
     assert.equal(elements.get("start-logging").checked, true);
     elements.get("cancel-start").events.click();
@@ -294,6 +310,7 @@ export async function checkWebUi({html, source, status}) {
     await settle();
     const start = calls.findLast(call => call.url.endsWith("session/start"));
     assert.equal(JSON.parse(start.options.body).logging_enabled, true);
+    assert.equal(JSON.parse(start.options.body).export_enabled, true);
     assert.equal(JSON.parse(start.options.body).iface, "mon0");
     assert.equal(JSON.parse(start.options.body).netns, "lab");
     assert.equal(JSON.parse(start.options.body).center_frequency1_mhz, 6425);

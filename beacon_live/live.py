@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.beacon_export import BeaconExport, ExportLimits
 from beacon_live.capture_target import CaptureTarget, as_capture_target, discover_capture_target
 from beacon_live.radio_session import RadioSession
 from beacon_live.channel import ChannelDefinition
@@ -658,7 +659,7 @@ def build_tshark_stream_command(*, field_names: tuple[str, ...]) -> list[str]:
     return command
 
 
-def start_core_capture_process(target, definition, *, field_names, raw_capture_path=None):
+def start_core_capture_process(target, definition, *, field_names, raw_capture_path=None, exporter=None):
     from beacon_live.core_capture import CoreCaptureProcess, CoreRequest, validate_core_request
     request = CoreRequest(target, definition, raw_path=raw_capture_path)
     validate_core_request(request)
@@ -669,7 +670,7 @@ def start_core_capture_process(target, definition, *, field_names, raw_capture_p
     except OSError as exc:
         raise LiveCommandError(command=command, stderr=str(exc)) from exc
     try:
-        return CoreCaptureProcess(decoder, request)
+        return CoreCaptureProcess(decoder, request, **({"exporter": exporter} if exporter is not None else {}))
     except BaseException:
         terminate_tshark_process(decoder)
         raise
@@ -690,6 +691,8 @@ def _live_aggregation_worker(
     # the normal terminate behavior and never own radio state.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(stdout_fd, "detach"):
+        stdout_fd = stdout_fd.detach()
     analyzer = Analyzer(
         target_primary_frequency_mhz=target_primary_frequency_mhz,
         channel_definition_max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
@@ -850,18 +853,19 @@ def _start_live_aggregation_process(
     target_primary_frequency_mhz: int,
     actual_definition: ChannelDefinition,
     capabilities: RadioCapabilities,
+    use_spawn: bool = False,
 ) -> Optional[tuple[object, multiprocessing.Process]]:
     """Start the Pi live worker, falling back for non-file test streams."""
     try:
         stdout_fd = int(stdout.fileno())  # type: ignore[attr-defined]
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn" if use_spawn else "fork")
     except (AttributeError, OSError, TypeError, ValueError):
         return None
     receive, send = context.Pipe(duplex=False)
     worker = context.Process(
         target=_live_aggregation_worker,
         kwargs={
-            "stdout_fd": stdout_fd,
+            "stdout_fd": multiprocessing.reduction.DupFd(stdout_fd) if use_spawn else stdout_fd,
             "send_connection": send,
             "field_names": field_names,
             "band": band,
@@ -1197,10 +1201,18 @@ def run_live(
     min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
     disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
     rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
+    export_directory: Optional[Path] = None,
+    initial_export_enabled: bool = False,
+    export_limits: ExportLimits = ExportLimits(),
     _dashboard: Optional[LiveDashboard] = None,
 ) -> int:
     if capture_backend not in {"direct", "core"}:
         raise ValueError("capture_backend must be direct or core")
+    export_limits.validate()
+    if initial_export_enabled and export_directory is None:
+        raise ValueError("Beacon export requires an export directory")
+    if export_directory is not None and raw_capture_path is not None:
+        raise ValueError("Use raw diagnostic capture or managed beacon export in a session")
     if core_diagnostics_path is not None and capture_backend != "core":
         raise ValueError("Core diagnostics requires the Core backend")
     if capture_backend == "core":
@@ -1257,6 +1269,9 @@ def run_live(
                 min_free_bytes=min_free_bytes,
                 disk_check_interval_seconds=disk_check_interval_seconds,
                 rotation_interval_seconds=rotation_interval_seconds,
+                export_directory=export_directory,
+                initial_export_enabled=initial_export_enabled,
+                export_limits=export_limits,
                 _dashboard=curses_dashboard,
             )
         )
@@ -1343,6 +1358,10 @@ def run_live(
         ExitStack() as aggregation_resources,
         ExitStack() as capture_resources,
     ):
+        exporter = None
+        if export_directory is not None:
+            exporter = BeaconExport(export_directory, limits=export_limits, enabled=initial_export_enabled)
+            capture_resources.callback(exporter.close)
         core_diagnostics.bind_radio(radio)
         capabilities = _read_radio_capabilities_safely(hardware_iface)
         if capabilities.source_complete and not capabilities.supports_monitor:
@@ -1392,6 +1411,7 @@ def run_live(
             process = start_core_capture_process(
                 target, initial_definition, field_names=tshark_fields,
                 raw_capture_path=raw_capture_path,
+                **({"exporter": exporter} if exporter is not None else {}),
             )
             capture_resources.callback(process.close)
             core_diagnostics.update(process, force=True)
@@ -1539,12 +1559,13 @@ def run_live(
         if raw_capture_path is not None:
             raw_capture_path.parent.mkdir(parents=True, exist_ok=True)
         if capture_backend == "direct":
-            process = start_tshark_process(
-                hardware_iface,
-                field_names=tshark_fields,
-                raw_capture_path=raw_capture_path,
-            )
-            capture_resources.callback(terminate_tshark_process, process)
+            if exporter is not None:
+                from beacon_live.packet_source import DirectCaptureProcess
+                process = DirectCaptureProcess(hardware_iface, field_names=tshark_fields, exporter=exporter)
+                capture_resources.callback(process.close)
+            else:
+                process = start_tshark_process(hardware_iface, field_names=tshark_fields, raw_capture_path=raw_capture_path)
+                capture_resources.callback(terminate_tshark_process, process)
         aggregation_connection: Optional[object] = None
         aggregation_process: Optional[multiprocessing.Process] = None
         if process.stdout is not None:
@@ -1555,6 +1576,7 @@ def run_live(
                 target_primary_frequency_mhz=resolved_frequency_mhz,
                 actual_definition=actual_definition,
                 capabilities=capabilities,
+                **({"use_spawn": True} if exporter is not None or capture_backend == "core" else {}),
             )
             if aggregation is not None:
                 aggregation_connection, aggregation_process = aggregation
@@ -1624,6 +1646,8 @@ def run_live(
         ):
             dashboard_poll_interval = None
         next_dashboard_poll = next_logging_control_poll
+        next_export_publication = next_logging_control_poll
+        last_export_error = None
         survey_warning_printed = False
         low_disk_latched = False
 
@@ -1703,6 +1727,9 @@ def run_live(
                         tshark_stderr=tshark_stderr_text,
                     )
                 loop_now = time.monotonic()
+                if exporter is not None and loop_now >= next_export_publication:
+                    last_export_error = _publish_beacon_export(dashboard, exporter, last_export_error)
+                    next_export_publication = loop_now + 0.1
                 if dashboard_poll_interval is None:
                     if _dashboard_requests_exit(dashboard):
                         raise KeyboardInterrupt
@@ -2114,6 +2141,10 @@ def run_live(
                     and current >= next_logging_control_poll
                 ):
                     requested = _read_logging_control(logging_control_path)
+                    if exporter is not None:
+                        export_requested = _read_export_control(logging_control_path)
+                        if export_requested is not None:
+                            exporter.set_enabled(export_requested)
                     if requested is False:
                         low_disk_latched = False
                     if logging_service is not None and requested is not None:
@@ -2283,6 +2314,8 @@ def run_live(
                 _publish_closed_logs(dashboard, logging_service)
             selector.close()
             capture_resources.close()
+            if exporter is not None:
+                _publish_beacon_export(dashboard, exporter, last_export_error)
             if capture_backend == "core":
                 core_diagnostics.update(process, records=capture_record_count,
                     frames=normalized_frame_count, malformed=malformed_capture_record_count, force=True)
@@ -2608,6 +2641,26 @@ def _read_logging_control(path: Path) -> Optional[bool]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         value = payload["logging_enabled"]
+    except (KeyError, OSError, TypeError, ValueError, UnicodeError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
+def _publish_beacon_export(dashboard, exporter, previous_error):
+    status = exporter.read()
+    setter = getattr(dashboard, "set_beacon_export", None)
+    if callable(setter):
+        setter(status, exporter.closed_logs)
+    elif status.error and status.error != previous_error:
+        message = f"Beacon export: {status.error}. Live analysis continues."
+        if not _set_dashboard_notice(dashboard, message):
+            print(message, file=sys.stderr, flush=True)
+    return status.error
+
+
+def _read_export_control(path: Path) -> Optional[bool]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))["export_enabled"]
     except (KeyError, OSError, TypeError, ValueError, UnicodeError):
         return None
     return value if isinstance(value, bool) else None

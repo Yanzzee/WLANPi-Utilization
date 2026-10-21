@@ -64,6 +64,8 @@
     </section>
     <section id="logs" class="panel" aria-label="Log downloads" hidden>
       <div class="section-heading"><h2>Log files</h2><button id="refresh-files" class="button secondary small">Refresh files</button></div>
+      <div class="section-heading"><div><h3>Beacon pcapng export</h3><p id="export-status" class="muted" role="status">Beacon export off</p></div><button id="export-toggle" class="button secondary small" disabled>Start beacon export</button></div>
+      <p id="export-policy" class="method-note">Original beacon packets from the shared capture. Closed files appear below.</p>
       <div class="log-intro"><div><h3 id="log-heading">Logging status unavailable</h3><p id="log-detail">CSV statistics and beacon JSONL use the same capture session.</p><ul id="active-files" class="active-files"></ul></div><div class="log-hint">Downloads appear after a segment closes. Stop logging to close the current files while capture and history continue.</div></div>
       <div id="file-error" class="notice error" role="status" hidden></div><div id="file-list" class="file-list"></div><p id="file-empty" class="empty">No closed log segments yet.</p>
     </section>
@@ -79,6 +81,7 @@
       <div class="centers wide" id="centers" hidden><label id="center-one-field" hidden>Center frequency 1<select name="center_frequency1_mhz" id="center-one"></select></label><label id="center-two" hidden>Center frequency 2<select name="center_frequency2_mhz" id="center-two-choice"></select></label></div>
     </div>
     <label class="check"><input id="start-logging" name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
+    <label class="check"><input id="start-export" name="export_enabled" type="checkbox"> Start beacon pcapng export</label>
     <details><summary>Capture source</summary><div class="form-grid"><label>Backend<select name="capture_backend"><option value="direct">Direct capture</option><option value="core">Core · optional</option></select></label><label>Interface<select name="iface" id="iface"><option value="auto">Automatic discovery</option></select></label><button type="button" id="refresh-interfaces" class="button secondary small">Refresh interfaces</button><label class="wide">Network namespace · optional<input name="netns" id="netns" spellcheck="false" placeholder="Automatic discovery"></label></div><p id="interface-note" class="muted" role="status"></p></details>
     <div id="form-error" class="notice error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="cancel-bottom" class="button secondary">Cancel</button><button type="submit" id="start-submit" class="button primary">Start session</button></div>
   </form></dialog>

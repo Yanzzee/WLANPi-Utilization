@@ -373,7 +373,7 @@ def _transport_worker(connection, descriptor, request: CoreRequest, parent_pid: 
 
 class CoreCaptureProcess:
     """Decoder process facade; Core TCP/JWT state exists only in a spawn worker."""
-    def __init__(self, decoder, request: CoreRequest):
+    def __init__(self, decoder, request: CoreRequest, *, exporter=None):
         self.decoder = decoder
         self.stdout, self.stderr = decoder.stdout, decoder.stderr
         self.request = request
@@ -384,16 +384,24 @@ class CoreCaptureProcess:
         self.closed = False
         self.received_bytes = self.forwarded_bytes = self.chunks = 0
         self.events: list[dict] = []
+        self.fanout = None
+        sink_fd = decoder.stdin.fileno()
+        if exporter is not None:
+            from beacon_live.packet_source import core_fanout
+            self.fanout, sink_fd = core_fanout(decoder, exporter)
         context = multiprocessing.get_context('spawn')
         self.connection, child = context.Pipe()
         self.worker = context.Process(target=_transport_worker,
-            args=(child, DupFd(decoder.stdin.fileno()), request, os.getpid()), name='beacon-live-core', daemon=True)
+            args=(child, DupFd(sink_fd), request, os.getpid()), name='beacon-live-core', daemon=True)
         try:
             self.worker.start()
         finally:
             child.close()
-            decoder.stdin.close()
-            decoder.stdin = None
+            if self.fanout is None:
+                decoder.stdin.close()
+                decoder.stdin = None
+            else:
+                os.close(sink_fd)
 
     def _drain(self):
         try:
@@ -441,6 +449,8 @@ class CoreCaptureProcess:
 
     def poll(self):
         self._drain()
+        if getattr(self, "fanout", None) is not None and self.fanout.error:
+            self.capture_error = self.fanout.error
         result = self.decoder.poll()
         if self.capture_error:
             return 1
@@ -472,6 +482,8 @@ class CoreCaptureProcess:
         finally:
             try:
                 self.connection.close()
+                if getattr(self, "fanout", None) is not None:
+                    self.fanout.join(timeout=0.5)
                 if self.decoder.poll() is None:
                     self.decoder.terminate()
                     try:
@@ -479,6 +491,8 @@ class CoreCaptureProcess:
                     except subprocess.TimeoutExpired:
                         self.decoder.kill()
                         self.decoder.wait(timeout=5)
+                if getattr(self, "fanout", None) is not None:
+                    self.fanout.join(timeout=1)
             finally:
                 if old_mask is not None:
                     signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)

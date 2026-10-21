@@ -13,6 +13,8 @@
   let failures = 0, filesAt = 0, chosenGraph = "cu", sortKey = "latest_rssi_dbm", descending = true;
   let admissionMaximum = 31250;
   let loggingAvailable = false;
+  let exportAvailable = false;
+  let exportLimits = null;
   let statusRequest = null;
   let interfacesRequest = null;
   const interfacesById = new Map();
@@ -89,6 +91,9 @@
     $("logging-toggle").disabled = !online || busy || !active || !loggingAvailable || stopping;
     $("logging-toggle").title = loggingAvailable ? "Toggle log files while capture continues" : "This session has no logging formats configured";
     $("logging-toggle").textContent = publication?.logging.active ? "Stop logging" : "Start logging";
+    $("export-toggle").disabled = !online || busy || !active || !exportAvailable || stopping;
+    $("export-toggle").textContent = publication?.beacon_export?.requested ? "Stop beacon export" : "Start beacon export";
+    $("export-toggle").title = exportAvailable ? "Toggle beacon pcapng export while analysis continues" : "Start a new session to enable the full-packet export source";
     $("start-submit").disabled = !online || busy || active;
     $("refresh-files").disabled = !online || busy;
     $("refresh-interfaces").disabled = !online || busy || Boolean(interfacesRequest);
@@ -264,7 +269,10 @@
     $("log-heading").textContent = publication.logging.active ? "Logging is active" : "Logging is off";
     $("log-detail").textContent = publication.logging.message || "CSV statistics and beacon JSONL use the same capture session.";
     $("active-files").replaceChildren(...publication.logging.paths.map(path => node("li", "", `${path.split("/").pop()}${publication.logging.active ? " · Writing" : " · Closed"}`)));
-    message("notice", [...new Set([publication.error, publication.notice, publication.logging.message].filter(Boolean))].join(" · "));
+    const exported = publication.beacon_export;
+    $("export-policy").textContent = exportLimits ? `Original beacon packets from the shared capture. Rotation: ${number(exportLimits.rotation_seconds)} seconds / ${number(exportLimits.segment_bytes / 1048576)} MiB. Retention: ${number(exportLimits.retained_files)} files / ${number(exportLimits.retained_bytes / 1048576)} MiB. Free-space reserve: ${number(exportLimits.min_free_bytes / 1048576)} MiB. Closed files appear below.` : "Original beacon packets from the shared capture. Closed files appear below.";
+    $("export-status").textContent = exported ? `${exported.active ? "Export active" : exported.requested ? "Export requested / stopped" : "Export off"} · ${number(exported.exported_beacons)} beacons in closed files · ${number(exported.active_beacons)} in current file · ${number(exported.skipped_beacons)} skipped · ${number(exported.queued_bytes)} bytes queued${exported.path ? ` · ${exported.path.split("/").pop()}` : ""}${exported.incomplete ? " · Incomplete output" : ""}${exported.error ? ` · ${exported.error}` : ""}` : "Beacon export unavailable";
+    message("notice", [...new Set([publication.error, publication.notice, publication.logging.message, exported?.error].filter(Boolean))].join(" · "));
     setControls();
   }
 
@@ -308,6 +316,11 @@
   $("logging-toggle").addEventListener("click", async () => {
     if (!online || busy || !publication || !activeSession(publication) || !loggingAvailable || publication.phase === "stopping") return;
     await control("logging", {session_id: publication.session_id, enabled: !publication.logging.active});
+    filesAt = 0;
+  });
+  $("export-toggle").addEventListener("click", async () => {
+    if (!online || busy || !publication || !activeSession(publication) || !exportAvailable || publication.phase === "stopping") return;
+    await control("export", {session_id: publication.session_id, enabled: !publication.beacon_export.requested});
     filesAt = 0;
   });
   ["cancel-start", "cancel-bottom"].forEach(id => $(id).addEventListener("click", () => $("start-dialog").close()));
@@ -391,7 +404,7 @@
     const data = new FormData(event.currentTarget), width = data.get("channel_width");
     const choice = selectedChannel();
     if (!choice) {message("form-error", "Select a valid primary channel for this capture width."); return;}
-    const body = {band: data.get("band"), channel: String(choice.primary), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled")};
+    const body = {band: data.get("band"), channel: String(choice.primary), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled"), export_enabled: data.has("export_enabled")};
     const target = interfacesById.get(body.iface);
     if (body.iface !== "auto" && !target) {message("form-error", "Refresh interfaces and select an available interface."); return;}
     if (target) {body.iface = target.interface; body.netns = target.namespace;}
@@ -412,6 +425,8 @@
     const changed = !publication || value.publication.revision !== publication.revision || value.publication.session_id !== publication.session_id;
     publication = value.publication; screens = new Map(value.screens.map(screen => [screen.screen_id, screen]));
     loggingAvailable = value.logging_available;
+    exportAvailable = value.export_available;
+    exportLimits = value.export_limits;
     admissionMaximum = value.units?.admission_capacity_max || admissionMaximum;
     connection(true);
     loginRequired = false; $("login-required").hidden = true;

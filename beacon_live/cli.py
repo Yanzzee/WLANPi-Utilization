@@ -71,7 +71,7 @@ def live_main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="wlanpi-utilization",
         description="Run Utilization with standalone capture or a shared managed session.",
-        epilog="Other commands: web, serve, session status|stop|logging, replay, retry-debug.",
+        epilog="Other commands: web, serve, session status|stop|logging|export, replay, retry-debug.",
     )
     _add_live_arguments(parser)
     return _run_live_command(parser.parse_args(argv), parser)
@@ -110,6 +110,8 @@ def _run_live_command(
             f"{command_prefix}--logging-only cannot be combined with "
             "--log"
         )
+    if args.beacon_pcapng and args.raw_pcapng is not None:
+        parser.error("--beacon-pcapng cannot be combined with --raw-pcapng")
     write_stats_csv = args.stats_csv or args.logging_only or args.log
     write_beacons_jsonl = (
         args.beacons_jsonl or args.logging_only or args.log
@@ -147,6 +149,17 @@ def _run_live_command(
             live_options["center_frequency2_mhz"] = args.center_frequency2_mhz
         if args.raw_pcapng is not None:
             live_options["raw_capture_path"] = args.raw_pcapng
+        if args.beacon_pcapng:
+            live_options["export_directory"] = (args.log_dir / "beacons").absolute()
+            live_options["initial_export_enabled"] = True
+        from beacon_live.beacon_export import ExportLimits
+        export_limits = ExportLimits(segment_bytes=args.beacon_segment_mb * 1024 * 1024,
+            rotation_seconds=args.beacon_rotation_seconds,
+            retained_bytes=args.beacon_retained_mb * 1024 * 1024,
+            retained_files=args.beacon_retained_files, min_free_bytes=args.min_free_mb * 1024 * 1024)
+        export_limits.validate()
+        if export_limits != ExportLimits():
+            live_options["export_limits"] = export_limits
         if args.logging_only:
             live_options["logging_only"] = True
         if args.logging_control is not None:
@@ -168,6 +181,8 @@ def _run_live_command(
             from beacon_live.service_client import ServiceError, managed_live
 
             if args.managed:
+                if args.raw_pcapng is None:
+                    live_options.setdefault("export_directory", (args.log_dir / "beacons").absolute())
                 for key in ("stats_csv", "beacons_jsonl", "raw_capture_path", "core_diagnostics_path"):
                     if live_options.get(key) is not None:
                         live_options[key] = live_options[key].absolute()
@@ -431,6 +446,16 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         default=Path("logs"),
         help="Directory for generated live log filenames. Default: logs.",
     )
+    parser.add_argument("--beacon-pcapng", action="store_true",
+                        help="Start beacon-only pcapng export in --log-dir/beacons from the shared full-packet source.")
+    parser.add_argument("--beacon-segment-mb", type=int, default=64,
+                        help="Maximum beacon pcapng segment size in MiB. Default: 64.")
+    parser.add_argument("--beacon-rotation-seconds", type=float, default=300,
+                        help="Rotate beacon pcapng after this many seconds. Default: 300.")
+    parser.add_argument("--beacon-retained-mb", type=int, default=512,
+                        help="Maximum retained beacon pcapng bytes in MiB. Default: 512.")
+    parser.add_argument("--beacon-retained-files", type=int, default=16,
+                        help="Maximum retained beacon pcapng segments. Default: 16.")
     parser.add_argument(
         "--logging-only",
         action="store_true",

@@ -777,3 +777,30 @@ def test_live_reports_setup_failure(
     assert "Command failed: iw dev wlan0 set channel 36 HT20" in captured.err
     assert "Exit status: 1" in captured.err
     assert "channel set failed" in captured.err
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_live_beacon_export_flags_configure_one_source_and_bounded_storage(monkeypatch, tmp_path, managed):
+    calls = []
+    if managed:
+        monkeypatch.setattr("beacon_live.service_client.managed_live", lambda options, **kwargs: calls.append(options) or 0)
+    else:
+        monkeypatch.setattr("beacon_live.cli.run_live", lambda **options: calls.append(options) or 0)
+    assert main(["live", "--managed" if managed else "--standalone", "--band", "2.4", "--channel", "6",
+        "--log-dir", str(tmp_path), "--beacon-pcapng", "--beacon-segment-mb", "8",
+        "--beacon-retained-mb", "32", "--beacon-retained-files", "4", "--beacon-rotation-seconds", "60",
+        "--min-free-mb", "16"]) == 0
+    options = calls[0]
+    assert options["export_directory"] == tmp_path / "beacons" and options["initial_export_enabled"]
+    assert options.get("capture_backend", "direct") == "direct"
+    assert options["export_limits"].segment_bytes == 8 * 1024 * 1024
+    assert options["export_limits"].retained_bytes == 32 * 1024 * 1024
+    assert options["export_limits"].retained_files == 4
+    assert options["export_limits"].rotation_seconds == 60
+    assert options["export_limits"].min_free_bytes == 16 * 1024 * 1024
+
+
+def test_raw_diagnostic_and_beacon_export_are_explicitly_exclusive(tmp_path):
+    with pytest.raises(SystemExit) as error:
+        main(["live", "--beacon-pcapng", "--raw-pcapng", str(tmp_path / "raw.pcapng")])
+    assert error.value.code == 2

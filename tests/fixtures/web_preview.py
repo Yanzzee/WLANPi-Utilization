@@ -72,6 +72,7 @@ class PreviewService:
         self.publication = RuntimePublication(
             uuid4().hex, 1, SessionPhase.RUNNING,
             LiveSessionConfig(band="5", channel="36", local_cu=True,
+                              export_directory=directory / "beacons",
                               stats_csv=directory / "utilization_current_stats.csv",
                               beacons_jsonl=directory / "utilization_current_beacons.jsonl"), self.snapshot,
             completed_stats=tuple(row for row in self.snapshot.history if row.sample_available),
@@ -122,6 +123,15 @@ class PreviewService:
 
     def files(self):
         return self.records
+
+    def set_export(self, identifier, enabled):
+        with self.lock:
+            if identifier != self.publication.session_id:
+                raise ServiceError("Stale Utilization session ID")
+            self.publication = replace(self.publication, beacon_export=replace(
+                self.publication.beacon_export, requested=enabled, active=enabled),
+                revision=self.publication.revision + 1)
+            return self.publication
 
 
 def main():

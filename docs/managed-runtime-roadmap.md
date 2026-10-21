@@ -191,8 +191,11 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   input, repeated rotation, and export stop/restart without history resets.
   **5a complete October 20:** bounded hardware-free reader/filter/writer and
   offline helper, with original packet-block fidelity, TShark decoding and
-  unchanged mixed-frame analyzer results. Live source fan-out, worker/disk
-  isolation, rotation/retention, status and downloads remain 5b. See
+  unchanged mixed-frame analyzer results. **5b implementation and local checks
+  complete October 21:** same-source direct/Core fan-out, bounded spawned
+  writer, rotation/retention/free-space limits, independent controls, health
+  and closed pcapng downloads. Physical Pi/busy-channel acceptance remains
+  pending; see the 5b evidence and device checks below. See
   [export foundation](beacon-export.md).
 - [ ] **6. Offline analysis and release acceptance.** Run the end-to-end
   workflow below with exported segments, record evidence, complete device and
@@ -972,3 +975,84 @@ PSC labels and actual tuning in the running-session header. Native rendered
 dropdown and adapter/regulatory acceptance remain pending. Milestone 5b live
 beacon export remains next; this refinement does not advance its completion.
 Version remains `2.1.0.dev0`.
+
+## Milestone 5b — live beacon export — October 21, 2026
+
+The latest width-first setup was reported working on Pi. The next roadmap item
+is now implemented locally: managed web/CLI/FPMS starts configure a full-packet
+source for beacon export, initially off unless requested. Direct capture uses
+one Dumpcap source in the selected namespace and the existing TShark stdin
+decoder. Core's existing owner transport feeds that same fan-out boundary.
+Every original pcapng block reaches the decoder before export admission; no
+beacon filter is applied to the analyzer source. Metrics, automatic BSSID
+selection, completed-second closure and rolling history remain unchanged.
+The threaded/Core aggregation paths use spawn with descriptor transfer.
+
+The export producer uses the milestone 5a selector and bounded section/interface
+context. It queues only original beacon blocks/context to a spawned storage
+worker, with an 8 MiB / 64-record admission budget. A full queue skips export
+records with visible counts. The worker rotates independently readable files
+at 300 seconds or 64 MiB, retains at most 16 files / 512 MiB including active
+output, and checks a 256 MiB free-space reserve before writing. Limits are
+configurable through CLI/Python. Oldest owned closed exports in the dedicated
+directory are deleted to enforce retention, including across session restarts.
+An exclusive writer lease protects concurrent starts and permits cleanup of
+owned stale partials. Active files are 0600 and published after flush/close with
+an atomic no-replace hard link; partial/failed output is never downloadable.
+
+Start/stop export is independent of CSV/JSONL logging and session lifetime.
+Web setup has an export checkbox; Log files has Start/Stop beacon export,
+status/counts/current file/policy, and registered closed pcapng downloads.
+CLI adds `--beacon-pcapng`, rotation/retention options and
+`session export --session-id <actual-id> --enabled yes|no`. Broker controls
+preserve both logging/export requests in the existing control file and reject
+stale IDs. Exports use the same protected web/CSRF and descriptor-identity
+download boundary as other logs. The bounded in-memory catalog retains its
+existing broker-lifetime contract. Raw diagnostic capture keeps its original
+path and explicitly opts out of managed beacon export in that session.
+
+Low/free/full disk, writer death, malformed export metadata and queue pressure
+do not stop decoder/analyzer delivery. Export status includes committed/active
+beacons, skipped records, queue pressure, retained bytes/deletions, original
+selection outcomes, errors and incomplete output. Shutdown drains for at most
+two seconds before terminating a stalled writer; incomplete partials stay out
+of the catalog. A worker notices owner death; an uninterruptible filesystem
+can still delay its exit, with the lease preventing a competing writer.
+
+**Evidence:** Python 3.13.3 full regression passes **938 tests in 33.69 seconds**,
+including real broker/owner IPC, protected Nginx routing and all four Core
+loopback integration cases. The pinned optional `websockets==15.0.1` dependency
+was installed into the local venv to run those tests; no optional Core skip
+remains. Two Python fork deprecation warnings occur in existing direct-worker
+test paths; new fan-out/Core paths use spawn.
+The real direct facade with a synthetic source and real TShark preserves all
+27 mixed frames and identical analyzer snapshots with export on/off (four
+retry-eligible frames, three retries, one observed client, 12 QBSS stations).
+Rotated exports retain exact packet blocks, endian/interface IDs, nanosecond
+timestamp metadata, radiotap/options and decode independently with TShark.
+Core's fragmented stream, spawned analyzer, export packet equality and confirmed
+stop are exercised through its actual transport worker against a local mock.
+Tests also cover independent logging/export controls without another owner,
+retention across writers, low/full/slow disks, overload, worker death, malformed
+export options, lease/stale-partial safety, bounded stop and scoped downloads
+with retention races. Standalone export failures leave analysis running and surface
+renderer notices; attached terminal/FPMS consumers also receive export errors.
+Protected/local simulated-DOM export checks pass.
+
+**Next device acceptance:** sync/reinstall, start a fresh managed session and
+enable export in setup or under Log files. Attach web, CLI and FPMS together;
+toggle export and CSV/JSONL independently and confirm the session ID, radio
+and history stay continuous. Leave export running beyond five minutes, then
+stop it and download at least two closed segments. Check each with TShark for
+beacon-only content, original times/radiotap and read errors. Repeat busy
+download/upload traffic on Pi 4/5 and record adapter/driver/band/width, CPU,
+capture health, export queue/skips and radio restoration after stop/reboot.
+Exercise Core only where its existing source/width restrictions are supported.
+Use a disposable filesystem for device storage-failure checks.
+
+Milestone 5 remains pending physical acceptance. Milestone 6 is next after that:
+run exported segments through a pinned WiFi-Beacon-analysis revision with
+supported AP-name, AP/classroom/schedule and date/timezone context, then close
+broader release checks. Export readability alone does not complete that gate.
+Version remains `2.1.0.dev0`; no tag or release is published. Operation details
+and remaining checks are in [beacon export](beacon-export.md).

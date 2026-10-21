@@ -505,3 +505,33 @@ def test_web_clients_share_real_service_and_download_closed_logs(service, tmp_pa
     assert {item["id"] for item in retained} == {item["id"] for item in inventory}
     assert all(item["session_id"] == identifier for item in retained)
     owner.stop(next_identifier)
+
+
+def test_export_and_logging_controls_share_owner_without_resetting_analysis(service, tmp_path):
+    from beacon_live.beacon_export import ExportLimits
+    from test_pcapng import section, interface, packet
+    client, _ = service
+    directory = tmp_path / "beacons"
+    directory.mkdir()
+    (directory / "fixture_source.pcapng").write_bytes(section() + interface() + packet())
+    started = client.ensure(config(tmp_path, export_directory=directory,
+                                  export_limits=ExportLimits(min_free_bytes=0, rotation_seconds=.15)))
+    before = until(client, lambda pub: pub.phase is SessionPhase.RUNNING)
+    client.set_export(started.session_id, True)
+    active = until(client, lambda pub: pub.beacon_export.active_beacons > 0)
+    assert active.session_id == before.session_id and active.snapshot == before.snapshot
+    client.set_logging(started.session_id, True)
+    both = until(client, lambda pub: pub.logging.active and pub.beacon_export.active)
+    controls = json.loads(both.config.logging_control_path.read_text())
+    assert controls == {"logging_enabled": True, "export_enabled": True}
+    client.set_export(started.session_id, False)
+    closed = until(client, lambda pub: not pub.beacon_export.active and bool(pub.closed_exports))
+    assert closed.logging.active and closed.snapshot == before.snapshot
+    assert any(item["path"].endswith(".pcapng") for item in client.files())
+    assert len((tmp_path / "stats.owners").read_text().splitlines()) == 1
+    with pytest.raises(ServiceError, match="Stale"):
+        client.set_export("b" * 32, True)
+    client.stop(started.session_id)
+    final = until(client, lambda pub: pub.phase is SessionPhase.STOPPED)
+    assert not final.beacon_export.active and final.closed_exports
+    assert final.snapshot == before.snapshot

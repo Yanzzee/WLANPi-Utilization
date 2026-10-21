@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from beacon_live.channel import ChannelDefinition, ChannelWidth
 from beacon_live.capture_target import CaptureTarget
+from beacon_live.beacon_export import BeaconExportStatus, ExportLimits
 from beacon_live.log_writer import (
     DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
     DEFAULT_MIN_FREE_BYTES,
@@ -62,6 +63,9 @@ class LiveSessionConfig:
     min_free_bytes: int = DEFAULT_MIN_FREE_BYTES
     disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS
     rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS
+    export_directory: Path | None = None
+    initial_export_enabled: bool = False
+    export_limits: ExportLimits = ExportLimits()
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,8 @@ class RuntimePublication:
     capture_definition: ChannelDefinition | None = None
     capture_definition_verified: bool = False
     capture_target: CaptureTarget | None = None
+    beacon_export: BeaconExportStatus = BeaconExportStatus()
+    closed_exports: tuple[ClosedLog, ...] = ()
 
 
 class SessionConflictError(RuntimeError):
@@ -210,7 +216,8 @@ class ManagedRuntime:
         with self._condition:
             if session_id == self._publication.session_id:
                 self._update_locked(
-                    logging=replace(self._publication.logging, active=False), **changes
+                    logging=replace(self._publication.logging, active=False),
+                    beacon_export=replace(self._publication.beacon_export, active=False), **changes
                 )
 
     def _capture_started(self, session_id: str) -> None:
@@ -301,6 +308,11 @@ class _RuntimeDashboard:
 
     def set_capture_health(self, health: CaptureHealth) -> None:
         self._runtime._publish(self._session_id, capture_health=health)
+
+    def set_beacon_export(self, status: BeaconExportStatus, logs: tuple[ClosedLog, ...]) -> None:
+        current = self._runtime.read()
+        if status != current.beacon_export or logs != current.closed_exports:
+            self._runtime._publish(self._session_id, beacon_export=status, closed_exports=logs)
 
     def set_capture_started(self) -> None:
         self._runtime._capture_started(self._session_id)

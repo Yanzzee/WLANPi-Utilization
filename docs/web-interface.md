@@ -3,7 +3,7 @@
 The v2.1.0 development web consumer uses the managed session at
 `/utilization/`. It provides current metrics, six shared-history graphs,
 a sortable BSSID table, explicit session/logging controls, and closed
-CSV/JSONL downloads. Direct capture remains the default; Core is optional.
+CSV/JSONL and beacon pcapng downloads. Direct capture remains the default; Core is optional.
 
 ## Install and open on a Pi
 
@@ -77,6 +77,13 @@ is disabled during shutdown. Start opens the channel setup dialog, including
 the existing CSV/beacon JSONL logging checkbox. During a session the separate
 **Start logging / Stop logging** button controls logging. It is disabled while
 idle, stopping, disconnected or when the owner has no configured log formats.
+
+The start dialog also offers **Start beacon pcapng export**. Its independent
+**Start beacon export / Stop beacon export** control lives under Log files,
+with current-file/closed counts, skipped records, errors and the configured
+rotation/retention policy. Web and managed CLI/FPMS starts configure the shared
+full-packet source for later export toggling. Existing legacy/raw-diagnostic
+sessions require a new export-capable session. See [beacon export operation](beacon-export.md).
 
 Primary channel is a band-specific dropdown: 2.4 GHz channels 1–14, the normal
 5 GHz 20 MHz primary grid, and 6 GHz channels 1, 5, …, 233. Bonded-channel
@@ -197,15 +204,17 @@ the page; web-created sessions configure both formats for later toggling.
 
 ## Download contract
 
-Only successfully closed CSV/JSONL segments registered by the logging service
-are offered. Hourly rollover, explicit logging stop, capture stop, and normal
+Only successfully closed CSV/JSONL and beacon pcapng segments registered by the
+capture owner are offered. CSV/JSONL hourly rollover, explicit logging stop, capture stop, and normal
 low-disk close register completed files. Active segments remain excluded;
 stop logging to download them while capture/history continue.
+Beacon pcapng defaults to 5-minute/64-MiB rotation and a 16-file/512-MiB budget;
+stop export to close its current file. Partial/failed output is never offered.
 
 The logging owner records device/inode, size, and modification time from the
 original open descriptor after flushing. A bounded broker catalog keeps the
 latest 256 registered records across capture sessions for that broker lifetime.
-Each publication carries at most 128 recent closed records. Restarting the
+Each publication carries at most 128 CSV/JSONL and 256 beacon export closed records. Restarting the
 broker clears the catalog; the UI does not scan historical directories. The
 files themselves remain on disk under the existing logging policy.
 
@@ -214,8 +223,9 @@ The web process refuses symlinks, traversal, changed/replaced files, and active
 paths. Removed or changed records show **Unavailable** and return 404. A
 download whose descriptor is already open can finish if its name is later
 removed by retention. File reads/HTTP backpressure stay in the web process,
-independent of capture and ordered analysis. Beacon-only pcapng export and its
-size/retention budgets remain milestone 5.
+independent of capture and ordered analysis. Export retention applies only to
+owned reserved-name pcapng segments in its dedicated directory, including across
+sessions. See [export limits and storage failure](beacon-export.md#rotation-retention-and-storage-failure).
 
 ## Pi browser acceptance
 

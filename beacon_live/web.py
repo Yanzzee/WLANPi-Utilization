@@ -43,6 +43,7 @@ class PublicationReader:
                 # Only expose useful consumer configuration, not internal IPC
                 # control files or the closed-file descriptors used for downloads.
                 value.pop("closed_logs", None)
+                value.pop("closed_exports", None)
                 if value["config"] is not None:
                     value["config"] = {key: item for key, item in value["config"].items() if key in {
                         "iface", "netns", "band", "channel", "frequency_mhz", "channel_width",
@@ -50,7 +51,8 @@ class PublicationReader:
                     }}
                 self.cached = {"publication": value, "logging_available": bool(
                     publication.config and (publication.config.stats_csv or publication.config.beacons_jsonl)
-                ), "screens": [
+                ), "export_available": bool(publication.config and publication.config.export_directory),
+                    "export_limits": to_wire(publication.config.export_limits) if publication.config else None, "screens": [
                     to_wire(screen.render(publication.snapshot)) for screen in DEFAULT_SCREENS
                 ], "units": {"admission_capacity_max": QBSS_ADMISSION_CAPACITY_MAX}}
                 self.deadline = self.clock() + 1.0
@@ -75,7 +77,7 @@ def open_closed_log(record: dict, directory: Path):
     relative = path.relative_to(directory.absolute())
     if not relative.parts or any(part in {".", ".."} for part in relative.parts):
         raise ValueError("Invalid registered log path")
-    if path.suffix not in {".csv", ".jsonl"}:
+    if path.suffix not in {".csv", ".jsonl", ".pcapng"}:
         raise ValueError("Unsupported log format")
     folder = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     descriptor = None
@@ -197,11 +199,14 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
     def start():
         value = payload({"band", "channel", "channel_width", "center_frequency1_mhz",
                          "center_frequency2_mhz", "iface", "netns", "capture_backend",
-                         "local_cu", "logging_enabled"})
+                         "local_cu", "logging_enabled", "export_enabled"})
         try:
             enabled = value.pop("logging_enabled", False)
+            export_enabled = value.pop("export_enabled", False)
             if type(enabled) is not bool:
                 raise ValueError("Logging enabled must be boolean")
+            if type(export_enabled) is not bool:
+                raise ValueError("Beacon export enabled must be boolean")
             from beacon_live.ipc import from_wire
             paths = build_live_log_paths(directory, write_stats_csv=True, write_beacons_jsonl=True)
             config = from_wire(LiveSessionConfig, value)
@@ -213,7 +218,8 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
             validate_config(config)
             from dataclasses import replace
             config = replace(config, stats_csv=paths.stats_csv, beacons_jsonl=paths.beacons_jsonl,
-                             initial_logging_enabled=enabled)
+                             initial_logging_enabled=enabled, export_directory=directory / "beacons",
+                             initial_export_enabled=export_enabled)
             publication = reader.control(lambda: service.request("start", config=config))
         except (ValueError, TypeError) as error:
             abort(400, str(error))
@@ -258,6 +264,20 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
     def registered_files():
         return service.files()
 
+    @app.post(url_prefix + "api/export")
+    def export_control():
+        value = payload({"session_id", "enabled"})
+        identifier = current_session(value)
+        if type(value.get("enabled")) is not bool:
+            abort(400, "Beacon export enabled must be boolean")
+        try:
+            reader.control(lambda: service.set_export(identifier, value["enabled"]))
+        except ServiceError as error:
+            if any(text in str(error) for text in ("Stale", "No active", "stopping", "no beacon export")):
+                abort(409, str(error))
+            raise
+        return jsonify(requested=value["enabled"]), 202
+
     @app.get(url_prefix + "api/files")
     def files():
         result = []
@@ -293,7 +313,8 @@ def create_app(*, client=None, socket_path=DEFAULT_SOCKET, log_directory=DEFAULT
             abort(404, "This log is no longer available")
         try:
             response = send_file(stream, as_attachment=True, download_name=Path(record["path"]).name,
-                                 mimetype="text/csv" if record["path"].endswith(".csv") else "application/x-ndjson",
+                                 mimetype={".csv": "text/csv", ".jsonl": "application/x-ndjson",
+                                           ".pcapng": "application/octet-stream"}[Path(record["path"]).suffix],
                                  conditional=False, etag=False)
             response.content_length = record["size_bytes"]
             response.call_on_close(stream.close)

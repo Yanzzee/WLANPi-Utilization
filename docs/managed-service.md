@@ -193,7 +193,13 @@ connection causes the owner to exit through its normal cleanup when it next
 polls, rather than leaving an unattended capture. Logging-control errors are
 reported without replacing the analyzer. Low-disk/rotation behavior remains
 the existing shared logging policy. Closed CSV/JSONL segments now enter a
-bounded download catalog; beacon pcapng export remains a later milestone.
+bounded download catalog. Managed CLI/FPMS and web starts also configure the
+shared full-packet source for independently controlled beacon pcapng export.
+`session export --session-id "$UTILIZATION_SESSION_ID" --enabled yes|no`
+controls it without replacing the source or history. Its separate spawned
+writer provides bounded admission, rotation, retention, health and closed-file
+registration; see [beacon export](beacon-export.md). Raw diagnostic capture
+retains its existing path and opts out of beacon export in that session.
 
 ## Web boundary and device acceptance
 

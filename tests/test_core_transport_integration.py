@@ -20,8 +20,9 @@ from beacon_live.live import (available_tshark_fields, build_tshark_stream_comma
 from beacon_live.parser import parse_tshark_live_record
 
 
-@pytest.mark.parametrize('tune_failure,aggregate', [(False, False), (True, False), (False, True)])
-def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, tune_failure, aggregate):
+@pytest.mark.parametrize('tune_failure,aggregate,export', [(False, False, False), (True, False, False),
+    (False, True, False), (False, True, True)])
+def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, tune_failure, aggregate, export):
     tshark = os.environ.get('WLANPI_TEST_TSHARK') or shutil.which('tshark')
     if not tshark:
         pytest.skip('TShark is required for transport integration')
@@ -74,11 +75,16 @@ def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, 
         async with serve(handler, '127.0.0.1', 0, process_request=http) as server:
             port = server.sockets[0].getsockname()[1]
             spec = core.CoreRequest(CaptureTarget('wlanpi0'), ChannelDefinition(5975, ChannelWidth.MHZ80, 5985),
-                                    url=f'ws://127.0.0.1:{port}/api/v1/streaming/capture', raw_path=tmp_path/'core.pcapng')
+                                    url=f'ws://127.0.0.1:{port}/api/v1/streaming/capture',
+                                    raw_path=None if export else tmp_path/'core.pcapng')
             command = build_tshark_stream_command(field_names=fields)
             command[0] = tshark
             decoder = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-            process = core.CoreCaptureProcess(decoder, spec)
+            exporter = None
+            if export:
+                from beacon_live.beacon_export import BeaconExport, ExportLimits
+                exporter = BeaconExport(tmp_path / 'beacons', enabled=True, limits=ExportLimits(min_free_bytes=0))
+            process = core.CoreCaptureProcess(decoder, spec, exporter=exporter)
             aggregation = None
             try:
                 await asyncio.to_thread(process.wait_phase, 'ready')
@@ -90,7 +96,8 @@ def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, 
                     if aggregate:
                         aggregation = _start_live_aggregation_process(decoder.stdout, field_names=fields,
                             band='6', target_primary_frequency_mhz=5975, actual_definition=spec.definition,
-                            capabilities=RadioCapabilities(frozenset({ChannelWidth.MHZ80}), frozenset({5975})))
+                            capabilities=RadioCapabilities(frozenset({ChannelWidth.MHZ80}), frozenset({5975})),
+                            use_spawn=True)
                         receiver, worker = aggregation
                         assert await asyncio.to_thread(receiver.poll, 10), 'Shared analyzer published no live frames'
                         message = receiver.recv()
@@ -109,6 +116,8 @@ def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, 
                     await asyncio.wait_for(streamed.wait(), 10)
             finally:
                 await asyncio.to_thread(process.close)
+                if exporter is not None:
+                    await asyncio.to_thread(exporter.close)
                 if aggregation is not None:
                     await asyncio.to_thread(_stop_live_aggregation, *aggregation)
             assert process.stop_confirmed
@@ -116,7 +125,21 @@ def test_spawn_transport_with_mock_core_and_real_decoder(tmp_path, monkeypatch, 
             assert stopped.is_set()
             assert commands.count('start') == commands.count('stop') == 1
             if not tune_failure:
-                assert (tmp_path/'core.pcapng').read_bytes() == capture
+                if exporter is None:
+                    assert (tmp_path/'core.pcapng').read_bytes() == capture
+                else:
+                    import io
+                    from beacon_live.pcapng import BeaconFilter, ENHANCED_PACKET, iter_blocks
+                    selector = BeaconFilter()
+                    expected = []
+                    for block in iter_blocks(io.BytesIO(capture)):
+                        selected = selector.select(block)
+                        if selected is not None and block.kind == ENHANCED_PACKET:
+                            expected.append(selected)
+                    actual = [block.raw for log in exporter.closed_logs
+                              for block in iter_blocks(io.BytesIO(log.path.read_bytes())) if block.kind == ENHANCED_PACKET]
+                    assert actual == expected and len(actual) > 0
+                    assert exporter.read().error is None
                 assert process.received_bytes == process.forwarded_bytes == len(capture)
                 assert process.chunks > 0
     asyncio.run(scenario())

@@ -49,6 +49,11 @@ class FakeService:
             raise ServiceError("Stale Utilization session ID")
         return self.request("logging", session_id=identifier, enabled=enabled)
 
+    def set_export(self, identifier, enabled):
+        if identifier != SESSION:
+            raise ServiceError("Stale Utilization session ID")
+        return self.request("export", session_id=identifier, enabled=enabled)
+
     def files(self):
         return self.records
 
@@ -435,3 +440,62 @@ def test_prefix_host_body_limits_and_no_external_asset_dependencies(web):
     assert client.post("/utilization/api/logging", data="x" * 17000, content_type="application/json", headers=headers).status_code == 413
     page = client.get("/utilization/").text
     assert not re.search(r'(?:src|href)="https?://', page)
+
+
+def test_export_controls_require_csrf_valid_id_and_preserve_session(web):
+    service, app, client, headers = web
+    body = {"session_id": SESSION, "enabled": True}
+    path = "/utilization/api/export"
+    assert client.post(path, json=body).status_code == 403
+    assert client.post(path, json=body, headers=headers | {"Origin": "https://other.example"}).status_code == 403
+    assert client.post(path, json=body | {"session_id": "b" * 32}, headers=headers).status_code == 409
+    assert client.post(path, json=body | {"enabled": "yes"}, headers=headers).status_code == 400
+    assert not service.controls
+    assert client.post(path, json=body, headers=headers).status_code == 202
+    assert service.controls == [("export", body)]
+    assert service.publication.phase is SessionPhase.RUNNING
+    assert service.publication.session_id == SESSION
+
+
+def test_web_start_can_enable_export_and_status_hides_internal_paths(web, tmp_path):
+    from beacon_live.beacon_export import BeaconExportStatus
+    service, app, client, headers = web
+    assert client.post("/utilization/api/session/start", json={
+        "band": "2.4", "channel": "6", "export_enabled": True}, headers=headers).status_code == 202
+    config = service.controls[-1][1]["config"]
+    assert config.initial_export_enabled and config.export_directory == tmp_path / "beacons"
+    assert not config.initial_logging_enabled
+    assert client.post("/utilization/api/session/start", json={
+        "band": "2.4", "channel": "6", "export_enabled": 1}, headers=headers).status_code == 400
+    service.publication = replace(service.publication, config=config, beacon_export=BeaconExportStatus(
+        requested=True, active=True, exported_beacons=17, skipped_beacons=2, queue_full=2))
+    app.extensions["utilization_reader"].deadline = 0
+    status = client.get("/utilization/api/status").json
+    assert status["export_available"]
+    assert status["publication"]["beacon_export"]["exported_beacons"] == 17
+    assert status["publication"]["beacon_export"]["skipped_beacons"] == 2
+    assert "closed_exports" not in status["publication"]
+    assert "export_directory" not in status["publication"]["config"]
+
+
+def test_closed_pcapng_download_preserves_bytes_and_handles_retention(web, tmp_path):
+    from test_pcapng import section, interface, packet
+    service, _, client, _ = web
+    directory = tmp_path / "beacons"
+    directory.mkdir()
+    path = directory / "utilization_beacons.pcapng"
+    path.write_bytes(section() + interface() + packet())
+    record = record_for(path)
+    service.records.append(record)
+    assert client.get("/utilization/api/files").json["files"][0]["available"]
+    response = client.get("/utilization/api/files/" + record["id"])
+    assert response.status_code == 200 and response.data == path.read_bytes()
+    assert response.mimetype == "application/octet-stream"
+    response.close()
+    path.unlink()
+    assert not client.get("/utilization/api/files").json["files"][0]["available"]
+    assert client.get("/utilization/api/files/" + record["id"]).status_code == 404
+    partial = directory / "active.pcapng.partial"
+    partial.write_bytes(b"incomplete")
+    with pytest.raises(ValueError, match="Unsupported"):
+        open_closed_log(record_for(partial), tmp_path)

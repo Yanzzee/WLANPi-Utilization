@@ -15,6 +15,8 @@ from beacon_live.capture_target import CaptureTarget
 from beacon_live.models import FrameRecord
 from beacon_live.log_writer import LiveLogPaths, LoggingService, LogMetadata
 from beacon_live.service import run_owner, serve
+from beacon_live.beacon_export import BeaconExport
+from beacon_live.pcapng import iter_blocks, ENHANCED_PACKET
 
 
 def runner(**options):
@@ -59,9 +61,28 @@ def runner(**options):
         initial_paths=LiveLogPaths(path, options.get("beacons_jsonl")),
         min_free_bytes=options["min_free_bytes"], rotation_interval_seconds=options["rotation_interval_seconds"],
     )
+    exporter = None
+    export_packets = []
+    if options.get("export_directory") is not None:
+        exporter = BeaconExport(options["export_directory"], limits=options["export_limits"],
+                                enabled=options["initial_export_enabled"])
+        fixture = options["export_directory"] / "fixture_source.pcapng"
+        if fixture.exists():
+            with fixture.open("rb") as source:
+                for block in iter_blocks(source):
+                    if block.kind == ENHANCED_PACKET:
+                        export_packets.append(block)
+                    else:
+                        exporter.offer(block)
     try:
         while not dashboard.poll_input():
-            enabled = json.loads(options["logging_control_path"].read_text())["logging_enabled"]
+            controls = json.loads(options["logging_control_path"].read_text())
+            enabled = controls["logging_enabled"]
+            if exporter is not None:
+                exporter.set_enabled(controls.get("export_enabled", False))
+                for block in export_packets:
+                    exporter.offer(block)
+                dashboard.set_beacon_export(exporter.read(), exporter.closed_logs)
             if enabled != last_enabled:
                 if enabled:
                     logging.start()
@@ -87,6 +108,9 @@ def runner(**options):
             dashboard.set_closed_logs(logging.closed_logs)
             time.sleep(0.01)
     finally:
+        if exporter is not None:
+            exporter.close()
+            dashboard.set_beacon_export(exporter.read(), exporter.closed_logs)
         logging.stop()
         dashboard.set_closed_logs(logging.closed_logs)
         if path:
