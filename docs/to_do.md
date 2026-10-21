@@ -42,11 +42,11 @@ Features & changes
 12. CANCELLED   look into the possibility of scanning multiple channels
         probably not very feasible, beacons are 10 per second per BSSID, and there are many channels
         it could possibly change channels with a button press, but this would necessitate restarting observations & clearing data
-13. classroom mode
-        find likely radios in classroom
-        scan beacons for those radios
-        record and show analytics from the study
-        alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
+13. DONE classroom mode
+        xfind likely radios in classroom
+        xscan beacons for those radios
+        xrecord and show analytics from the study
+        yes - alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
 14. DONE        return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. DONE    optimize code for processor utilization and/or use multithreading for multiple cores
         there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
@@ -103,7 +103,7 @@ Features & changes
 34. include OBSS count in composition screen
         number of BSSIDs that overlap to the selected primary, but have a different primary
         can this be observed accurately without scanning multiple channels?
-35. add web interface
+35. DONE        add web interface
         accessible through existing web menu
         show same metrics as CLI
         better graphs
