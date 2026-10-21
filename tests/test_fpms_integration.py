@@ -20,6 +20,8 @@ def isolated_backend_settings(monkeypatch, tmp_path):
     monkeypatch.delenv('WLANPI_UTILIZATION_CAPTURE_BACKEND', raising=False)
     monkeypatch.delenv('WLANPI_UTILIZATION_RUNTIME_MODE', raising=False)
     monkeypatch.setattr(channel_utilization, 'BACKEND_CONFIG', tmp_path / 'fpms.json')
+    # Legacy foreground lifecycle tests opt into standalone explicitly.
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"standalone"}')
     monkeypatch.setattr(channel_utilization, '_managed_session_status', lambda: None)
 
 
@@ -32,6 +34,16 @@ def test_managed_fpms_menu_uses_utilization_and_has_explicit_stop():
     assert menu["name"] == "Utilization"
     assert [item["name"] for item in menu["action"]] == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
     assert "Stop Session" not in [item["name"] for item in menu["action"][0]["action"][0]["action"]]
+
+
+def test_new_fpms_install_defaults_to_managed_but_preserves_explicit_standalone():
+    channel_utilization.BACKEND_CONFIG.unlink()
+    assert channel_utilization.configured_runtime_mode() == "managed"
+    assert "--managed" in channel_utilization.build_launch_command(band="5", channel=36, logging=False)
+    channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"direct"}')
+    assert channel_utilization.configured_runtime_mode() == "managed"
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"standalone"}')
+    assert channel_utilization.configured_runtime_mode() == "standalone"
 
 
 def _open_managed_menu(state):
@@ -229,6 +241,51 @@ def test_managed_menu_status_failure_does_not_offer_new_capture(monkeypatch):
     assert [item["name"] for item in menu["action"]] == ["Session unavailable"]
 
 
+@pytest.mark.parametrize("action", ["logging_only", "start_log"])
+def test_already_running_logging_is_reported_without_reenabling_or_another_proxy(monkeypatch, tmp_path, action):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.setattr(channel_utilization, "FRAME_PATH", tmp_path / "frame.ppm")
+    monkeypatch.setattr(channel_utilization._DisplaySession, "start_display", lambda self: None)
+    running = {"phase": "running", "config": {"band": "6", "channel": "5"},
+               "logging": {"active": True, "paths": ["existing.csv"]}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: running)
+    monkeypatch.setattr(channel_utilization.subprocess, "run", lambda *args, **kwargs: pytest.fail("logging control issued"))
+    messages, commands = [], []
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
+    monkeypatch.setattr(channel_utilization._DisplaySession, "show_status", lambda self, message: messages.append(message))
+    def popen(command):
+        commands.append(command)
+        return _FakeProcess(command)
+    app = channel_utilization.ChannelUtilizationApp({}, popen=popen)
+    if action == "logging_only":
+        app.start_logging_only(band="2.4", channel=1)
+        assert commands == []
+    else:
+        app.launch(band="2.4", channel=1, logging=True)
+        assert len(commands) == 1
+        assert commands[0][commands[0].index("--logging-initial-state") + 1] == "disabled"
+        app.g_vars["page_exit_handler"]()
+    assert len(messages) == 1 and "Logging already being saved" in messages[0]
+    assert "Ch 5 5975 MHz" in messages[0]
+
+
+def test_start_logging_uses_owner_status_after_logging_was_stopped_elsewhere(monkeypatch):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    running = {"phase": "running", "session_id": "current-owner", "config": {"band": "5", "channel": "36"},
+               "logging": {"active": False}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: running)
+    calls, messages = [], []
+    def run(command, **kwargs):
+        calls.append(command)
+        return channel_utilization.subprocess.CompletedProcess(command, 0, "", "")
+    monkeypatch.setattr(channel_utilization.subprocess, "run", run)
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
+    app = channel_utilization.ChannelUtilizationApp({}, popen=lambda *a, **k: pytest.fail("unneeded proxy"))
+    app.start_logging_only(band="2.4", channel=1)
+    assert calls[0][1:] == ["session", "logging", "--session-id", "current-owner", "--enabled", "yes", "--summary"]
+    assert messages[0].startswith("Logging requested: Ch 36")
+
+
 @pytest.mark.parametrize("mode", [None, [], "invalid"])
 def test_invalid_fpms_runtime_mode_fails_before_capture(mode):
     channel_utilization.BACKEND_CONFIG.write_text(json.dumps({"runtime_mode": mode}))
@@ -262,7 +319,7 @@ def test_invalid_fpms_configuration_never_falls_back_to_direct(value):
 
 @pytest.mark.parametrize('logging_only', [False, True])
 def test_core_menu_exit_allows_stop_acknowledgement_and_radio_cleanup(tmp_path, monkeypatch, logging_only):
-    channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"core"}')
+    channel_utilization.BACKEND_CONFIG.write_text('{"capture_backend":"core","runtime_mode":"standalone"}')
     monkeypatch.setattr(channel_utilization, 'FRAME_PATH', tmp_path / 'frame.ppm')
     processes = []
     def popen(command, **kw):
@@ -298,8 +355,8 @@ def test_fpms_menu_is_band_channel_then_display_mode() -> None:
     assert six_all[0]["name"] == "Ch 1 5955 MHz"
     assert six_all[1]["name"] == "PSC 5 5975 MHz"
     assert [item["name"] for item in six_all[1]["action"]] == [
-        "Display",
-        "Display + Log",
+        "Start Session",
+        "Start + Log",
         "Start Logging",
         "Stop Logging",
     ]

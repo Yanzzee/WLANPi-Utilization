@@ -51,12 +51,23 @@ export async function checkWebUi({html, source, status}) {
         addEventListener: (event, fn) => docEvents[event] = fn,
       },
       Intl, Map, Set, AbortController,
+      FormData: class {
+        get(key) {return {band: "2.4", channel: "6", channel_width: "20", capture_backend: "direct", iface: "auto", netns: ""}[key];}
+        has(key) {return key === "logging_enabled" && elements.get("start-logging").checked;}
+      },
       Date: class extends Date {static now() {return now;}},
       setTimeout: (fn, ms) => {timers.set(++sequence, {fn, ms}); return sequence;},
       clearTimeout: id => timers.delete(id),
       fetch: async (url, options) => {
         calls.push({url, options});
         const code = url === "/apps" ? headCode : statusCode;
+        if (code === 200 && options.method === "POST" && url.endsWith("session/start")) {
+          value.publication.phase = "starting"; value.publication.revision++;
+          value.publication.logging.active = JSON.parse(options.body).logging_enabled;
+        }
+        if (code === 200 && options.method === "POST" && url.endsWith("session/stop")) {
+          value.publication.phase = "stopping"; value.publication.revision++;
+        }
         return {status: code, type: code === 302 ? "opaqueredirect" : "basic", ok: code === 200,
           json: async () => code !== 200 ? {error: "Fixture service error"}
             : url.endsWith("files") ? {files: []} : structuredClone(value)};
@@ -69,7 +80,12 @@ export async function checkWebUi({html, source, status}) {
     assert.match(elements.get("session-detail").textContent, /Session already running/);
     assert.match(elements.get("session-id").textContent, new RegExp(value.publication.session_id));
     assert.equal(elements.get("retries-value").textContent, "<1%");
-    assert.equal(elements.get("stop").disabled, false);
+    assert.equal(elements.get("session-toggle").disabled, false);
+    assert.equal(elements.get("session-toggle").textContent, "Stop session");
+    assert.equal(elements.get("session-toggle").className, "button danger");
+    assert.equal(elements.get("logging-toggle").textContent, "Stop logging");
+    assert.equal(elements.has("stop"), false);
+    assert.equal(elements.has("new-session"), false);
     assert.equal(elements.get("graphs").children.length, 6);
     assert.equal(elements.has("local-cu-value"), false);
     assert.equal(elements.has("bssids-value"), false);
@@ -116,26 +132,75 @@ export async function checkWebUi({html, source, status}) {
     assert.doesNotMatch(elements.get("tuning").textContent, /MHz MHz/);
     const metrics = elements.get("ap-cu-value").textContent;
     statusCode = 503; await poll();
-    assert.equal(elements.get("stop").disabled, true);
+    assert.equal(elements.get("session-toggle").disabled, true);
+    assert.equal(elements.get("logging-toggle").disabled, true);
     assert.equal(elements.get("ap-cu-value").textContent, metrics);
     statusCode = 401; await poll();
     assert.equal(elements.get("login-required").hidden, false);
     statusCode = 200; await poll();
     assert.equal(elements.get("login-required").hidden, true);
-    assert.equal(elements.get("stop").disabled, false);
+    assert.equal(elements.get("session-toggle").disabled, false);
     assert.equal(value.publication.session_id, data.publication.session_id);
 
-    elements.get("logging-toggle").events.click(); await settle();
+    await elements.get("logging-toggle").events.click(); await settle();
     const post = calls.find(call => call.options.method === "POST");
     assert.equal(JSON.parse(post.options.body).session_id, value.publication.session_id);
+    assert.equal(JSON.parse(post.options.body).enabled, false);
     assert.equal(post.options.headers["X-Utilization-CSRF"], metas["utilization-csrf"]);
     assert.equal(calls.filter(call => call.url === "/apps").length, hosted ? 1 : 0);
+    value.publication.logging.active = false; value.publication.revision++;
+    await poll();
+    assert.equal(elements.get("logging-toggle").disabled, false);
+    assert.equal(elements.get("logging-toggle").textContent, "Start logging");
+    await elements.get("logging-toggle").events.click(); await settle();
+    assert.equal(JSON.parse(calls.filter(call => call.url.endsWith("logging")).at(-1).options.body).enabled, true);
+    value.publication.logging.active = true; value.publication.revision++;
+    await poll();
+    assert.equal(elements.get("logging-toggle").textContent, "Stop logging");
+    statusCode = 409;
+    await elements.get("logging-toggle").events.click(); await settle();
+    assert.equal(elements.get("logging-toggle").textContent, "Stop logging");
+    assert.match(elements.get("error").textContent, /Fixture service error/);
+    statusCode = 200;
+    value.logging_available = false; await poll();
+    assert.equal(elements.get("logging-toggle").disabled, true);
+    value.logging_available = true;
+    value.publication.phase = "stopping"; value.publication.revision++; await poll();
+    assert.equal(elements.get("session-toggle").textContent, "Stopping…");
+    assert.equal(elements.get("session-toggle").disabled, true);
+    assert.equal(elements.get("logging-toggle").disabled, true);
+    value.publication.phase = "stopped"; value.publication.logging.active = false; value.publication.revision++;
+    await poll();
+    assert.equal(elements.get("session-toggle").textContent, "Start session");
+    assert.equal(elements.get("session-toggle").className, "button primary");
+    assert.equal(elements.get("logging-toggle").disabled, true);
+    const countBeforePreference = calls.filter(call => call.options.method === "POST").length;
+    elements.get("session-toggle").events.click();
+    assert.equal(elements.get("start-dialog").open, true);
+    elements.get("start-logging").checked = true;
+    await poll();
+    assert.equal(elements.get("start-logging").checked, true);
+    elements.get("cancel-start").events.click();
+    assert.equal(calls.filter(call => call.options.method === "POST").length, countBeforePreference);
+    elements.get("session-toggle").events.click();
+    await elements.get("start-form").events.submit({preventDefault() {}, currentTarget: elements.get("start-form")});
+    await settle();
+    const start = calls.find(call => call.url.endsWith("session/start"));
+    assert.equal(JSON.parse(start.options.body).logging_enabled, true);
+    assert.equal(elements.get("start-dialog").open, false);
+    assert.equal(elements.get("session-toggle").textContent, "Stop session");
+    elements.get("session-toggle").events.click(); await settle();
+    assert.equal(elements.get("session-toggle").textContent, "Stopping…");
+    assert.equal(elements.get("session-toggle").disabled, true);
+    const stop = calls.find(call => call.url.endsWith("session/stop"));
+    assert.equal(JSON.parse(stop.options.body).session_id, value.publication.session_id);
+    value.publication.phase = "running"; value.publication.revision++; await poll();
     if (hosted) {
       docEvents.pointerdown(); docEvents.keydown(); await settle();
       assert.equal(calls.filter(call => call.url === "/apps").length, 1);
       now += 61000; headCode = 302;
       const count = calls.filter(call => call.options.method === "POST").length;
-      elements.get("stop").events.click(); await settle();
+      elements.get("session-toggle").events.click(); await settle();
       assert.equal(calls.filter(call => call.options.method === "POST").length, count);
       assert.equal(elements.get("login-required").hidden, false);
     }

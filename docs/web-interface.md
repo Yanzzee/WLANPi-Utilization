@@ -7,14 +7,21 @@ CSV/JSONL downloads. Direct capture remains the default; Core is optional.
 
 ## Install and open on a Pi
 
-For direct HTTPS access through WLAN Pi's existing login and Apps menu, use
-[protected deployment](web-deployment.md). The manual loopback/SSH procedure
-below remains available for local operation and development.
-
-Update the checkout, then install the service and optional web dependencies:
+Install/update the application, FPMS, broker and protected web hosting together:
 
 ```bash
-sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+Open `https://<your-pi>/utilization/` or Apps → Utilization through the normal
+WLAN Pi login. The installer includes web dependencies and integration by default;
+no separate integration command or SSH forwarding is required. Saved FPMS/backend
+settings are preserved. See [protected deployment](web-deployment.md).
+The manual loopback/SSH procedure below remains available for local development.
+
+For a manual loopback server after installation:
+
+```bash
 sudo wlanpi-utilization web
 ```
 
@@ -24,8 +31,9 @@ and web process need the updated code for the closed-file inventory.
 The installer copies local HTML/CSS/JavaScript assets and installs Flask and
 Waitress in the application's isolated venv. `--wheel-dir DIRECTORY` also
 supports offline installation when that directory contains all required Core
-and web dependency wheels. The command above selects managed FPMS attachment;
-normal CLI capture stays standalone unless `--managed` or `--attach` is used.
+and web dependency wheels. New FPMS installations use managed attachment;
+CLI capture attaches to an active managed session and otherwise starts foreground
+capture unless requested with `--managed`.
 
 The web server stays in the foreground and binds `127.0.0.1:8765`. From a
 laptop, leave this SSH tunnel running:
@@ -46,10 +54,10 @@ reloader, local assets, host/origin checks, a per-process CSRF token for control
 and no response caching. Restarting this web process invalidates tokens;
 reload open pages before sending another control.
 
-The optional milestone 4 adapter adds a protected Apps entry, HTTPS route and
+The milestone 4 adapter adds a protected Apps entry, HTTPS route and
 separate web service through a private Unix socket. It protects page, status,
-controls and downloads with the platform login. That integration requires its
-own explicit installer; the manual command above retains loopback operation.
+controls and downloads with the platform login. It is included in the standard
+installation; the manual command above retains loopback operation.
 
 ## Use the shared session
 
@@ -60,6 +68,13 @@ existing session's ID, phase and retained history before the first poll returns.
 Band/channel/width apply only to a new session. Advanced source fields offer
 the existing automatic interface/namespace discovery and optional Core backend.
 There is no SSID/BSSID selector.
+
+The single session button shows **Start session** while idle and **Stop session**
+in the active/danger color while starting or running. It shows **Stopping…** and
+is disabled during shutdown. Start opens the channel setup dialog, including
+the existing CSV/beacon JSONL logging checkbox. During a session the separate
+**Start logging / Stop logging** button controls logging. It is disabled while
+idle, stopping, disconnected or when the owner has no configured log formats.
 
 Primary channel is a band-specific dropdown: 2.4 GHz channels 1–14, the normal
 5 GHz 20 MHz primary grid, and 6 GHz channels 1, 5, …, 233. Bonded-channel

@@ -431,7 +431,7 @@ Apps
   Utilization
     2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
       <channel and center frequency>
-        Display | Display + Log | Start Logging | Stop Logging
+        Start Session | Start + Log | Start Logging | Stop Logging
 ```
 
 ### Capture interface and namespace acceptance
@@ -446,12 +446,12 @@ ip netns list
 ```
 
 1. With interface/namespace service overrides unset, select Apps → Utilization
-   → 2.4 GHz → channel 1 → Display. On the previously tested device, discovery
+   → 2.4 GHz → channel 1 → Start Session. On the previously tested device, discovery
    should select `root:wlanpi0`, leaving the unsupported `wlan0` unselected.
    Check `sudo journalctl -u wlanpi-fpms -n 80 --no-pager` for
    `Capture interface: root:wlanpi0`. Confirm live data, navigation, rotation,
    and left-button exit still work.
-2. Select Display + Log and confirm the stats CSV and beacon JSONL metadata
+2. Select Start + Log and confirm the stats CSV and beacon JSONL metadata
    identify the resolved interface. `network_namespace` is blank in CSV and
    null in JSON for root capture. Repeat with logging-only mode, then stop it.
 3. After stopping the front-panel capture, test an explicit root interface:
@@ -506,11 +506,11 @@ Keep `lldpd` running for these tests. Its link-discovery socket on an idle
 managed interface must not produce a busy-radio error. A simultaneous tcpdump
 or other capture still must, including one on that same managed interface.
 
-1. Run Display on a different channel from the baseline, navigate/rotate, then
-   exit left. Repeat the baseline commands. Confirm the capture interface's
+1. Run Start Session on a different channel from the baseline, navigate/rotate, then
+   detach with Left, then select Stop Session. Repeat the baseline commands. Confirm the capture interface's
    mode, UP flag, and original known channel/width are restored; siblings regain
    their prior UP flags. Existing monitor interfaces and namespaces must remain.
-2. Repeat with Display + Log and logging-only Start/Stop. Start again to confirm
+2. Repeat with Start + Log and logging-only Start/Stop. Start again to confirm
    the phy lock was released and the shared analysis/history still behaves as
    before.
 3. With front-panel capture stopped, run
@@ -542,7 +542,7 @@ journaled; it is not the graceful-exit acceptance case.
 
 ## On-device acceptance checklist
 
-1. Select a channel with known AP beacon activity and open `Display`.
+1. Select a channel with known AP beacon activity and open `Start Session`.
 2. Confirm the Utilization graph gains samples as new capture seconds complete.
 3. Use up/down to visit Utilization, Admission, Stations, Retries, Beacon Loss,
    and Composition.
@@ -551,15 +551,18 @@ journaled; it is not the graceful-exit acceptance case.
    and confirm cyan per-second bars overlay the amber advertised-count bars.
 5. Return to earlier screens and confirm their two-minute histories continued
    while inactive.
-6. Press left and confirm capture exits and the selected channel menu returns.
+6. Press left and confirm the managed display detaches, capture/logging keep
+   running, and the current session menu shows Connect and Stop Session.
+   Reconnect and verify the session ID and rolling history are unchanged.
 7. While a display is active, confirm the first auxiliary button does nothing
    and the second rotates the display without restarting capture or resetting
    history. Press the third auxiliary button and confirm a timestamped PNG for
    the active screen appears in `/var/log/wlanpi-beacon-live`. Confirm the
    brief saved-folder message clears back to the same screen.
-8. Open `Display + Log`; confirm its brief start message includes the log
-   folder. Wait several seconds, exit left, confirm the stop message, and
-   confirm a CSV and JSONL file exist:
+8. Open `Start + Log`; confirm its brief start message includes the log
+   folder. Wait several seconds and exit left; confirm logging continues.
+   Start Logging again and expect Logging already being saved with the same
+   file paths. Confirm a CSV and JSONL file exist:
 
    ```bash
    sudo ls -l /var/log/wlanpi-beacon-live
@@ -568,9 +571,10 @@ journaled; it is not the graceful-exit acceptance case.
 9. Inspect the stats CSV and confirm `unique_client_mac_count` contains the
    unique eligible client count for each emitted second.
 10. Use `Start Logging`; confirm no graph page opens. Then use `Stop Logging` and
-   confirm both messages include the log folder, the child exits, and files are
-   closed.
-11. Confirm no unexpected capture child remains:
+   confirm both messages include the log folder and files are closed while the
+   managed capture continues. Use Stop Session to end capture explicitly.
+11. After Stop Session completes, confirm no capture owner/TShark remains
+    (the broker/web service may remain running):
 
    ```bash
    pgrep -af 'wlanpi-utilization|tshark'

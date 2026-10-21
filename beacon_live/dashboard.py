@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import tzinfo
-from typing import Optional, TextIO, Tuple
+from typing import Callable, Optional, TextIO, Tuple
 
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
@@ -41,6 +42,7 @@ class TerminalDashboard:
         band: Optional[str] = None,
         channel: Optional[str] = None,
         frequency_mhz: Optional[int] = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.screen_manager = ScreenManager(
             snapshot=MetricsSnapshot.empty(window_seconds=max_seconds)
@@ -52,6 +54,9 @@ class TerminalDashboard:
         self.frequency_mhz = frequency_mhz
         self.capture_width: Optional[str] = None
         self.notice_message: Optional[str] = None
+        self.transient_notice: Optional[str] = None
+        self._transient_deadline = 0.0
+        self._clock = clock
         self.collecting = False
 
     def set_capture_width(self, width: str) -> None:
@@ -63,6 +68,10 @@ class TerminalDashboard:
 
     def set_collecting(self, collecting: bool) -> None:
         self.collecting = collecting
+
+    def set_transient_notice(self, message: str, *, seconds: float = 10) -> None:
+        self.transient_notice = message
+        self._transient_deadline = self._clock() + seconds
 
     @property
     def snapshot(self) -> MetricsSnapshot:
@@ -199,6 +208,8 @@ class TerminalDashboard:
             rendered.append("Collecting")
         if self.notice_message is not None:
             rendered.append(f"Warning: {self.notice_message}")
+        if self.transient_notice and self._clock() < self._transient_deadline:
+            rendered.append(self.transient_notice)
         return rendered
 
     def _format_rolling_summary(self) -> str:

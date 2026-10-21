@@ -1,8 +1,9 @@
 # Utilization managed service
 
 The v2.1.0 development service gives CLI and FPMS consumers one capture owner
-and the same analyzer publications. Managed mode is opt-in pending Pi
-acceptance. Direct capture remains the default provider; Core remains an
+and the same analyzer publications. Managed mode is the default for new FPMS
+installs; saved explicit standalone settings are preserved. Direct capture
+remains the default provider; Core remains an
 explicit optional provider. The preferred commands and every app title use
 **Utilization**. `wlanpi-beacon-live` and `beacon-live` remain executable
 compatibility aliases. New generated logs use the `utilization_` filename
@@ -30,7 +31,9 @@ after reboot or service restart; it never resumes capture automatically.
 existing session wins over the command's requested source/tuning: the CLI
 reports **Session already running** and displays the actual owner configuration,
 session ID, logs and history. Source changes still require an explicit stop
-and new start. Logging paths and limits belong to the initial owner;
+and new start. In the interactive CLI the attachment information clears after
+ten seconds or a keypress. Capture warnings are separate and remain visible.
+Logging paths and limits belong to the initial owner;
 display-only attachment cannot replace them or disable logging. An explicit
 logging request can enable logging. `--attach` only reads the current owner
 and never starts one. A plain `sudo wlanpi-utilization` also attaches when the
@@ -48,13 +51,19 @@ managed mode checks status when entering Utilization with Right or Center.
 Idle sessions offer band/channel selection; active sessions show status and
 current tuning above **Connect**, **Stop Session**, **Start Logging** and
 **Stop Logging**. Reopen the menu to refresh it after another consumer changes
-the session. This is an entry-time check, not continuous background polling.
+the session. Left from the managed display also refreshes this menu and returns
+directly to its Connect/Stop Session controls, even when capture started from a
+channel submenu. These checks do not poll continuously while the menu is open.
 Connect cannot create a replacement session. An existing-session notice shows
 once per display connection, never on periodic FPMS refresh. Starting the
 display from idle FPMS, or joining its active logging-only proxy, does not show
 that notice. Even a stale channel menu adopts the current active source.
-**Stop Logging**
-disables logging without ending capture. CLI controls require the actual
+Start Session and Start + Log are the idle channel actions. Start Logging and
+Start + Log report **Logging already being saved** when logging is active;
+they preserve the current files. Enabling logging on an existing session uses
+its current ID and does not need a new background renderer.
+**Stop Logging** disables logging without ending capture. CLI controls require
+the actual
 `session_id` value from status, not the literal placeholder `SESSION_ID`.
 While a session is active, read its ID automatically before using the desired
 control below. Repeat the assignment after a new session starts.
@@ -103,7 +112,9 @@ removed or reinstalled for this callback fix.
 Foreground capture stops on exit; managed attachment only detaches. Select
 `--fpms-runtime standalone` to
 restore that FPMS behavior. Reinstallation without a runtime flag preserves
-the saved selection in `/etc/wlanpi-beacon-live/fpms.json`. The
+the saved selection in `/etc/wlanpi-beacon-live/fpms.json`; an absent runtime
+setting defaults to managed. The installer ensures the broker is installed when
+the resolved selection is managed, including reinstalls without a runtime flag. The
 `WLANPI_UTILIZATION_RUNTIME_MODE=managed|standalone` environment variable can
 override that setting. Backend selection remains independent.
 

@@ -331,6 +331,16 @@ def _patch_buttons(text: str, path: Path) -> str:
         insertion = _line_offset(text, branches[0].body[0].lineno)
         text = text[:insertion] + handler_code + text[insertion:]
 
+    return_code = (
+        "            menu_return = g_vars.get('channel_utilization_menu_return')\n"
+        "            if callable(menu_return):\n"
+        "                menu_return(menu)\n"
+    )
+    if return_code not in text:
+        # Runs after the renderer detaches, before native FPMS redraws. Upgrade
+        # the previous managed exit hook without duplicating its cleanup.
+        text = text.replace(handler_code, handler_code + return_code, 1)
+
     text = _insert_page_handler(
         text,
         method_name="menu_up",

@@ -80,11 +80,14 @@
 
   function setControls() {
     const active = publication && activePhases.has(publication.phase);
-    $("new-session").disabled = !online || busy || active;
-    $("stop").disabled = !online || busy || !active || publication.phase === "stopping";
-    $("logging-toggle").disabled = !online || busy || !active || !loggingAvailable || publication.phase === "stopping";
+    const stopping = publication?.phase === "stopping";
+    $("session-toggle").disabled = !online || busy || stopping;
+    $("session-toggle").textContent = stopping ? "Stopping…" : active ? "Stop session" : "Start session";
+    $("session-toggle").className = `button ${active ? "danger" : "primary"}`;
+    $("logging-toggle").disabled = !online || busy || !active || !loggingAvailable || stopping;
     $("logging-toggle").title = loggingAvailable ? "Toggle log files while capture continues" : "This session has no logging formats configured";
     $("logging-toggle").textContent = publication?.logging.active ? "Stop logging" : "Start logging";
+    $("start-submit").disabled = !online || busy || active;
     $("refresh-files").disabled = !online || busy;
   }
 
@@ -291,9 +294,16 @@
     catch (error) {message("error", error.name === "AbortError" ? "Control timed out. Check the session status before retrying." : error.message); return false;}
     finally {busy = false; setControls();}
   }
-  $("stop").addEventListener("click", () => {if (publication?.session_id) control("session/stop", {session_id: publication.session_id});});
-  $("logging-toggle").addEventListener("click", async () => {if (publication?.session_id) {await control("logging", {session_id: publication.session_id, enabled: !publication.logging.active}); filesAt = 0;}});
-  $("new-session").addEventListener("click", () => {message("form-error", null); $("start-dialog").showModal();});
+  $("session-toggle").addEventListener("click", () => {
+    if (!online || busy || publication?.phase === "stopping") return;
+    if (publication && activeSession(publication)) control("session/stop", {session_id: publication.session_id});
+    else {message("form-error", null); $("start-dialog").showModal();}
+  });
+  $("logging-toggle").addEventListener("click", async () => {
+    if (!online || busy || !publication || !activeSession(publication) || !loggingAvailable || publication.phase === "stopping") return;
+    await control("logging", {session_id: publication.session_id, enabled: !publication.logging.active});
+    filesAt = 0;
+  });
   ["cancel-start", "cancel-bottom"].forEach(id => $(id).addEventListener("click", () => $("start-dialog").close()));
   const channelChoices = JSON.parse($("channel").dataset.channels);
   $("band").addEventListener("change", () => {
@@ -309,14 +319,16 @@
     document.querySelector('[name="center_frequency2_mhz"]').required = width === "80+80";
   });
   $("start-form").addEventListener("submit", async event => {
-    event.preventDefault(); const data = new FormData(event.currentTarget), width = data.get("channel_width");
+    event.preventDefault();
+    if (!online || busy || (publication && activeSession(publication))) return;
+    const data = new FormData(event.currentTarget), width = data.get("channel_width");
     const body = {band: data.get("band"), channel: data.get("channel"), channel_width: width || null, capture_backend: data.get("capture_backend"), iface: data.get("iface"), netns: data.get("netns") || null, logging_enabled: data.has("logging_enabled")};
     if (width && width !== "20") body.center_frequency1_mhz = Number(data.get("center_frequency1_mhz"));
     if (width === "80+80") body.center_frequency2_mhz = Number(data.get("center_frequency2_mhz"));
-    $("start-submit").disabled = true; message("form-error", null);
+    busy = true; setControls(); message("form-error", null);
     try {await request("session/start", body); $("start-dialog").close(); message("error", null); await pollOnce();}
     catch (error) {message("form-error", error.name === "AbortError" ? "Start request timed out. Close this dialog and check session status before retrying." : error.message);}
-    finally {$("start-submit").disabled = false;}
+    finally {busy = false; setControls();}
   });
 
   function pollOnce() {

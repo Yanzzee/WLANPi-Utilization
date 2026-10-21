@@ -33,9 +33,20 @@ def inspect(webui_root: Path, nginx_config: Path):
             and 'internal;' in texts["nginx"] and 'auth_request /auth/check;' in texts["nginx"],
         "apps_card_template": 'app-card' in texts["apps_cards"],
     }
+    managed = {
+        "apps_card_installed": all(marker in texts["apps_cards"] for marker in (
+            "<!-- BEGIN Utilization managed app card -->", "<!-- END Utilization managed app card -->")),
+        "nginx_route_installed": all(marker in texts["nginx"] for marker in (
+            "# BEGIN Utilization managed web route", "# END Utilization managed web route")),
+    }
+    next_step = "Verify installed nginx routing, login/logout/expiry and proxy boundary before enabling /utilization/."
+    if all(checks.values()) and not all(managed.values()):
+        next_step = ("Utilization card/route missing or incomplete. Run install_web_integration.py --check, "
+                     "then install_web_integration.py to restore after platform validation.")
     return {"read_only": True, "files": files, "candidate_hooks": checks,
+            "managed_integration": managed,
             "integration_candidate": all(checks.values()),
-            "next": "Verify installed nginx routing, login/logout/expiry and proxy boundary before enabling /utilization/."}
+            "next": next_step}
 
 
 def main():

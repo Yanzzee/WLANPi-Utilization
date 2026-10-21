@@ -97,6 +97,24 @@ def test_plan_is_read_only_repeat_install_is_idempotent_and_removal_preserves_cu
                    and call[-1] == "wlanpi-utilization.service" for call in system.calls)
 
 
+def test_reinstall_repairs_platform_files_replaced_by_package_update_and_keeps_token(platform):
+    package, nginx, config, unit = platform
+    cards = package / "templates/partials/apps_cards.html"
+    original = {nginx: nginx.read_bytes(), cards: cards.read_bytes()}
+    first = install.prepare(*platform)
+    system = System()
+    install.apply(first, webui_service="wlanpi-webui.service", runner=system, ready=lambda *args: None)
+    for path, content in original.items():
+        path.write_bytes(content)  # Package upgrade replaced the modified files.
+    repaired = install.prepare(*platform)
+    assert repaired.token == first.token
+    install.apply(repaired, webui_service="wlanpi-webui.service", runner=system, ready=lambda *args: None)
+    assert cards.read_text().count('href="/utilization/"') == 1
+    assert nginx.read_text().count("# BEGIN Utilization managed web route") == 1
+    assert (config / "web-proxy.token").read_text().strip() == first.token
+    assert system.active and system.enabled
+
+
 @pytest.mark.parametrize("change", ["auth", "freshness", "nginx", "markers", "token", "unit"])
 def test_unsupported_or_insecure_layout_fails_before_writes(platform, change):
     package, nginx, config, unit = platform

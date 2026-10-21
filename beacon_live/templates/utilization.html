@@ -26,7 +26,7 @@
   <main id="main" class="shell">
     <section class="session-bar" aria-label="Capture session">
       <div><div class="eyebrow">Capture session</div><div class="session-title"><span id="phase" class="status neutral">—</span><strong id="tuning">No session</strong></div><p id="session-detail" class="muted">Open this page without changing capture.</p></div>
-      <div class="actions"><span id="logging-state" class="logging-state">Logging —</span><button id="logging-toggle" class="button secondary" disabled>Start logging</button><button id="stop" class="button danger" disabled>Stop session</button><button id="new-session" class="button primary" disabled>Start session</button></div>
+      <div class="actions"><span id="logging-state" class="logging-state">Logging —</span><button id="logging-toggle" class="button secondary" disabled>Start logging</button><button id="session-toggle" class="button primary" disabled>Start session</button></div>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <div id="error" class="notice error" role="alert" hidden></div>
@@ -72,7 +72,7 @@
     <div class="dialog-header"><div><span class="eyebrow">New capture</span><h2 id="dialog-title">Start a session</h2></div><button type="button" id="cancel-start" class="icon-button" aria-label="Close session setup">×</button></div>
     <p class="muted">All views will share this channel and its rolling history.</p>
     <div class="form-grid"><label>Band<select name="band" id="band"><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option></select></label><label>Primary channel<select name="channel" id="channel" data-channels='{{ channel_choices|tojson }}' required>{% for channel in channel_choices["2.4"] %}<option value="{{ channel }}">{{ channel }}</option>{% endfor %}</select></label><label class="wide">Capture width<select name="channel_width" id="channel-width"><option value="">Band default</option><option value="20">20 MHz</option><option value="40">40 MHz</option><option value="80">80 MHz</option><option value="160">160 MHz</option><option value="80+80">80 + 80 MHz</option><option value="320">320 MHz</option></select></label><div class="centers wide" id="centers" hidden><label>Center frequency 1 · MHz<input name="center_frequency1_mhz" type="number" min="2000" max="7200"></label><label id="center-two" hidden>Center frequency 2 · MHz<input name="center_frequency2_mhz" type="number" min="2000" max="7200"></label></div></div>
-    <label class="check"><input name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
+    <label class="check"><input id="start-logging" name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
     <details><summary>Capture source</summary><div class="form-grid"><label>Backend<select name="capture_backend"><option value="direct">Direct capture</option><option value="core">Core · optional</option></select></label><label>Interface<input name="iface" value="auto" required spellcheck="false"></label><label class="wide">Network namespace · optional<input name="netns" spellcheck="false" placeholder="Automatic discovery"></label></div></details>
     <div id="form-error" class="notice error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="cancel-bottom" class="button secondary">Cancel</button><button type="submit" id="start-submit" class="button primary">Start session</button></div>
   </form></dialog>

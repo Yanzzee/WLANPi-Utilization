@@ -512,8 +512,8 @@ from missing decoded beacon rows.
 
 ## Logs are missing
 
-- `Display` intentionally does not start logging.
-- Use `Display + Log` for a graph and logs.
+- `Start Session` does not enable logging; joining preserves existing logging.
+- Use `Start + Log` for a graph and logs.
 - Use `Start Logging` for a logging-only background session.
 - FPMS files are under `/var/log/wlanpi-beacon-live`.
 - CLI files are under `--log-dir` (default `logs`).

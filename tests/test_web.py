@@ -156,7 +156,12 @@ def test_page_bootstraps_the_running_publication_and_preserves_data_without_a_co
     assert not service.controls
     assert page.index('id="composition-title"') < page.index('On this channel')
     assert 'data-sort="latest_ap_name"' in page
-    assert "Stop session" in page and "Stop capture" not in page
+    assert 'id="session-toggle"' in page and "Stop capture" not in page
+    assert 'id="stop"' not in page and 'id="new-session"' not in page
+    assert '<button id="logging-toggle"' in page
+    assert re.search(r'<input id="start-logging"[^>]*type="checkbox"', page)
+    assert page.index('id="start-form"') < page.index('id="start-logging"')
+    assert page.count('name="logging_enabled"') == 1
     assert 'name="local_cu"' not in page
 
 

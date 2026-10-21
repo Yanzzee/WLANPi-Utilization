@@ -104,9 +104,9 @@ def configured_runtime_mode() -> str:
     mode = os.environ.get("WLANPI_UTILIZATION_RUNTIME_MODE")
     if mode is None:
         try:
-            mode = json.loads(BACKEND_CONFIG.read_text()).get("runtime_mode", "standalone")
+            mode = json.loads(BACKEND_CONFIG.read_text()).get("runtime_mode", "managed")
         except FileNotFoundError:
-            mode = "standalone"
+            mode = "managed"
         except (OSError, ValueError, AttributeError):
             return "invalid"
     return mode if isinstance(mode, str) and mode in {"standalone", "managed"} else "invalid"
@@ -206,6 +206,23 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
                 refresh_menu()
 
         g_vars["channel_utilization_menu_enter"] = menu_enter
+
+        def menu_return(root_menu) -> None:
+            # Leaving a newly started display otherwise lands in its original
+            # channel submenu, which has no controls for the shared owner.
+            location = g_vars.get("current_menu_location", [])
+            level = root_menu
+            for depth, index in enumerate(location):
+                if not isinstance(level, list) or not 0 <= index < len(level):
+                    return
+                node = level[index]
+                if node is menu:
+                    refresh_menu()
+                    g_vars["current_menu_location"] = location[:depth + 1] + [0]
+                    return
+                level = node["action"]
+
+        g_vars["channel_utilization_menu_return"] = menu_return
     return menu
 
 
@@ -226,11 +243,11 @@ def _band_menu(
                 "name": f"{prefix} {channel} {frequency} MHz",
                 "action": [
                     {
-                        "name": "Display",
+                        "name": "Start Session",
                         "action": _launch_action(app, band, channel, False),
                     },
                     {
-                        "name": "Display + Log",
+                        "name": "Start + Log",
                         "action": _launch_action(app, band, channel, True),
                     },
                     {
@@ -324,6 +341,17 @@ def _session_channel(state):
     return band or ("2.4" if int(config["channel"]) <= 14 else "5"), int(channel or config["channel"])
 
 
+def _set_managed_logging(state, enabled: bool) -> None:
+    """Target the inspected owner so a replacement session cannot be changed."""
+    result = subprocess.run(
+        [EXECUTABLE, "session", "logging", "--session-id", state["session_id"],
+         "--enabled", "yes" if enabled else "no", "--summary"],
+        capture_output=True, text=True, timeout=6,
+    )
+    if result.returncode != 0:
+        raise OSError(result.stderr.strip() or "Utilization logging control failed")
+
+
 class ChannelUtilizationApp:
     """Launch a standalone owner or managed renderer and mirror its FPMS frames."""
 
@@ -366,6 +394,7 @@ class ChannelUtilizationApp:
         if resume_only and running is None:
             _display_status(self.g_vars, "No running session. Select a channel to start.")
             return
+        logging_already_active = bool(running and running.get("logging", {}).get("active"))
         logging_only_session = self.g_vars.get(
             "channel_utilization_logging_session"
         )
@@ -385,7 +414,7 @@ class ChannelUtilizationApp:
         new_session = False
         if not isinstance(session, _DisplaySession):
             _write_logging_enabled(logging, apply_managed=False)
-            command = build_launch_command(band=band, channel=channel, logging=logging)
+            command = build_launch_command(band=band, channel=channel, logging=logging and not logging_already_active)
             if resume_only:
                 command[command.index("--managed")] = "--attach"
             session = _DisplaySession(
@@ -432,7 +461,9 @@ class ChannelUtilizationApp:
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
-        if new_session and running is not None and not (
+        if logging and logging_already_active:
+            session.show_logging_status("Logging already being saved")
+        elif new_session and running is not None and not (
             isinstance(logging_only_session, _LoggingOnlySession) and not logging_only_session.finished
         ):
             session.show_status(f"Session already running: Ch {channel} {band} GHz. Loading display.")
@@ -448,6 +479,12 @@ class ChannelUtilizationApp:
                 running = _managed_session_status()
                 if running is not None:
                     band, channel = _session_channel(running)
+                    if running.get("logging", {}).get("active"):
+                        _display_logging_status(self.g_vars, "Logging already being saved", band=band, channel=channel)
+                        return
+                    _set_managed_logging(running, True)
+                    _display_logging_status(self.g_vars, "Logging requested", band=band, channel=channel)
+                    return
             except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
                 _display_error(self.g_vars, "Session unavailable. Check journal.")
                 return
@@ -461,7 +498,7 @@ class ChannelUtilizationApp:
         if isinstance(session, _LoggingOnlySession) and not session.finished:
             _display_logging_status(
                 self.g_vars,
-                "Logging already active",
+                "Logging already being saved",
                 band=session.band,
                 channel=session.channel,
             )

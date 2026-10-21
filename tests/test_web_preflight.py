@@ -24,3 +24,19 @@ def test_platform_candidate_records_hashes_and_not_configuration_contents(tmp_pa
     assert all(len(item["sha256"]) == 64 for item in report["files"].values())
     assert "never import" not in str(report)
     assert nginx.read_bytes() == before
+    assert report["managed_integration"] == {"apps_card_installed": False, "nginx_route_installed": False}
+    assert "restore" in report["next"]
+
+
+def test_preflight_reports_partial_and_complete_managed_blocks(tmp_path):
+    package = tmp_path / "webui"
+    (package / "templates/partials").mkdir(parents=True)
+    card = package / "templates/partials/apps_cards.html"
+    card.write_text("<!-- BEGIN Utilization managed app card -->\n<!-- END Utilization managed app card -->\n")
+    nginx = tmp_path / "nginx.conf"
+    nginx.write_text("# BEGIN Utilization managed web route\n")
+    report = inspect(package, nginx)
+    assert report["managed_integration"] == {"apps_card_installed": True, "nginx_route_installed": False}
+    nginx.write_text(nginx.read_text() + "# END Utilization managed web route\n")
+    report = inspect(package, nginx)
+    assert all(report["managed_integration"].values())

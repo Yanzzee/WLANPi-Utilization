@@ -1,6 +1,6 @@
 # WLAN Pi Apps and authenticated Utilization hosting
 
-The optional integration adds **Utilization** to WLAN Pi's Apps menu and serves
+The standard installer adds **Utilization** to WLAN Pi's Apps menu and serves
 the existing application at `https://<your-pi>/utilization/`. It uses WLAN Pi's
 existing login, session revocation, idle expiry and maximum session age.
 Utilization remains a separate backend and managed capture consumer; no custom
@@ -13,19 +13,28 @@ below include failure recovery, download authorization and capture-idle startup.
 
 ## Install on the Pi
 
-From the updated `~/WLANPi-Utilization` checkout, update the application and its
-optional web dependencies first:
+From the updated `~/WLANPi-Utilization` checkout, install or update everything
+with one command:
 
 ```bash
-sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web
+sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-That application installer restarts the capture broker and FPMS. Stop any
+This installs CLI/FPMS, the managed broker, web dependencies, Apps card, protected
+route and web service. It first validates the supported platform without writes,
+then installs application components and applies protected web integration.
+Saved backend/runtime choices are preserved; new FPMS installs default to managed
+direct capture. `--with-web` remains accepted for older instructions. Explicit
+`--without-web` skips web dependencies and integration without removing an
+existing route.
+
+The application installer restarts the capture broker and FPMS. Stop any
 active capture normally before this application update. If a manual
 `sudo wlanpi-utilization web` process is running, stop it with Ctrl-C.
 The protected web service replaces that manual process for direct hosting.
 
-Validate the installed WebUI sources and proposed changes, then install:
+For a read-only integration check or web-only repair, the component installer
+remains available:
 
 ```bash
 sudo python3 scripts/install_web_integration.py --check
@@ -75,6 +84,39 @@ hashes match the user's Pi preflight. Both the supplied Pi `app.py` hash and
 reviewed upstream `2b112f5a739e4647de4f5fd48948cd16e4d07d94` are accepted,
 with additional AST checks on the session-freshness and login gates. A later
 WebUI package upgrade may require review before reapplying this integration.
+
+### Apps card and route missing after an OS update
+
+The October 21 Pi report has WebUI **1.21.17-1** and FPMS **1.4.24-1**.
+Its auth, application, Apps-card and Nginx hashes match the reviewed original
+files, including application hash `b90723ca…`, card hash `d1fb8c9c…` and
+Nginx hash `8d4704f8…`. The managed card/route blocks are absent. This is
+consistent with a WebUI package update replacing the patched files, rather
+than an unsupported auth revision. The report does not include a successful
+reapplication of the protected integration after that update.
+
+Earlier versions of `install_wlanpi_fpms.sh --with-web` installed only web
+dependencies, requiring a separate protected integration command. The standard
+installer now performs both steps by default, including restoration after a
+WebUI update. Run the standard command above; no separate command is needed.
+To repair only the web integration without updating/restarting capture, run:
+
+```bash
+sudo python3 scripts/install_web_integration.py --check
+```
+
+```bash
+sudo python3 scripts/install_web_integration.py
+```
+
+No removal, downgrade or auth bypass is needed for these supplied hashes.
+The installer validates the platform before reapplying managed blocks and
+preserves the proxy token. It reloads the web services without restarting
+capture. Then verify Apps → Utilization and `/utilization/` after normal login.
+The preflight now reports `managed_integration.apps_card_installed` and
+`managed_integration.nginx_route_installed` separately to expose missing or
+partial patches. For a different revision rejected by `--check`, collect a new
+preflight and review the security/auth/routing changes before extending support.
 
 ### Pi 4 revision rejected during installation
 

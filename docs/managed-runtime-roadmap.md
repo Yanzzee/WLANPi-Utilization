@@ -703,3 +703,118 @@ return. Updated menu rendering still needs this hardware check. The next
 implementation milestone remains 5b (live export fan-out, rotation and disk
 limits); WiFi-Beacon-analysis context/validation remains milestone 6. Release
 metadata stays `2.1.0.dev0`.
+
+## FPMS session controls, logging notices and package-update recovery — October 21, 2026
+
+Follow-up Pi testing found that Left returned to the original channel submenu,
+where Stop Session was absent. The supplied configuration explicitly selects
+managed runtime and direct capture; this report does not indicate standalone
+capture. Managed Left continues to terminate only the renderer. A new native
+page-return hook refreshes Utilization and returns directly to the current
+session menu, making Connect and Stop Session available after a channel start.
+Other applications retain their menu paths. Idle actions are renamed
+Start Session and Start + Log. An absent FPMS runtime setting now defaults to
+managed, while an explicit saved standalone selection is retained. Reinstallation
+resolves the saved runtime and ensures its managed broker is installed, even
+without an explicit runtime flag.
+
+Start Logging and Start + Log inspect the owner's published logging status.
+When active, they report **Logging already being saved**, preserve existing
+file paths and avoid another enable request/background logging proxy. Starting
+logging on an existing owner with logging inactive sends an ID-scoped request
+without a new renderer, reporting Logging requested. Existing LoggingService
+start behavior is also idempotent while active; the repeated start message was
+not evidence of multiple analyzers or duplicated log writers.
+
+CLI attachment information now has its own transient notice rather than using
+the persistent Warning field. The interactive footer clears it after ten
+seconds or any keypress, including while display updates are paused. Runtime
+warnings retain their separate state and priority. Plain terminal rendering
+also omits attachment information after its deadline on subsequent renders.
+
+**Web recovery diagnosis:** the user reports FPMS **1.4.24-1** and WebUI
+**1.21.17-1** after apt upgrades. All four supplied hashes match the reviewed
+original WebUI files, including the supported `b90723ca…` application, and the
+card/Nginx managed blocks are absent. No allowlist or auth change is needed for
+this installed revision. Reapply `install_web_integration.py --check`, then
+`install_web_integration.py`, separately, to restore the card and route without
+restarting capture. The application installer's `--with-web` installs web
+dependencies; its help/completion output now states the separate integration
+step. Preflight reports card/route presence separately. The supplied evidence
+is consistent with package replacement of modified files; successful route
+restoration on this Pi is not yet reported. Different security-updated WebUI
+revisions still require source/auth/routing review, preserving the existing
+authentication boundary rather than bypassing revision checks.
+
+**Evidence:** Python 3.13.3 full regression passes **829 tests with one optional
+Core transport skip in 21.04 seconds**, including TLS Nginx authorization tests.
+A new native FPMS Start + Log → Left → Stop Session regression uses the real
+broker, owner, CLI renderer and LoggingService: Left preserves owner ID,
+history and active logging paths, exposes the Stop Session menu, and repeating
+Start Logging retains those paths. Stop then closes logs/owner while the broker
+remains running. Other new cases cover active-logging messages without controls
+or extra proxies, logging enable against the current owner, managed defaults,
+transient CLI timeout/keypress/paused behavior without losing warnings/history,
+and missing/partial managed web blocks. Installer shell syntax/help checks pass.
+
+**Remaining device checks:** reinstall the application/FPMS adapter, check Left
+and the returned menu on physical FPMS, repeat logging actions and verify paths,
+and check CLI notice dismissal. Reapply protected web integration and verify
+Apps, direct URL and login/logout/expiry after the package upgrade. Application
+reinstallation restarts the broker and ends any active session; protected web
+integration alone does not. The next implementation milestone remains 5b live
+pcapng export/rotation/disk limits, followed by milestone 6 analysis-context
+validation. Release metadata remains `2.1.0.dev0`.
+
+## Combined web session control and default full installation — October 21, 2026
+
+**Completed locally:** the web session bar now has one session button. It uses
+Start session with the primary color when idle/stopped/failed, Stop session with
+the danger color while starting/running, and disabled Stopping… during shutdown.
+The idle action opens the existing setup dialog. The main Start logging/Stop
+logging button remains, and the setup dialog retains its logging checkbox.
+Start submission and controls are disabled while requests run, disconnected or
+in incompatible phases; logging formats and current-session-ID checks remain.
+No capture/analyzer or metrics behavior changes are introduced by these controls.
+
+The default install/update command is now simply
+`sudo ./scripts/install_wlanpi_fpms.sh`. It validates the protected platform
+proposal first, installs application/CLI/FPMS and web dependencies, ensures the
+managed broker, and applies the protected Apps card, route and web service.
+Existing backend/runtime choices and the web proxy token are preserved. This
+also repairs supported platform files replaced by an OS package upgrade.
+No separate web-integration command is needed for standard installation.
+`--with-web` remains compatible; `--without-web` explicitly skips web work and
+retains any existing integration. The component web installer remains available
+for read-only checks or web-only repair without restarting capture.
+
+Unsupported-platform checks fail before application writes or capture restarts.
+Later install failures propagate a nonzero exit instead of announcing a complete
+install; the protected web component retains its own rollback behavior. The
+full install restarts the broker and FPMS and ends an active session normally.
+It updates the local checkout's code; source synchronization remains separate.
+
+**Evidence:** full Python 3.13.3 regression passes **837 tests with one optional
+Core transport skip in 23.64 seconds**, including real broker/CLI lifecycle and
+TLS Nginx authorization. A new temporary-Pi shell harness exercises the actual
+coordinator's defaults, saved standalone mode, legacy --with-web option, explicit
+web opt-out, offline-wheel forwarding, early platform-check failure and later
+web-apply failure. A protected-installer regression simulates package replacement
+of the card and route and verifies restoration without duplicated blocks or
+token replacement. Shell syntax/help checks pass.
+
+The updated JavaScript simulated-DOM checks pass in protected and local modes:
+one session button transitions label/color and shutdown state, current-ID stop
+and logging requests retain CSRF, the logging button follows owner state,
+the setup checkbox survives polls and reaches the start payload, cancel does
+not start capture, and auth expiry prevents further mutations. Existing metric,
+selection/table/graph, PSC and polling checks remain. These are frontend logic
+checks, not rendered-browser or physical-Pi acceptance.
+
+**Next Pi check:** sync the checkout, run the single standard installer, then
+open Apps → Utilization through the normal login. Verify start-dialog logging,
+main logging controls, combined session button and stopped-history retention.
+Repeat the standard install after a supported WebUI update to verify automatic
+card/route restoration. Milestone 5b live pcapng fan-out/rotation/disk limits and
+milestone 6 WiFi-Beacon-analysis validation remain next; version stays
+`2.1.0.dev0`.

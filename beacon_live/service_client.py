@@ -160,7 +160,7 @@ def managed_live(options, *, socket_path=DEFAULT_SOCKET, attach_only=False, star
         print(f"{attachment_notice}: {publication.session_id}. Source settings are unchanged.",
               file=sys.stderr, flush=True)
     # Joining a display-only consumer never disables logging owned elsewhere.
-    if not attach_only and options.get("initial_logging_enabled"):
+    if not attach_only and options.get("initial_logging_enabled") and not publication.logging.active:
         client.set_logging(publication.session_id, True)
     if start_only:
         print(f"Utilization session: {publication.session_id} ({publication.phase.value})")
@@ -178,7 +178,7 @@ def managed_live(options, *, socket_path=DEFAULT_SOCKET, attach_only=False, star
     follow_kwargs = dict(initial=publication, logging_status_path=status)
     def display(dashboard):
         if attachment_notice:
-            setter = getattr(dashboard, "set_notice", None)
+            setter = getattr(dashboard, "set_transient_notice", None)
             if callable(setter):
                 setter(attachment_notice)
         return dashboard

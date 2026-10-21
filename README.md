@@ -57,7 +57,10 @@ sudo ./scripts/install_wlanpi_fpms.sh
 The installer creates an isolated app environment under
 `/opt/wlanpi-beacon-live`, adds `Utilization` to the FPMS Apps menu, creates the
 runtime and log directories, installs the system-wide `wlanpi-utilization` and
-`utilization` commands, and restarts `wlanpi-fpms`. The commands are launchers
+`utilization` commands, and restarts `wlanpi-fpms`. New installs use the managed
+runtime and install/start its idle broker. Saved explicit runtime settings are
+preserved. It also installs web dependencies and the protected WLAN Pi Apps
+entry and `/utilization/` route by default. The commands are launchers
 in `/usr/local/bin` that run the existing executables in the isolated app
 environment; the installer does not copy the application into the system
 Python environment.
@@ -93,9 +96,13 @@ Core starts log `Capture backend: core` to stderr/the FPMS journal. The owner
 backend still requires an existing `wlanpiN` monitor and supports verified
 20/80 MHz configurations; see [Core acceptance](docs/core-capture-evaluation.md).
 
-Rerun the installer after updating this repository or upgrading FPMS. It
+Rerun the same command after updating this repository or upgrading FPMS/WebUI. It
 safely refreshes its managed CLI launchers as well as the application and FPMS
-integration. It locates FPMS through its launcher's Python environment and
+integration, and restores the protected web integration. Platform validation
+runs before files are installed or capture is restarted. Installation restarts
+the broker/FPMS and ends an active capture. Use `--without-web` only when skipping
+web installation intentionally; `--with-web` remains a compatibility option.
+It locates FPMS through its launcher's Python environment and
 prints the resolved package path before patching.
 
 The front panel and live CLI discover interfaces in the root and named network
@@ -139,22 +146,22 @@ Apps
   Utilization
     <band>
       <channel and center frequency>
-        Display | Display + Log | Start Logging | Stop Logging
+        Start Session | Start + Log | Start Logging | Stop Logging
 ```
 
-- `Display` starts capture and the graphical screens without writing logs.
-- `Display + Log` starts the same display with CSV and JSONL logging enabled.
+- `Start Session` starts capture and opens the graphical screens.
+- `Start + Log` starts the same display with CSV and JSONL logging enabled.
 - `Start Logging` captures and logs in the background without opening a graph.
-- `Stop Logging` stops the background logging session.
+- `Stop Logging` disables logging while the managed capture session continues.
 
 Logging start/stop messages briefly show the tuned channel, frequency, and log
-folder. `Display + Log` shows the same information when it starts and when you
-exit left.
+folder. If shared logging is already active, the start action reports
+**Logging already being saved** and preserves the existing files.
 
 While a display is open:
 
 - move up or down to cycle through the six screens;
-- press left to stop capture and return to the menu;
+- press left to detach the display and return to the session menu;
 - the first auxiliary button is disabled;
 - the second auxiliary button rotates the display 180 degrees while capture
   continues; and
@@ -170,8 +177,8 @@ Connect loads the existing display without changing its source or history.
 An attachment notice appears once when opening an existing session, with no
 repeated popups during display refresh. Left detaches that managed display;
 **Stop Session** explicitly ends capture. Reopen Utilization to refresh menu
-status after another consumer starts/stops a session. Foreground FPMS mode
-keeps the stop-on-exit behavior described above.
+status after another consumer starts/stops a session. Explicit legacy
+standalone FPMS mode stops its foreground capture when leaving the display.
 
 ## Use the command line
 
@@ -219,33 +226,29 @@ for permissions, shutdown, failure behavior, and device checks.
 
 ### Web interface
 
-Install the optional web dependencies alongside the managed service:
+The standard install/update command includes protected web hosting:
 
 ```bash
-sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed --with-web
-sudo wlanpi-utilization web
+sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-From your laptop, open an SSH tunnel and visit
-`http://127.0.0.1:8765/utilization/`:
+Open `https://<your-pi>/utilization/` or choose **Apps → Utilization** after
+signing in normally. No SSH tunnel or separate integration command is needed.
+
+For manual local development instead, start `sudo wlanpi-utilization web`, open
+an SSH tunnel from your laptop and visit `http://127.0.0.1:8765/utilization/`:
 
 ```bash
 ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
 ```
 
 The responsive page provides metrics, shared history graphs, a BSSID table,
-session/logging controls, and closed CSV/JSONL downloads. Opening, refreshing,
-or closing it leaves capture running. This manual server listens on loopback.
-For direct hosting through WLAN Pi's existing login and Apps menu, stop the
-manual web process and install the optional protected adapter:
-
-```bash
-sudo python3 scripts/install_web_integration.py --check
-sudo python3 scripts/install_web_integration.py
-```
-
-Open `https://<your-pi>/utilization/` or choose **Apps → Utilization**, without an
-SSH tunnel. See [protected deployment and Pi acceptance](docs/web-deployment.md)
+session/logging controls, and closed CSV/JSONL downloads. One session button
+switches between Start session and Stop session. The start dialog has a logging
+checkbox; Start logging/Stop logging remains a separate button during a session.
+Opening, refreshing, or closing the page leaves capture running. The manual
+development server listens on loopback.
+See [protected deployment and Pi acceptance](docs/web-deployment.md)
 for supported platform checks, rollback and login/logout acceptance, and
 [web operation](docs/web-interface.md) for controls and metric behavior.
 

@@ -333,6 +333,77 @@ def test_native_fpms_menu_stop_ends_shared_owner_and_logging_but_keeps_broker_an
     assert broker.poll() is None
 
 
+def test_native_fpms_left_detaches_new_session_and_returns_to_stop_menu(service, tmp_path, monkeypatch):
+    import ast
+    import types
+    from integration.wlanpi_fpms import channel_utilization as fpms
+    from scripts.patch_wlanpi_fpms import _patch_buttons
+    client, broker = service
+    settings = tmp_path / "fpms.json"
+    settings.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.delenv("WLANPI_UTILIZATION_RUNTIME_MODE", raising=False)
+    monkeypatch.setattr(fpms, "BACKEND_CONFIG", settings)
+    monkeypatch.setattr(fpms, "FRAME_PATH", tmp_path / "display.ppm")
+    monkeypatch.setattr(fpms, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(fpms._DisplaySession, "start_display", lambda self: None)
+    real_run, real_popen = subprocess.run, subprocess.Popen
+    def cli(command):
+        return [sys.executable, "-m", "beacon_live.device", *command[1:],
+                "--service-socket", str(client.socket_path)]
+    def installed_cli(command, **options):
+        # session controls use --socket rather than the device option.
+        return real_run([sys.executable, "-m", "beacon_live.device", *command[1:],
+                         "--socket", str(client.socket_path)], **options)
+    monkeypatch.setattr(fpms.subprocess, "run", installed_cli)
+    state = {"display_state": "menu", "current_menu_location": [0, 0, 0, 0, 1]}
+    controller = fpms.ChannelUtilizationApp(state, popen=lambda command: real_popen(
+        cli(command), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    monkeypatch.setattr(fpms, "ChannelUtilizationApp", lambda _: controller)
+    app_menu = fpms.build_channel_utilization_menu(state)
+    menu = [{"name": "Apps", "action": [app_menu]}]
+    buttons_path = Path(__file__).parent / "fixtures/fpms_1_4_24/buttons.py"
+    tree = ast.parse(_patch_buttons(buttons_path.read_text(), buttons_path))
+    button_class = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    namespace = {"types": types}
+    exec(compile(ast.Module(body=[button_class], type_ignores=[]), "native_buttons", "exec"), namespace)
+    button = object.__new__(namespace["Button"])
+    class Page:
+        def draw_page(self, g_vars, menu):
+            level = menu
+            for index in g_vars["current_menu_location"][:-1]:
+                level = level[index]["action"]
+            g_vars["option_selected"] = level[g_vars["current_menu_location"][-1]]["action"]
+    button.page_obj = Page()
+    button.page_obj.draw_page(state, menu)
+    button.menu_center(state, menu)  # Start + Log from a channel submenu.
+    try:
+        original = until(client, lambda pub: pub.logging.active and bool(pub.completed_stats))
+        session = state["channel_utilization_session"]
+        button.menu_left(state, menu)
+        current = client.read()
+        assert current.session_id == original.session_id
+        assert current.phase is SessionPhase.RUNNING and current.logging.active
+        assert current.logging.paths == original.logging.paths
+        assert current.snapshot == original.snapshot
+        assert session.process.poll() == 0
+        assert state["display_state"] == "menu"
+        assert state["current_menu_location"] == [0, 0, 0]
+        assert [item["name"] for item in app_menu["action"]][1:3] == ["Connect", "Stop Session"]
+        # Repeating Start Logging while active must preserve the same files.
+        controller.start_logging_only(band="5", channel=36)
+        assert client.read().logging.paths == original.logging.paths
+        state["current_menu_location"][-1] = 2
+        button.page_obj.draw_page(state, menu)
+        button.menu_center(state, menu)
+        stopped = until(client, lambda pub: pub.phase is SessionPhase.STOPPED)
+        assert not stopped.logging.active and stopped.closed_logs
+        assert stopped.session_id == original.session_id
+        assert broker.poll() is None
+    finally:
+        if state.get("channel_utilization_session"):
+            state["channel_utilization_session"].stop()
+
+
 def test_large_partial_write_retains_only_one_pending_latest_publication():
     sender, receiver = socket.socketpair()
     try:
