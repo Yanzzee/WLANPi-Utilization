@@ -245,7 +245,7 @@ an SSH tunnel from your laptop and visit `http://127.0.0.1:8765/utilization/`:
 ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
 ```
 
-The responsive page provides metrics, shared history graphs, a BSSID table,
+The responsive page provides metrics, shared history graphs, sortable BSSID and Hosts tables,
 session/logging/export controls, and closed CSV/JSONL/pcapng downloads. One session button
 switches between Start session and Stop session. The start dialog has a logging
 checkbox; Start logging/Stop logging remains a separate button during a session.
@@ -256,6 +256,11 @@ rotates every hour or 256 MiB, and saves files without a default count/total-siz
 cap. It stops export at a 256 MiB free-space reserve and closes buffered output. See [export controls and policy](docs/beacon-export.md).
 Opening, refreshing, or closing the page leaves capture running. The manual
 development server listens on loopback.
+
+Hosts shows observed wireless client MACs, vendor/local indicator, latest observed
+SSID/BSSID context, last activity, last transmitted RSSI, Tx/Rx data-frame counts
+and Tx retry percentage from the same rolling two-minute window. Missing signal
+or retry data stays unavailable. See [host observation rules](docs/web-interface.md#hosts-tab).
 See [protected deployment and Pi acceptance](docs/web-deployment.md)
 for supported platform checks, rollback and login/logout acceptance, and
 [web operation](docs/web-interface.md) for controls and metric behavior.

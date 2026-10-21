@@ -11,6 +11,7 @@
   const activePhases = new Set(["starting", "running", "stopping"]);
   let publication = null, screens = new Map(), online = false, busy = false;
   let failures = 0, filesAt = 0, chosenGraph = "cu", sortKey = "latest_rssi_dbm", descending = true;
+  let hostSortKey = "last_activity", hostDescending = true;
   let admissionMaximum = 31250;
   let loggingAvailable = false;
   let exportAvailable = false;
@@ -23,7 +24,7 @@
   const number = value => value == null ? "—" : new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(value);
   const percent = (value, retry = false) => value == null ? "—" : retry && value > 0 && value < 1 ? "<1%" : `${number(value)}%`;
   const date = seconds => seconds == null ? "—" : new Date(seconds * 1000).toLocaleString();
-  const timeLabel = seconds => new Date(seconds * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+  const timeLabel = seconds => new Date(seconds * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"});
   const node = (tag, className, text) => {const element = document.createElement(tag); if (className) element.className = className; if (text != null) element.textContent = text; return element;};
   const svgNode = (tag, attributes = {}, text) => {const element = document.createElementNS(ns, tag); Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value)); if (text != null) element.textContent = text; return element;};
   const message = (id, text) => {$(id).textContent = text || ""; $(id).hidden = !text;};
@@ -248,6 +249,37 @@
     });
   }
 
+  function renderHosts() {
+    const snapshot = publication.snapshot, rows = [...(snapshot.hosts || [])];
+    const knownBssids = new Set(snapshot.bssids.map(row => row.bssid.toLowerCase()));
+    rows.sort((a, b) => {
+      const value = row => hostSortKey === "vendor" ? row.locally_administered ? "Locally administered" : row.vendor || "Unknown" : row[hostSortKey];
+      const av = value(a), bv = value(b);
+      if (av == null) return bv == null ? a.mac.localeCompare(b.mac) : 1;
+      if (bv == null) return -1;
+      return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * (hostDescending ? -1 : 1) || a.mac.localeCompare(b.mac);
+    });
+    $("host-count").textContent = number(snapshot.window_unique_client_mac_count);
+    $("host-summary").textContent = `${number(rows.length)} shown · ${number(snapshot.window_unique_client_mac_count)} observed clients · ${snapshot.window_seconds}s`;
+    $("host-limit").hidden = !snapshot.host_details_limited;
+    $("host-rows").replaceChildren(...rows.map(row => {
+      const tr = node("tr"), activity = node("td", "", timeLabel(row.last_activity));
+      activity.title = date(row.last_activity);
+      const signal = node("td", "", row.last_tx_rssi_dbm == null ? "—" : `${number(row.last_tx_rssi_dbm)} dBm`);
+      signal.title = row.last_tx_timestamp == null ? "No client transmission observed" : `Last client transmission: ${timeLabel(row.last_tx_timestamp)}`;
+      const known = knownBssids.has(row.bssid);
+      tr.append(node("td", "mac", row.mac), node("td", "", row.locally_administered ? "Locally administered" : row.vendor || "Unknown"),
+        node("td", "", row.ssid ?? (known ? "<Hidden SSID>" : "—")), node("td", "mac", row.bssid), activity, signal,
+        node("td", "", number(row.tx_frames)), node("td", "", number(row.rx_frames)), node("td", "", percent(row.tx_retry_percent, true)));
+      return tr;
+    }));
+    $("host-empty").hidden = rows.length > 0;
+    document.querySelectorAll("[data-host-sort]").forEach(button => {
+      button.parentElement.setAttribute("aria-sort", button.dataset.hostSort === hostSortKey ? hostDescending ? "descending" : "ascending" : "none");
+      button.textContent = button.textContent.replace(/ [↑↓]$/, "") + (button.dataset.hostSort === hostSortKey ? hostDescending ? " ↓" : " ↑" : "");
+    });
+  }
+
   function renderSession() {
     const cfg = publication.config, phase = publication.phase;
     $("phase").textContent = phase.charAt(0).toUpperCase() + phase.slice(1);
@@ -297,9 +329,11 @@
     document.querySelectorAll(".panel").forEach(panel => panel.hidden = panel.id !== name);
     document.querySelectorAll("[data-tab]").forEach(button => {button.classList.toggle("selected", button.dataset.tab === name); if (button.dataset.tab === name) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current");});
     if (name === "logs") files();
+    if (name === "hosts" && publication) renderHosts();
   }
   document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.tab)));
   document.querySelectorAll("[data-sort]").forEach(button => button.addEventListener("click", () => {descending = sortKey === button.dataset.sort ? !descending : !["ssid", "latest_ap_name"].includes(button.dataset.sort); sortKey = button.dataset.sort; if (publication) renderTable();}));
+  document.querySelectorAll("[data-host-sort]").forEach(button => button.addEventListener("click", () => {hostDescending = hostSortKey === button.dataset.hostSort ? !hostDescending : !["mac", "vendor", "ssid", "bssid"].includes(button.dataset.hostSort); hostSortKey = button.dataset.hostSort; if (publication) renderHosts();}));
   $("graph-choice").addEventListener("change", () => {chosenGraph = $("graph-choice").value; document.querySelectorAll("[data-graph]").forEach(card => card.classList.toggle("mobile-selected", card.dataset.graph === chosenGraph));});
   $("refresh-files").addEventListener("click", files);
 
@@ -436,7 +470,12 @@
       const age = health.latest_timestamp == null ? null : Math.max(0, value.server_time - health.latest_timestamp);
       $("capture-health").textContent = `Capture quality · ${number(health.decoded_frames)} decoded frames · ${number(health.bad_fcs_frames)} bad FCS · ${number(health.rejected_records)} rejected rows · ${age == null ? "Waiting for capture timestamps" : `Latest capture ${number(age)}s ago`}${health.fcs_metadata_available ? "" : " · FCS metadata unavailable"}${age > 3 && publication.phase === "running" ? " · Quiet traffic, buffering or capture loss can leave gaps" : ""}`;
     }
-    if (changed) {renderSession(); renderComposition(); renderMetrics(); renderTable(); $("graphs").replaceChildren(...graphDefinitions.map(drawGraph));}
+    if (changed) {
+      renderSession(); renderComposition(); renderMetrics(); renderTable();
+      $("host-count").textContent = number(publication.snapshot.window_unique_client_mac_count);
+      if (!$("hosts").hidden) renderHosts();
+      $("graphs").replaceChildren(...graphDefinitions.map(drawGraph));
+    }
     if (!$("logs").hidden && Date.now() - filesAt > 5000) files();
     if (!failures) return;
     message("error", null); failures = 0;

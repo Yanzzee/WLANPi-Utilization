@@ -233,12 +233,14 @@ a{
 }
 .navigation{
   display:flex;
+  overflow-x:auto;
   gap:8px;
   align-items:center;
   border-bottom:1px solid var(--line);
   margin:26px 0 22px
 }
 .nav-item{
+  flex-shrink:0;
   border:0;
   background:none;
   padding:12px 15px 15px;

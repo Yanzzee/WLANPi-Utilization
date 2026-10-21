@@ -87,6 +87,8 @@ class FrameRecord:
     qos_tid: Optional[int] = None
     ampdu_reference: Optional[int] = None
     radiotap_bad_fcs: Optional[bool] = None
+    transmitter_vendor: Optional[str] = None
+    receiver_vendor: Optional[str] = None
 
     @property
     def has_bad_fcs(self) -> bool:
@@ -367,6 +369,23 @@ class RetryBssidState:
 
 
 @dataclass(frozen=True)
+class HostState:
+    """Observed wireless data endpoint in the shared rolling capture window."""
+
+    mac: str
+    vendor: Optional[str]
+    locally_administered: bool
+    ssid: Optional[str]
+    bssid: str
+    last_activity: float
+    last_tx_timestamp: Optional[float]
+    last_tx_rssi_dbm: Optional[int]
+    tx_frames: int
+    rx_frames: int
+    tx_retry_percent: Optional[float]
+
+
+@dataclass(frozen=True)
 class MetricsSnapshot:
     """Read-only analyzer state shared by every display renderer."""
 
@@ -388,6 +407,8 @@ class MetricsSnapshot:
     beacons: BeaconReceptionSnapshot = field(
         default_factory=BeaconReceptionSnapshot.empty
     )
+    hosts: tuple[HostState, ...] = ()
+    host_details_limited: bool = False
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":

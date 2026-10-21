@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("flask", reason="Install the optional web extra for web tests")
 
 from beacon_live.channel import ChannelWidth
-from beacon_live.models import MetricsSnapshot
+from beacon_live.models import HostState, MetricsSnapshot
 from beacon_live.runtime import LiveSessionConfig, RuntimePublication, SessionPhase
 from beacon_live.service_client import ServiceError
 from beacon_live.web import PublicationReader, create_app, open_closed_log
@@ -165,6 +165,25 @@ def test_page_bootstraps_the_running_publication_and_preserves_data_without_a_co
     assert 'id="stop"' not in page and 'id="new-session"' not in page
     assert '<button id="logging-toggle"' in page
     assert re.search(r'<input id="start-logging"[^>]*type="checkbox"', page)
+
+
+def test_hosts_are_shared_in_embedded_and_polled_state_without_new_controls(web):
+    service, app, client, _ = web
+    host = HostState("00:11:22:33:44:55", "Example <Manufacturer>", False,
+                     "Test", "02:00:00:00:00:10", 1000.2, None, None, 0, 7, None)
+    service.publication = replace(service.publication, snapshot=replace(
+        service.publication.snapshot, hosts=(host,), window_unique_client_mac_count=1))
+    app.extensions["utilization_reader"].deadline = 0
+    page = client.get("/utilization/").text
+    embedded = json.loads(re.search(r'<script id="initial-status" type="application/json">(.*?)</script>', page, re.S)[1])
+    status = client.get("/utilization/api/status").json
+    assert embedded["publication"]["snapshot"]["hosts"] == status["publication"]["snapshot"]["hosts"]
+    row = status["publication"]["snapshot"]["hosts"][0]
+    assert row["vendor"] == "Example <Manufacturer>" and row["last_tx_rssi_dbm"] is None
+    assert row["tx_frames"] == 0 and row["rx_frames"] == 7 and row["tx_retry_percent"] is None
+    assert 'data-tab="hosts"' in page and 'data-host-sort="last_activity"' in page
+    assert "hostname" not in row and "throughput" not in row
+    assert not service.controls and service.reads == 2  # Initial fixture read plus refreshed shared publication.
     assert page.index('id="start-form"') < page.index('id="start-logging"')
     assert page.count('name="logging_enabled"') == 1
     assert 'name="local_cu"' not in page

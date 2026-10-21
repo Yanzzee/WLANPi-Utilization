@@ -49,8 +49,14 @@ def preview_snapshot():
                 timestamp=second + .3 + frame * .0005, bssid="02:00:00:00:00:10",
                 frame_type=2, frame_subtype=0,
                 retry_flag=frame == 0 if offset == 119 else frame < 2 + int(2 * abs(math.sin(offset / 10))),
-                receiver_address="02:00:00:00:00:10", transmitter_address=f"02:10:00:00:00:{frame % 8 + 1:02x}",
+                receiver_address="02:00:00:00:00:10", transmitter_address=f"{'00' if frame % 8 == 0 else '02'}:10:00:00:00:{frame % 8 + 1:02x}",
+                rssi_dbm=-55 - frame % 8, transmitter_vendor="Example Client",
             ), publish_snapshot=False)
+        analyzer.ingest(FrameRecord(
+            timestamp=second + .8, bssid="02:00:00:00:00:10", frame_type=2, frame_subtype=0,
+            retry_flag=False, receiver_address="00:10:00:00:00:99", transmitter_address="02:00:00:00:00:10",
+            rssi_dbm=-42,
+        ), publish_snapshot=False)
         analyzer.ingest(FrameRecord(
             timestamp=second + .85, bssid="02:00:00:00:00:11", frame_type=2, frame_subtype=0,
             retry_flag=True, receiver_address="02:00:00:00:00:11", transmitter_address="02:10:00:00:00:10",

@@ -52,6 +52,7 @@ from beacon_live.parser import parse_tshark_live_record
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_REQUIRED_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_METADATA_FRAME_FIELD_NAMES
+from beacon_live.parser import TSHARK_HOST_FIELD_NAMES
 from beacon_live.parser import TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_MULTI_VALUE_SEPARATOR
 from beacon_live.parser import TSHARK_OPTIONAL_FRAME_FIELD_NAMES
@@ -573,7 +574,7 @@ def select_tshark_frame_fields(
     )
     return TSHARK_REQUIRED_FRAME_FIELD_NAMES + tuple(
         field
-        for field in TSHARK_METADATA_FRAME_FIELD_NAMES + optional_fields
+        for field in TSHARK_METADATA_FRAME_FIELD_NAMES + TSHARK_HOST_FIELD_NAMES + optional_fields
         if field in available_fields
     )
 
@@ -2555,6 +2556,8 @@ def _wall_clock_snapshot(
             composition=empty.composition,
             window_unique_client_mac_count=0,
             beacons=empty.beacons,
+            hosts=(),
+            host_details_limited=False,
         )
     return replace(snapshot, **replacements)
 

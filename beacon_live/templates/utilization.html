@@ -36,6 +36,7 @@
     <nav class="navigation" aria-label="Views">
       <button class="nav-item selected" data-tab="overview" aria-current="page">Overview</button>
       <button class="nav-item" data-tab="bssids">BSSIDs <span id="bssid-count" class="count">—</span></button>
+      <button class="nav-item" data-tab="hosts">Hosts <span id="host-count" class="count">—</span></button>
       <button class="nav-item" data-tab="logs">Log files <span id="file-count" class="count">—</span></button>
       <span class="nav-caption">Shared <span id="window-label">120</span>-second history</span>
     </nav>
@@ -61,6 +62,14 @@
         <th scope="col"><button data-sort="ssid">SSID / BSSID</button></th><th scope="col"><button data-sort="latest_ap_name">AP name</button></th><th scope="col" aria-sort="descending"><button data-sort="latest_rssi_dbm">RSSI ↓</button></th><th scope="col"><button data-sort="latest_qbss_cu_percent">QBSS CU</button></th><th scope="col"><button data-sort="latest_station_count">QBSS stations</button></th><th scope="col"><button data-sort="window_unique_client_mac_count">Observed clients · 120s</button></th><th scope="col"><button data-sort="window_retry_percent">Retries · 120s</button></th><th scope="col">Admission · 32µs units</th><th scope="col">Last beacon</th>
       </tr></thead><tbody id="bssid-rows"></tbody></table><p id="bssid-empty" class="empty">No beacon observations in the current window.</p></div>
       <p class="method-note">QBSS fields come from each BSSID's latest beacon. Missing fields remain unavailable. Sorting changes only this table, never the reporting BSSID.</p>
+    </section>
+    <section id="hosts" class="panel" aria-label="Observed wireless hosts" hidden>
+      <div class="section-heading"><h2>Observed wireless clients</h2><span id="host-summary" class="muted">Shared 120-second window</span></div>
+      <p id="host-limit" class="notice" role="status" hidden>Showing the most recently tracked hosts. Some host detail counters may be incomplete on very busy channels; the observed client count is unchanged.</p>
+      <div class="table-wrap"><table><caption class="sr-only">Observed wireless clients and data frames in the shared rolling window. Column buttons change table order only.</caption><thead><tr>
+        <th scope="col"><button data-host-sort="mac">MAC</button></th><th scope="col"><button data-host-sort="vendor">Vendor / local indicator</button></th><th scope="col"><button data-host-sort="ssid">SSID</button></th><th scope="col"><button data-host-sort="bssid">BSSID</button></th><th scope="col" aria-sort="descending"><button data-host-sort="last_activity">Last activity ↓</button></th><th scope="col"><button data-host-sort="last_tx_rssi_dbm">Last transmitted RSSI</button></th><th scope="col"><button data-host-sort="tx_frames">Tx frames</button></th><th scope="col"><button data-host-sort="rx_frames">Rx frames</button></th><th scope="col"><button data-host-sort="tx_retry_percent">Tx retry %</button></th>
+      </tr></thead><tbody id="host-rows"></tbody></table><p id="host-empty" class="empty">No observed wireless clients in the current window.</p></div>
+      <p class="method-note">Tx/Rx counts describe captured data frames between a client and a known BSSID. BSSID/SSID show the latest observed context, not confirmed association. Last activity includes traffic to or from the client. RSSI is measured at the WLAN Pi only when the client transmits; unavailable values show —. Tx retries use eligible transmitted data frames, including each captured retry. Locally administered addresses do not identify a manufacturer reliably.</p>
     </section>
     <section id="logs" class="panel" aria-label="Log downloads" hidden>
       <div class="section-heading"><h2>Log files</h2><button id="refresh-files" class="button secondary small">Refresh files</button></div>

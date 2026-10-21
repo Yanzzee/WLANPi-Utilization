@@ -51,6 +51,7 @@ TSHARK_FRAME_FIELD_NAMES = (
 # address resolution are useful metadata, but are not capture prerequisites.
 TSHARK_REQUIRED_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[:14]
 TSHARK_METADATA_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[14:]
+TSHARK_HOST_FIELD_NAMES = ("wlan.ta.oui_resolved", "wlan.ra.oui_resolved")
 
 # Request optional fields only when the installed TShark reports them.
 TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
@@ -107,6 +108,8 @@ _TSHARK_OCCURRENCE_FIELD_NAMES = frozenset(
         "wlan.bssid",
         "wlan.ta",
         "wlan.ra",
+        "wlan.ta.oui_resolved",
+        "wlan.ra.oui_resolved",
         "wlan.sa",
         "wlan.da",
         "wlan.seq",
@@ -537,6 +540,9 @@ def parse_tshark_live_record(
             receiver_address=_parse_optional_mac(value("wlan.ra")),
             source_address=_parse_optional_mac(value("wlan.sa")),
             destination_address=_parse_optional_mac(value("wlan.da")),
+            rssi_dbm=_host_rssi(value("radiotap.dbm_antsignal")),
+            transmitter_vendor=value("wlan.ta.oui_resolved").strip() or None,
+            receiver_vendor=value("wlan.ra.oui_resolved").strip() or None,
             radiotap_bad_fcs=bad_fcs,
             fcs_status=fcs_status,
         ),
@@ -555,6 +561,8 @@ def _parse_named_tshark_frame_fields(
     record = parse_tshark_frame_row(core_row, ssid_encoding=ssid_encoding)
     if record is None or record.frame_type is None:
         return None
+    record = replace(record, transmitter_vendor=values.get("wlan.ta.oui_resolved", "").strip() or None,
+                     receiver_vendor=values.get("wlan.ra.oui_resolved", "").strip() or None)
 
     integers: dict[str, Optional[int]] = {}
     for name in TSHARK_OPTIONAL_FRAME_FIELD_NAMES:
@@ -703,6 +711,11 @@ def _vendor_ap_identity(
         if name:
             return name, vendor
     return None, None
+
+
+def _host_rssi(value):
+    parsed = _parse_optional_int(value, minimum=-200, maximum=100)
+    return None if parsed is _MALFORMED else parsed
 
 
 def _vendor_from_resolved_bssid(

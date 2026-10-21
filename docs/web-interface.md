@@ -2,7 +2,7 @@
 
 The v2.1.0 development web consumer uses the managed session at
 `/utilization/`. It provides current metrics, six shared-history graphs,
-a sortable BSSID table, explicit session/logging controls, and closed
+sortable BSSID and Hosts tables, explicit session/logging controls, and closed
 CSV/JSONL and beacon pcapng downloads. Direct capture remains the default; Core is optional.
 
 ## Install and open on a Pi
@@ -202,6 +202,56 @@ wait for shutdown to finish and retry. Controls are never retried automatically.
 Sessions created without configured logging formats have logging disabled in
 the page; web-created sessions configure both formats for later toggling.
 
+## Hosts tab
+
+**Hosts**, next to BSSIDs, lists observed wireless clients from the shared
+120-second window. Each column is sortable; rows initially sort by most recent
+activity. Tables scroll horizontally on small screens. Opening the tab renders
+the latest publication immediately; the page does not maintain another analyzer
+or capture. Hidden host rows are not rebuilt on every poll.
+
+| Column | Meaning |
+| --- | --- |
+| MAC | Unicast wireless data-frame transmitter/receiver, excluding known AP BSSIDs. |
+| Vendor / local indicator | TShark's local manufacturer lookup when available; **Locally administered** when the MAC's local bit is set, otherwise **Unknown** if unresolved. |
+| SSID / BSSID | Latest observed BSSID context and that BSSID's newest retained beacon SSID. This does not confirm association. |
+| Last activity | Last captured data frame to or from this client, shown in local 24-hour time; full date is available on hover. |
+| Last transmitted RSSI | Signal measured at the WLAN Pi on this client's latest captured transmission. A downlink from its AP never supplies client RSSI. |
+| Tx / Rx frames | Captured data frames transmitted/received by the client within the rolling window, including each retry transmission. |
+| Tx retry % | Retry-bit transmissions divided by this client's retry-eligible transmitted data frames in the window. Missing Retry bits are excluded from this denominator. |
+
+Host eligibility reuses the existing observed-client rules: valid unicast TA/RA
+data endpoints involving a known BSSID on the selected primary scope. Distribution
+system SA/DA addresses, probe traffic, group addresses and known corrupt frames
+do not create host rows. This intentionally does not enumerate every source
+address heard on the channel. Host counters are capture observations and cannot
+establish actual traffic volume, throughput or association counts. Channel retry
+metrics retain their existing denominator, which also includes eligible management
+frames and downlinks; it differs from the host Tx denominator.
+
+RSSI is unavailable for receive-only clients or when the latest transmitted frame
+lacks signal metadata. No eligible transmitted Retry bit means unavailable retry
+percentage; an observed zero stays zero, and nonzero retries below 1% show `<1%`.
+Counters and identities expire with the shared rolling window. Stopped sessions
+retain their final snapshot until a new session starts.
+
+Manufacturer fields are requested only if the installed TShark supports them
+(`wlan.ta.oui_resolved` / `wlan.ra.oui_resolved`). They use the existing MAC-only
+name resolution; there are no per-host lookup processes or network requests.
+A locally administered address does not reliably identify a manufacturer or
+prove randomization. Hostnames, IP discovery, throughput estimates and additional
+per-host graphs are excluded.
+
+Detail summaries are bounded to 1,024 identities per second and 1,024 published
+rows. Across buckets, the newest retained identities are preferred. A visible
+notice identifies detail omission or possibly incomplete host counters on very
+busy channels. The existing observed-client count is not capped; the tab badge
+shows that full count, while the table summary also gives the number shown.
+Per-second summaries are built in the existing frame pass, merged at completed
+bucket publication, and discarded as the window expires; no host packet history
+is added. See [TShark WLAN fields](https://www.wireshark.org/docs/dfref/w/wlan.html)
+and [TShark resolution options](https://www.wireshark.org/docs/man-pages/tshark.html).
+
 ## Download contract
 
 Only successfully closed CSV/JSONL and beacon pcapng segments registered by the
@@ -246,6 +296,11 @@ namespace, and diagnostic bundle. These checks complement the existing
 4. Open another tab/browser; reload, switch views, close every browser, and
    reconnect. Capture/logging must continue with the same ID and history.
    Compare CPU/RAM and publication lag with CLI/FPMS-only operation.
+   In Hosts, verify local/vendor indicators, client-only transmitted RSSI,
+   receive-only missing values, 24-hour activity, sorting and expiry. Compare
+   MAC/BSSID directions and Tx retries against a short mixed-frame diagnostic
+   capture, accounting for monitor-mode losses. Check busy download/upload with
+   Hosts visible and hidden, then verify a new session clears previous rows.
 5. Toggle logging off without stopping capture. Download CSV/JSONL, parse them,
    and compare completed values with the session. Verify new segments after
    toggling on/rollover, and explicit unavailable status for removed files.

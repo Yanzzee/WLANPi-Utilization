@@ -41,19 +41,25 @@ export async function checkWebUi({html, source, status}) {
     elements.get("capture-options").textContent = html.match(/<script id="capture-options" type="application\/json">(.*?)<\/script>/s)[1];
     elements.get("band").value = "2.4"; elements.get("channel").value = "1";
     elements.get("channel-width").value = ""; elements.get("iface").value = "auto"; elements.get("netns").value = "";
-    elements.get("logs").hidden = true;
+    for (const id of ["bssids", "hosts", "logs"]) elements.get(id).hidden = true;
     elements.get("channel").dataset.channels = html.match(/data-channels='([^']+)'/)[1];
     const sortButtons = Array.from(html.matchAll(/data-sort="([^"]+)"/g), match => {
       const button = new Element(); button.dataset.sort = match[1]; button.parentElement = new Element(); return button;
     });
-    const panels = ["overview", "bssids", "logs"].map(id => elements.get(id));
+    const hostSortButtons = Array.from(html.matchAll(/data-host-sort="([^"]+)"/g), match => {
+      const button = new Element(); button.dataset.hostSort = match[1]; button.parentElement = new Element(); return button;
+    });
+    const tabs = Array.from(html.matchAll(/data-tab="([^"]+)"/g), match => {
+      const button = new Element(); button.dataset.tab = match[1]; return button;
+    });
+    const panels = ["overview", "bssids", "hosts", "logs"].map(id => elements.get(id));
     const metas = {"utilization-api": "/utilization/api/", "utilization-hosted": hosted ? "yes" : "no",
       "utilization-csrf": html.match(/name="utilization-csrf" content="([^"]+)"/)[1]};
     const sandbox = {
       document: {
         getElementById: id => elements.get(id),
         querySelector: selector => ({content: metas[selector.match(/name="([^"]+)"/)?.[1]]}),
-        querySelectorAll: selector => selector === "[data-sort]" ? sortButtons : selector === ".panel" ? panels : [],
+        querySelectorAll: selector => selector === "[data-sort]" ? sortButtons : selector === "[data-host-sort]" ? hostSortButtons : selector === "[data-tab]" ? tabs : selector === ".panel" ? panels : [],
         createElement: () => new Element(), createElementNS: () => new Element(),
         createTextNode: content => Object.assign(new Element(), {textContent: content}),
         addEventListener: (event, fn) => docEvents[event] = fn,
@@ -132,6 +138,42 @@ export async function checkWebUi({html, source, status}) {
     assert.equal(elements.get("channel-width").children[0].textContent, "Band default (20 MHz)");
     assert.deepEqual(elements.get("channel-width").children.map(option => option.value), ["", "20", "40"]);
 
+    // Hosts are rendered on demand from the same publication; navigation sends
+    // no control, performs no capture work and does not alter graph history.
+    const history = structuredClone(value.publication.snapshot.history);
+    const originalSession = value.publication.session_id;
+    assert.equal(elements.get("host-rows").children.length, 0);
+    const beforeTabs = calls.length;
+    tabs.find(button => button.dataset.tab === "hosts").events.click();
+    assert.equal(elements.get("hosts").hidden, false);
+    assert.equal(elements.get("overview").hidden, true);
+    assert.equal(elements.get("host-rows").children.length, value.publication.snapshot.hosts.length);
+    assert.match(text(elements.get("host-rows")), /Example Client/);
+    assert.match(text(elements.get("host-rows")), /Locally administered/);
+    const clientRow = mac => elements.get("host-rows").children.find(row => row.children[0].textContent === mac);
+    const rxOnly = clientRow("00:10:00:00:00:99");
+    assert.equal(rxOnly.children[1].textContent, "Unknown");
+    assert.equal(rxOnly.children[2].textContent, "Classroom East");
+    assert.equal(rxOnly.children[3].textContent, qbss.bssid);
+    assert.match(rxOnly.children[4].textContent, /^\d\d:\d\d:\d\d$/);
+    assert.equal(rxOnly.children[5].textContent, "—");
+    assert.equal(rxOnly.children[6].textContent, "0");
+    assert.equal(rxOnly.children[8].textContent, "—");
+    const transmitting = clientRow("00:10:00:00:00:01");
+    assert.equal(transmitting.children[5].textContent, "-55 dBm");
+    assert.equal(transmitting.children.length, 9);
+    const hostMacSort = hostSortButtons.find(button => button.dataset.hostSort === "mac");
+    hostMacSort.events.click();
+    assert.equal(elements.get("host-rows").children[0].children[0].textContent, "00:10:00:00:00:01");
+    assert.equal(hostMacSort.parentElement.attributes["aria-sort"], "ascending");
+    hostMacSort.events.click();
+    assert.equal(hostMacSort.parentElement.attributes["aria-sort"], "descending");
+    tabs.find(button => button.dataset.tab === "overview").events.click();
+    assert.equal(elements.get("hosts").hidden, true);
+    assert.equal(calls.length, beforeTabs);
+    assert.equal(value.publication.session_id, originalSession);
+    assert.deepEqual(value.publication.snapshot.history, history);
+
     const apSort = sortButtons.find(button => button.dataset.sort === "latest_ap_name");
     apSort.events.click();
     assert.match(text(elements.get("bssid-rows").children[0]), new RegExp(retry.bssid));
@@ -198,6 +240,21 @@ export async function checkWebUi({html, source, status}) {
       assert.ok(entry, "next status poll scheduled");
       timers.delete(entry[0]); await entry[1].fn(); await settle();
     }
+    tabs.find(button => button.dataset.tab === "hosts").events.click();
+    value.publication.snapshot.hosts[0].tx_retry_percent = .25;
+    value.publication.snapshot.host_details_limited = true;
+    value.publication.revision++; await poll();
+    assert.equal(elements.get("host-limit").hidden, false);
+    assert.match(text(elements.get("host-rows")), /<1%/);
+    value.publication.snapshot.hosts = [];
+    value.publication.snapshot.window_unique_client_mac_count = 0;
+    value.publication.snapshot.host_details_limited = false;
+    value.publication.revision++; await poll();
+    assert.equal(elements.get("host-empty").hidden, false);
+    assert.equal(elements.get("host-rows").children.length, 0);
+    assert.equal(elements.get("host-limit").hidden, true);
+    assert.equal(elements.get("host-count").textContent, "0");
+    tabs.find(button => button.dataset.tab === "overview").events.click();
     value.publication.revision++;
     value.publication.capture_definition = {...value.publication.capture_definition, width: "80+80", center_frequency2_mhz: 5530};
     await poll();

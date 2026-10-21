@@ -1110,3 +1110,54 @@ sessions now target longer projects. Record busy-channel continuity and normal
 session/radio cleanup. Milestone 6 offline-analysis context/end-to-end checks
 remain next; the Hosts tab is discussed only and remains unimplemented.
 Version remains `2.1.0.dev0`.
+
+## Hosts web tab — October 21, 2026
+
+**Completed locally:** Hosts now sits next to BSSIDs and provides sortable MAC,
+vendor/local indicator, SSID, BSSID, last activity, last transmitted RSSI, Tx/Rx
+data-frame counts and Tx retry percentage. It contains no hostname discovery,
+throughput estimates or additional per-host graphs. Time uses the existing local
+24-hour convention. Hidden host tables render on demand from the latest shared
+publication, and narrow navigation/table layouts scroll horizontally.
+
+The existing analyzer pass now maintains bounded per-second host summaries and
+publishes immutable host rows in `MetricsSnapshot`. The observed-client rules,
+channel/retry definitions, completed buckets, rolling history and radio ownership
+remain unchanged. No second source/analyzer or retained host packet stream was
+added. RSSI comes only from the client's latest transmission; missing metadata
+stays unavailable. SSID/BSSID identify latest observed context rather than proven
+association. Optional TShark OUI fields reuse local MAC resolution, with a separate
+local-address indicator and no network/hostname lookup. Details are bounded at
+1,024 identities per bucket and 1,024 published rows, with an omission notice;
+the existing observed-client total remains uncapped.
+
+**Evidence:** full Python 3.13.3 regression passes **967 tests in 38.86 seconds**,
+including all four Core loopback tests, protected Nginx routes and export fidelity.
+Two existing direct-worker fork deprecation warnings remain. New checks cover
+streaming/replay host parity, endpoint eligibility, bad FCS/primary filtering,
+direction-specific counters and Retry denominators, receive-only/missing RSSI,
+latest context and late frames, window expiry, bounded details without capping
+client totals, multi-MPDU manufacturer alignment, optional fields, typed IPC and
+embedded/polled web publications. Protected/local simulated-DOM checks pass for
+host rendering, sorting, missing values, `<1%`, empty/limited updates and tab
+navigation without a session/history/control change. These are frontend logic
+checks, not rendered-browser acceptance.
+
+The existing 120-second synthetic parser/analyzer benchmark verifies all original
+metrics on **240,121 frames in 2.983 seconds**, approximately **80,501 frames/s**,
+with **23.4 MiB** peak process RSS on this laptop. It excludes TShark, capture,
+IPC and HTTP/rendering and does not establish Pi capacity.
+
+**Next Pi acceptance:** reinstall using `sudo ./scripts/install_wlanpi_fpms.sh`
+after stopping any capture that needs normal closure. Open an existing managed
+session and compare Hosts against known active clients. Check local/vendor
+indicators, downlink-only missing RSSI/retries, last transmitted signal, 24-hour
+activity and sorting; compare directions/retries with a short mixed-frame capture.
+Switch Overview/BSSIDs/Hosts and attach CLI/FPMS without changing session ID or
+history. Test idle expiry, empty/new sessions, phone-sized scrolling and busy
+download/upload with Hosts visible/hidden, recording Pi CPU/RAM and capture lag.
+
+The prior export-policy/FPMS acceptance remains outstanding where not yet tested.
+Milestone 6 remains next: WiFi-Beacon-analysis end-to-end validation with pinned
+AP/classroom/schedule/date/timezone context. Hosts is an additive web improvement;
+it does not close that export-analysis gate. Version stays `2.1.0.dev0`.
