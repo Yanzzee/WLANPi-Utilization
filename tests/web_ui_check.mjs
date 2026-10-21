@@ -55,7 +55,11 @@ export async function checkWebUi({html, source, status}) {
         get(key) {return {band: "2.4", channel: "6", channel_width: "20", capture_backend: "direct", iface: "auto", netns: ""}[key];}
         has(key) {return key === "logging_enabled" && elements.get("start-logging").checked;}
       },
-      Date: class extends Date {static now() {return now;}},
+      Date: class extends Date {
+        constructor(...args) {super(...(args.length ? args : [Date.UTC(2026, 9, 21, 19, 4, 5)]));}
+        static now() {return now;}
+        toLocaleTimeString(locales, options) {return super.toLocaleTimeString("en-US", {...options, timeZone: "UTC"});}
+      },
       setTimeout: (fn, ms) => {timers.set(++sequence, {fn, ms}); return sequence;},
       clearTimeout: id => timers.delete(id),
       fetch: async (url, options) => {
@@ -77,6 +81,7 @@ export async function checkWebUi({html, source, status}) {
     vm.runInNewContext(source, sandbox);
     // Embedded state must render before the first asynchronous status response.
     assert.equal(elements.get("phase").textContent, "Running");
+    assert.equal(elements.get("updated").textContent, "Received 19:04:05");
     assert.match(elements.get("session-detail").textContent, /Session already running/);
     assert.match(elements.get("session-id").textContent, new RegExp(value.publication.session_id));
     assert.equal(elements.get("retries-value").textContent, "<1%");

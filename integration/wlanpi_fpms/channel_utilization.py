@@ -30,6 +30,7 @@ NAVIGATION_DEBOUNCE_SECONDS = 0.2
 CAPTURE_STOP_TIMEOUT_SECONDS = 30
 CORE_CAPTURE_STOP_TIMEOUT_SECONDS = 90
 LOGGING_STATUS_SECONDS = 1.0
+MENU_POLL_SECONDS = 2.0
 LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
 
 _WHITE = (255, 255, 255)
@@ -178,52 +179,127 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
         ],
     }
     if configured_runtime_mode() == "managed":
-        idle_actions = list(menu["action"])
-
-        def refresh_menu() -> None:
-            try:
-                running = _managed_session_status()
-                if running is None:
-                    menu["action"][:] = idle_actions
-                else:
-                    band, channel = _session_channel(running)
-                    menu["action"][:] = [
-                        {"name": f"Session {running['phase']}: Ch {channel} {band} GHz", "action": _resume_action(app)},
-                        {"name": "Connect", "action": _resume_action(app)},
-                        {"name": "Stop Session", "action": _stop_session_action(app)},
-                        {"name": "Start Logging", "action": _logging_only_action(app, band, channel)},
-                        {"name": "Stop Logging", "action": _stop_logging_action(app)},
-                    ]
-            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
-                LOGGER.exception("Unable to refresh Utilization menu")
-                # Do not offer a new capture when the shared owner is unknown.
-                menu["action"][:] = [{"name": "Session unavailable", "action": _resume_action(app)}]
-
-        def menu_enter() -> None:
-            # Native FPMS keeps this exact list as option_selected. Mutate it
-            # only on entry, before its new selection index is appended.
-            if g_vars.get("option_selected") is menu["action"]:
-                refresh_menu()
-
-        g_vars["channel_utilization_menu_enter"] = menu_enter
-
-        def menu_return(root_menu) -> None:
-            # Leaving a newly started display otherwise lands in its original
-            # channel submenu, which has no controls for the shared owner.
-            location = g_vars.get("current_menu_location", [])
-            level = root_menu
-            for depth, index in enumerate(location):
-                if not isinstance(level, list) or not 0 <= index < len(level):
-                    return
-                node = level[index]
-                if node is menu:
-                    refresh_menu()
-                    g_vars["current_menu_location"] = location[:depth + 1] + [0]
-                    return
-                level = node["action"]
-
-        g_vars["channel_utilization_menu_return"] = menu_return
+        controller = _SessionMenu(app, menu)
+        g_vars["channel_utilization_menu_enter"] = controller.enter
+        g_vars["channel_utilization_menu_return"] = controller.returned
+        g_vars["channel_utilization_menu_poll"] = controller.poll
     return menu
+
+
+class _SessionMenu:
+    """Read shared status off-thread; change menu state only on FPMS's UI path."""
+
+    def __init__(self, app, menu):
+        self.app, self.menu, self.g_vars = app, menu, app.g_vars
+        self.idle_actions = list(menu["action"])
+        self.signature = ("uninitialized",)
+        self.last_poll = float("-inf")
+        self.lock = threading.Lock()
+        self.in_flight = False
+        self.result = None
+        self.generation = 0
+        self.worker = None
+
+    def _read(self):
+        try:
+            state = _managed_session_status()
+            if state is not None:
+                _session_channel(state)  # Validate before handing it to the UI.
+            return state
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            LOGGER.exception("Unable to refresh Utilization menu")
+            return {"unavailable": True}
+
+    def _apply(self, state):
+        if state is None:
+            signature, actions = ("idle",), self.idle_actions
+        elif state.get("unavailable"):
+            signature = ("unavailable",)
+            actions = [{"name": "Session unavailable", "action": _resume_action(self.app)}]
+        elif state["phase"] == "stopping":
+            signature = ("stopping", state.get("session_id"))
+            def waiting():
+                _display_status(self.g_vars, "Session stopping. Please wait.")
+                _return_to_menu(self.g_vars)
+            actions = [{"name": "Stopping Session", "action": waiting}]
+        else:
+            band, channel = _session_channel(state)
+            logging_active = bool(state.get("logging", {}).get("active"))
+            signature = ("active", state.get("session_id"), band, channel, logging_active)
+            actions = [
+                {"name": "Connect Session", "action": _resume_action(self.app)},
+                {"name": "Stop Session", "action": _stop_session_action(self.app)},
+                {"name": "Stop Logging" if logging_active else "Start Logging",
+                 "action": _stop_logging_action(self.app) if logging_active else _logging_only_action(self.app, band, channel)},
+            ]
+        if signature == self.signature:
+            return False
+        self.menu["action"][:] = actions
+        self.signature = signature
+        return True
+
+    def _refresh(self):
+        with self.lock:
+            self.generation += 1  # Discard any read started before this action.
+            self.result = None
+        self.last_poll = self.app.clock()
+        return self._apply(self._read())
+
+    def _location(self, root_menu):
+        location = self.g_vars.get("current_menu_location", [])
+        level = root_menu
+        for depth, index in enumerate(location):
+            if not isinstance(level, list) or not 0 <= index < len(level):
+                return None
+            item = level[index]
+            if item is self.menu:
+                return location[:depth + 1] if len(location) > depth + 1 else None
+            level = item["action"]
+        return None
+
+    def enter(self):
+        if self.g_vars.get("option_selected") is self.menu["action"]:
+            self._refresh()
+
+    def returned(self, root_menu):
+        prefix = self._location(root_menu)
+        if prefix is not None:
+            self._refresh()
+            self.g_vars["current_menu_location"] = prefix + [0]
+
+    def poll(self, root_menu):
+        prefix = self._location(root_menu)
+        if self.g_vars.get("display_state") != "menu" or prefix is None:
+            return False
+        with self.lock:
+            result, self.result = self.result, None
+        changed = False
+        if result is not None:
+            generation, state = result
+            if generation == self.generation:
+                old_signature = self.signature
+                changed = self._apply(state)
+                if changed:
+                    location = self.g_vars["current_menu_location"]
+                    selection = location[-1] if len(location) == len(prefix) + 1 else 0
+                    if old_signature[0] != self.signature[0]:
+                        selection = 0
+                    self.g_vars["current_menu_location"] = prefix + [min(selection, len(self.menu["action"]) - 1)]
+        now = self.app.clock()
+        with self.lock:
+            if self.in_flight or now - self.last_poll < MENU_POLL_SECONDS:
+                return changed
+            self.in_flight = True
+            generation = self.generation
+            self.last_poll = now
+        def read_status():
+            state = self._read()
+            with self.lock:
+                self.result = (generation, state)
+                self.in_flight = False
+        self.worker = threading.Thread(target=read_status, name="utilization-menu-status", daemon=True)
+        self.worker.start()
+        return changed
 
 
 def _band_menu(
@@ -283,6 +359,8 @@ def _logging_only_action(
 ) -> Callable[[], None]:
     def start_logging_only() -> None:
         app.start_logging_only(band=band, channel=channel)
+        if configured_runtime_mode() == "managed":
+            _return_to_menu(app.g_vars)
 
     return start_logging_only
 
@@ -292,6 +370,8 @@ def _stop_logging_action(
 ) -> Callable[[], None]:
     def stop_logging() -> None:
         app.stop_logging()
+        if configured_runtime_mode() == "managed":
+            _return_to_menu(app.g_vars)
 
     return stop_logging
 
@@ -306,6 +386,8 @@ def _resume_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
 def _stop_session_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
     def stop_session() -> None:
         app.stop_capture()
+        if configured_runtime_mode() == "managed":
+            _return_to_menu(app.g_vars)
 
     return stop_session
 
@@ -554,6 +636,30 @@ class ChannelUtilizationApp:
             _display_error(self.g_vars, "Stop failed. Check journal.")
 
     def stop_logging(self) -> None:
+        if configured_runtime_mode() == "managed":
+            try:
+                running = _managed_session_status()
+                if running is None:
+                    _display_status(self.g_vars, "Logging already stopped")
+                    return
+                band, channel = _session_channel(running)
+                was_active = bool(running.get("logging", {}).get("active"))
+                if was_active:
+                    _set_managed_logging(running, False)
+                proxy = self.g_vars.pop("channel_utilization_logging_session", None)
+                if isinstance(proxy, _LoggingOnlySession):
+                    proxy.stop()
+                display = self.g_vars.get("channel_utilization_session")
+                message = "Logging stop requested" if was_active else "Logging already stopped"
+                if isinstance(display, _DisplaySession) and not display.finished:
+                    display.logging_enabled = False
+                    display.show_logging_status(message)
+                else:
+                    _display_logging_status(self.g_vars, message, band=band, channel=channel)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                LOGGER.exception("Utilization logging control failed")
+                _display_error(self.g_vars, "Logging control failed. Check journal.")
+            return
         try:
             _write_logging_enabled(False)
         except (OSError, ValueError, subprocess.TimeoutExpired):

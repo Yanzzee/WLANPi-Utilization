@@ -374,6 +374,7 @@ def test_native_fpms_left_detaches_new_session_and_returns_to_stop_menu(service,
                 level = level[index]["action"]
             g_vars["option_selected"] = level[g_vars["current_menu_location"][-1]]["action"]
     button.page_obj = Page()
+    state["channel_utilization_return_to_menu"] = lambda: button.menu_left(state, menu)
     button.page_obj.draw_page(state, menu)
     button.menu_center(state, menu)  # Start + Log from a channel submenu.
     try:
@@ -388,17 +389,41 @@ def test_native_fpms_left_detaches_new_session_and_returns_to_stop_menu(service,
         assert session.process.poll() == 0
         assert state["display_state"] == "menu"
         assert state["current_menu_location"] == [0, 0, 0]
-        assert [item["name"] for item in app_menu["action"]][1:3] == ["Connect", "Stop Session"]
+        assert [item["name"] for item in app_menu["action"]][:2] == ["Connect Session", "Stop Session"]
         # Repeating Start Logging while active must preserve the same files.
         controller.start_logging_only(band="5", channel=36)
         assert client.read().logging.paths == original.logging.paths
-        state["current_menu_location"][-1] = 2
+        menu_controller = state["channel_utilization_menu_poll"].__self__
+        clock = [0.0]
+        controller.clock = lambda: clock[0]
+        menu_controller.last_poll = 0.0
+        def update_menu():
+            clock[0] += fpms.MENU_POLL_SECONDS
+            menu_controller.poll(menu)
+            menu_controller.worker.join(timeout=6)
+            assert not menu_controller.worker.is_alive()
+            if menu_controller.poll(menu):
+                button.page_obj.draw_page(state, menu)
+        # Web/CLI mutations reach the same owner; the visible menu follows.
+        client.set_logging(original.session_id, False)
+        until(client, lambda pub: not pub.logging.active)
+        update_menu()
+        assert app_menu["action"][2]["name"] == "Start Logging"
+        client.set_logging(original.session_id, True)
+        until(client, lambda pub: pub.logging.active)
+        update_menu()
+        assert app_menu["action"][2]["name"] == "Stop Logging"
+        assert client.read().snapshot == original.snapshot
+        state["current_menu_location"][-1] = 1
         button.page_obj.draw_page(state, menu)
         button.menu_center(state, menu)
         stopped = until(client, lambda pub: pub.phase is SessionPhase.STOPPED)
         assert not stopped.logging.active and stopped.closed_logs
         assert stopped.session_id == original.session_id
         assert broker.poll() is None
+        update_menu()
+        assert [item["name"] for item in app_menu["action"]] == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
+        assert state["current_menu_location"] == [0, 0, 0]
     finally:
         if state.get("channel_utilization_session"):
             state["channel_utilization_session"].stop()

@@ -179,8 +179,9 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   installation/reinstallation, URL prefixes, and service failure recovery on Pi.
   **Implementation and local checks complete October 19; Pi 4 Apps,
   login/logout/expiry, session attachment and web startup after reboot/relogin
-  confirmed October 20. Remaining failure/release checks and the repaired FPMS
-  Stop Session device retest remain open.** See milestone 4
+  confirmed October 20. FPMS Stop Session was confirmed working October 21;
+  subsequent menu refinements and broader failure/download/release checks
+  still need device acceptance.** See milestone 4
   evidence below and [protected deployment](web-deployment.md).
 - [ ] **5. Beacon pcapng export.** Implement the same-source export branch,
   rotation, retention, disk isolation, status, and downloads. Compare retained
@@ -818,3 +819,66 @@ Repeat the standard install after a supported WebUI update to verify automatic
 card/route restoration. Milestone 5b live pcapng fan-out/rotation/disk limits and
 milestone 6 WiFi-Beacon-analysis validation remain next; version stays
 `2.1.0.dev0`.
+
+## Dynamic FPMS menu and phase review — October 21, 2026
+
+**Completed locally:** the active menu starts with Connect Session, followed by
+Stop Session and exactly one logging action: Start Logging when inactive or
+Stop Logging when active. The redundant running-status item is removed. Local
+controls return through a refreshed root menu. While shutdown is in progress,
+only Stopping Session is shown; band/channel choices return when the owner is
+stopped, allowing a new explicit start without stale Connect/Logging actions.
+Managed Stop Logging now reads the owner's actual state and sends an ID-scoped
+request, including when another consumer started logging; it no longer reports
+already stopped merely because FPMS has no local logging proxy.
+
+An idempotent native FPMS menu-loop hook now consumes periodic status checks
+while Utilization's menu is visible. A daemon worker reads through the installed
+CLI, with at most one request in flight and at most one read every two seconds.
+The worker never paints or changes FPMS navigation. The UI loop applies changes
+and redraws only when the menu changes, so external web/CLI starts/stops and
+logging changes normally appear within a few seconds. No checks run in other
+apps, the parent Apps menu or the active metric display. Selection stays valid
+when logging actions change; lifecycle changes collapse stale channel paths
+to the correct root. Older pending reads cannot overwrite a local refresh.
+Service failures show Session unavailable and recover on later reads.
+
+The web Received clock now uses browser-local **24-hour HH:MM:SS** formatting.
+Capture/log timestamps, metric definitions and publication history are unchanged.
+
+**Evidence:** Python 3.13.3 full regression passes **847 tests with one optional
+Core transport skip in 24.82 seconds**. Native installer/dispatcher fixtures cover
+menu-loop redraw gating, entry/navigation and idempotent patching. Tests cover
+external lifecycle/logging transitions, one bounded off-thread read, UI-only
+menu application, polling scope, selection repair, stale-read rejection and
+service recovery. The real broker/native-button regression now toggles logging
+externally and observes the menu follow it without changing capture history;
+Stop Session returns the menu to idle band choices. Protected/local JavaScript
+simulated-DOM checks pass, including an en-US locale fixture that requires
+Received 19:04:05, plus the existing control/auth/metric checks. Physical OLED
+rendering and the latest asynchronous menu behavior still need Pi acceptance.
+
+**Phase position:** milestone 1 is complete. Milestones 2–4 are implemented with
+local regression coverage and the user-reported CLI/TUI, Pi 4/5 web, login,
+logout/expiry, existing-session, reboot-page and Stop Session evidence recorded
+above. The latest report says the current application looks good; it does not
+close every controlled busy-channel, failure recovery, download authorization
+or physical radio-restoration release check. These broader acceptance items
+remain open rather than treating UI polish as completion of the release.
+
+Milestone **5a is complete**: the bounded offline pcapng reader/filter/writer
+and helper preserve original beacon packet blocks and pass TShark/fan-out
+regressions. Milestone **5b is the next bounded implementation**: connect a
+single full-packet source to the analyzer and beacon export worker, preserve all
+required analysis frames, add readable rotated segments and retention/free-space
+limits, isolate disk/queue failures, and expose status/registered downloads.
+Then milestone **6** runs WiFi-Beacon-analysis with pinned AP/classroom/schedule,
+date/timezone context and exported segments, closes release checks and prepares
+v2.1.0. Grafana/touchscreen work remains deferred; metadata stays `2.1.0.dev0`.
+
+**Next device check:** sync and run `sudo ./scripts/install_wlanpi_fpms.sh`
+(this restarts services and ends an active capture). Leave Utilization's FPMS
+menu open, start/stop the session and logging from web/CLI, and verify the menu
+changes without reopening it. Confirm Connect Session, the single logging
+action, Stop Session → idle choices, and Left detachment. Check the web receive
+clock. Proceed with 5b after recording any resulting device corrections.

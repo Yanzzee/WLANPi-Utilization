@@ -95,7 +95,7 @@
     online = connected;
     $("connection").className = `status ${connected ? "" : "bad"}`;
     $("connection").textContent = connected ? "Connected" : "Disconnected";
-    if (connected) $("updated").textContent = `Received ${new Date().toLocaleTimeString()}`;
+    if (connected) $("updated").textContent = `Received ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"})}`;
     setControls();
   }
 

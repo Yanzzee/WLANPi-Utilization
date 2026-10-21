@@ -203,8 +203,10 @@ def test_native_menu_refreshes_on_entry_without_changing_other_apps(package, tmp
         names = [item["name"] for item in app["action"]]
         if phase is None:
             assert names == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
+        elif phase == "stopping":
+            assert names == ["Stopping Session"]
         else:
-            assert names == [f"Session {phase}: Ch 5 6 GHz", "Connect", "Stop Session", "Start Logging", "Stop Logging"]
+            assert names == ["Connect Session", "Stop Session", "Start Logging"]
             assert all(isinstance(item["action"], FunctionType) for item in app["action"])
     assert len(reads) == 5
     state["current_menu_location"] = [0, 1]
@@ -213,6 +215,26 @@ def test_native_menu_refreshes_on_entry_without_changing_other_apps(package, tmp
     assert len(reads) == 5
     assert state["current_menu_location"] == [0, 1, 0]
     assert state["option_selected"] is other["action"][0]["action"]
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_menu_loop_redraws_only_when_poll_reports_changes(package, changed):
+    patcher.install_fpms(package, ADAPTER)
+    tree = ast.parse((package / "fpms.py").read_text())
+    condition = ast.parse('g_vars["display_state"] != "menu"', mode="eval").body
+    branch = next(node for node in ast.walk(tree) if isinstance(node, ast.If)
+                  and ast.dump(node.test) == ast.dump(condition))
+    calls = []
+    state = {"display_state": "menu", "button_press_count": 0, "last_button_press_count": 0,
+             "channel_utilization_menu_poll": lambda menu: calls.append("poll") or changed}
+    class Page:
+        def __init__(self, state):
+            pass
+        def draw_page(self, state, menu):
+            calls.append("draw")
+    exec(compile(ast.Module(body=[branch], type_ignores=[]), "native_menu_loop", "exec"),
+         {"g_vars": state, "menu": [], "Page": Page})
+    assert calls == (["poll", "draw"] if changed else ["poll"])
 
 
 @pytest.mark.parametrize(

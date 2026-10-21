@@ -308,6 +308,24 @@ def _patch_fpms(text: str, path: Path) -> str:
             path=path,
         )
 
+    poll_code = (
+        "                menu_poll = g_vars.get('channel_utilization_menu_poll')\n"
+        "                if callable(menu_poll) and menu_poll(menu):\n"
+        "                    Page(g_vars).draw_page(g_vars, menu)\n"
+    )
+    if "menu_poll = g_vars.get('channel_utilization_menu_poll')" not in text:
+        condition = ast.parse('g_vars["display_state"] != "menu"', mode="eval").body
+        branches = [node for node in ast.walk(_find_function(text, "main", path))
+                    if isinstance(node, ast.If) and node.orelse
+                    and ast.dump(node.test) == ast.dump(condition)]
+        if len(branches) != 1:
+            raise FPMSInstallError(f"FPMS menu refresh branch not found in {path}")
+        insertion = _line_offset(text, branches[0].orelse[0].lineno)
+        # Use the installed branch's indentation, including synthetic fixtures.
+        indent = " " * branches[0].orelse[0].col_offset
+        code = "\n".join(indent + line[16:] for line in poll_code.rstrip("\n").splitlines()) + "\n"
+        text = text[:insertion] + code + text[insertion:]
+
     return text
 
 

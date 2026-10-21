@@ -171,13 +171,16 @@ While a display is open:
 
 Changing screens never restarts capture or clears graph history.
 In managed FPMS mode, opening Utilization checks the current session. When
-idle, the menu offers band/channel selection. When active, it shows session
-status, **Connect**, **Stop Session**, **Start Logging** and **Stop Logging**.
-Connect loads the existing display without changing its source or history.
+idle, the menu offers band/channel selection. When active, it starts with
+**Connect Session**, followed by **Stop Session** and either **Start Logging**
+or **Stop Logging**, according to the shared owner's state.
+Connect Session loads the existing display without changing its source or history.
 An attachment notice appears once when opening an existing session, with no
 repeated popups during display refresh. Left detaches that managed display;
-**Stop Session** explicitly ends capture. Reopen Utilization to refresh menu
-status after another consumer starts/stops a session. Explicit legacy
+**Stop Session** explicitly ends capture. The visible menu updates after web/CLI
+session or logging changes, normally within a few seconds. During cleanup it
+shows Stopping Session, then returns to band/channel choices. Status checks run
+in the background only while Utilization's menu is visible. Explicit legacy
 standalone FPMS mode stops its foreground capture when leaving the display.
 
 ## Use the command line

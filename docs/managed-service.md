@@ -48,13 +48,12 @@ owner atomically, including concurrent opens with different requested channels.
 Exiting a managed CLI view with Q/Ctrl+C or leaving the FPMS display detaches
 that renderer. Capture and active logging continue with zero renderers. FPMS
 managed mode checks status when entering Utilization with Right or Center.
-Idle sessions offer band/channel selection; active sessions show status and
-current tuning above **Connect**, **Stop Session**, **Start Logging** and
-**Stop Logging**. Reopen the menu to refresh it after another consumer changes
-the session. Left from the managed display also refreshes this menu and returns
-directly to its Connect/Stop Session controls, even when capture started from a
-channel submenu. These checks do not poll continuously while the menu is open.
-Connect cannot create a replacement session. An existing-session notice shows
+Idle sessions offer band/channel selection. Active sessions show **Connect
+Session**, **Stop Session**, and only the applicable **Start Logging** or
+**Stop Logging** action; no separate running-status item is shown. Left from the
+managed display refreshes this menu and returns directly to these controls,
+even when capture started from a channel submenu. Connect Session cannot create
+a replacement session. An existing-session notice shows
 once per display connection, never on periodic FPMS refresh. Starting the
 display from idle FPMS, or joining its active logging-only proxy, does not show
 that notice. Even a stale channel menu adopts the current active source.
@@ -67,6 +66,20 @@ the actual
 `session_id` value from status, not the literal placeholder `SESSION_ID`.
 While a session is active, read its ID automatically before using the desired
 control below. Repeat the assignment after a new session starts.
+
+While Utilization's menu is visible, one bounded background read checks status
+at most every two seconds. The normal FPMS menu loop consumes changes and
+redraws only when needed, so web/CLI changes normally appear within a few seconds.
+There is no polling in other apps, the parent Apps menu, or the active display.
+An external start/stop returns a stale channel submenu to the appropriate root
+menu; logging changes preserve a valid highlighted row. Reads pending before a
+new local action cannot overwrite its refreshed state. Unavailable status shows
+Session unavailable and recovers when the service returns.
+
+Local logging/session controls also return through the refreshed root menu.
+During session cleanup it shows Stopping Session; new band/channel choices
+return only after the owner stops. The menu never offers a premature restart
+while cleanup still owns the radio.
 
 ```bash
 UTILIZATION_SESSION_ID="$(sudo wlanpi-utilization session status --summary \

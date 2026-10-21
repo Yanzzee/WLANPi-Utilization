@@ -46,6 +46,137 @@ def test_new_fpms_install_defaults_to_managed_but_preserves_explicit_standalone(
     assert channel_utilization.configured_runtime_mode() == "standalone"
 
 
+def _live_menu():
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    state = {"display_state": "menu", "current_menu_location": [0, 0, 0]}
+    menu = _open_managed_menu(state)
+    root = [{"name": "Apps", "action": [menu, {"name": "Other", "action": []}]}]
+    controller = state["channel_utilization_menu_poll"].__self__
+    now = [0.0]
+    controller.app.clock = lambda: now[0]
+    controller.last_poll = 0.0
+    return state, menu, root, controller, now
+
+
+def _poll_menu(root, controller, now):
+    now[0] += channel_utilization.MENU_POLL_SECONDS
+    controller.poll(root)
+    controller.worker.join(timeout=1)
+    assert not controller.worker.is_alive()
+    return controller.poll(root)
+
+
+def test_visible_menu_tracks_external_session_and_logging_changes_and_keeps_selection(monkeypatch):
+    state, menu, root, controller, now = _live_menu()
+    current = None
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: current)
+    idle_names = [item["name"] for item in menu["action"]]
+    # An external start can arrive while the user is in a channel submenu.
+    state["current_menu_location"] = [0, 0, 1, 0, 1]
+    current = {"session_id": "a" * 32, "phase": "running", "config": {"band": "5", "channel": "36"},
+               "logging": {"active": False}}
+    assert _poll_menu(root, controller, now)
+    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Start Logging"]
+    assert state["current_menu_location"] == [0, 0, 0]
+    state["current_menu_location"][-1] = 2
+    current = dict(current, logging={"active": True})
+    assert _poll_menu(root, controller, now)
+    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Stop Logging"]
+    assert state["current_menu_location"][-1] == 2
+    assert not _poll_menu(root, controller, now)  # No unnecessary redraws.
+    current = None
+    assert _poll_menu(root, controller, now)
+    assert [item["name"] for item in menu["action"]] == idle_names
+    assert state["current_menu_location"] == [0, 0, 0]
+
+
+def test_status_poll_is_bounded_off_thread_and_does_not_change_menu_until_ui_consumes_it(monkeypatch):
+    state, menu, root, controller, now = _live_menu()
+    entered, release = threading.Event(), threading.Event()
+    reads = []
+    def status():
+        reads.append(threading.current_thread().name)
+        entered.set()
+        assert release.wait(timeout=2)
+        return {"phase": "running", "config": {"band": "6", "channel": "5"}, "logging": {"active": True}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", status)
+    now[0] = 2
+    try:
+        assert not controller.poll(root)
+        assert entered.wait(timeout=1)
+        for _ in range(5):
+            assert not controller.poll(root)
+        assert reads == ["utilization-menu-status"]
+        assert menu["action"][0]["name"] == "2.4 GHz"
+    finally:
+        release.set()
+        controller.worker.join(timeout=1)
+    assert menu["action"][0]["name"] == "2.4 GHz"
+    assert controller.poll(root)
+    assert menu["action"][0]["name"] == "Connect Session"
+
+
+@pytest.mark.parametrize("location,display", [([0, 1, 0], "menu"), ([0, 0], "menu"), ([0, 0, 0], "page")])
+def test_menu_does_not_poll_other_apps_parent_menu_or_active_display(monkeypatch, location, display):
+    state, menu, root, controller, now = _live_menu()
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: pytest.fail("unneeded poll"))
+    state.update(current_menu_location=location, display_state=display)
+    now[0] = 10
+    assert not controller.poll(root)
+    assert controller.worker is None
+
+
+def test_stale_background_read_cannot_replace_status_from_a_new_menu_action(monkeypatch):
+    state, menu, root, controller, now = _live_menu()
+    entered, release = threading.Event(), threading.Event()
+    current = {"phase": "running", "config": {"band": "6", "channel": "5"}}
+    def status():
+        if threading.current_thread() is threading.main_thread():
+            return current
+        entered.set()
+        assert release.wait(timeout=2)
+        return None  # Read before an external start.
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", status)
+    now[0] = 2
+    try:
+        controller.poll(root)
+        assert entered.wait(timeout=1)
+        state["option_selected"] = menu["action"]
+        controller.enter()
+    finally:
+        release.set()
+        controller.worker.join(timeout=1)
+    assert not controller.poll(root)
+    assert menu["action"][0]["name"] == "Connect Session"
+
+
+def test_menu_poll_recovers_after_status_failure(monkeypatch):
+    state, menu, root, controller, now = _live_menu()
+    def unavailable():
+        raise OSError("service unavailable")
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", unavailable)
+    assert _poll_menu(root, controller, now)
+    assert [item["name"] for item in menu["action"]] == ["Session unavailable"]
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: None)
+    assert _poll_menu(root, controller, now)
+    assert menu["action"][0]["name"] == "2.4 GHz"
+
+
+def test_managed_stop_logging_targets_external_owner_and_reports_request(monkeypatch):
+    channel_utilization.BACKEND_CONFIG.write_text('{"runtime_mode":"managed"}')
+    current = {"session_id": "a" * 32, "phase": "running", "config": {"band": "6", "channel": "5"},
+               "logging": {"active": True}}
+    monkeypatch.setattr(channel_utilization, "_managed_session_status", lambda: current)
+    calls, messages = [], []
+    monkeypatch.setattr(channel_utilization, "_set_managed_logging", lambda state, enabled: calls.append((state["session_id"], enabled)))
+    monkeypatch.setattr(channel_utilization, "_display_status", lambda state, message: messages.append(message))
+    menu = _open_managed_menu({})
+    assert [item["name"] for item in menu["action"]] == ["Connect Session", "Stop Session", "Stop Logging"]
+    menu["action"][2]["action"]()
+    assert calls == [(current["session_id"], False)]
+    assert messages == [f"Logging stop requested: Ch 5 5975 MHz Log folder: {channel_utilization.LOG_DIR}"]
+
+
 def _open_managed_menu(state):
     menu = channel_utilization.build_channel_utilization_menu(state)
     state["option_selected"] = menu["action"]
@@ -100,7 +231,7 @@ def test_native_fpms_resume_menu_action_opens_existing_session(monkeypatch):
         "phase": "running", "config": {"band": "5", "channel": "36"},
     })
     monkeypatch.setattr(channel_utilization.ChannelUtilizationApp, "resume", lambda self: calls.append("resume"))
-    action = _open_managed_menu({})["action"][1]["action"]
+    action = _open_managed_menu({})["action"][0]["action"]
     if isinstance(action, FunctionType):
         action()
     assert calls == ["resume"]

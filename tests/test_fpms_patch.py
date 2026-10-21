@@ -64,6 +64,10 @@ def test_fpms_patch_overrides_auxiliary_dispatchers_and_is_idempotent(
         "        return 'key3'\n"
         "\n"
         "    # update menu options data structure if we're in non-classic mode\n"
+        "    if g_vars['display_state'] != 'menu':\n"
+        "        pass\n"
+        "    else:\n"
+        "        pass\n"
         "    return menu_key1, menu_key2, menu_key3\n",
         encoding="utf-8",
     )

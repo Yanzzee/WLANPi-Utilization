@@ -121,7 +121,8 @@ All HTTP threads share a one-second read cache. Tabs, graph selection, sorting,
 reloads, disconnects, and extra browsers never start capture or reset history.
 A failed read keeps the last values visible, marks the connection disconnected,
 disables controls, and retries with bounded backoff. The displayed receive time
-means a successful service response; the completed sample time identifies the
+uses the browser's local timezone with a 24-hour HH:MM:SS clock and means a
+successful service response; the completed sample time identifies the
 data. Delayed/stalled capture can therefore retain an older sample time.
 
 Capture quality shows the owner's decoded-frame, bad-FCS and rejected-row
