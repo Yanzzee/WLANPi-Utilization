@@ -22,6 +22,8 @@ the band and channel, not an SSID or BSSID.
 ![Utilization beacon loss screen](docs/images/beacon-loss_screen.png)
 ![Utilization composition screen](docs/images/composition_screen.png)
 
+![Utilization web interface rolling-history graphs](docs/images/web-graphs.png)
+
 ## Requirements
 
 The target is WLAN Pi hardware running WLAN Pi OS 26.10 DeadEye
