@@ -34,6 +34,7 @@ RETRY_AUDIT_FIELD_NAMES = (
     "missing_retry_bit_excluded_count",
     "non_retryable_type_excluded_count",
     "out_of_primary_scope_excluded_count",
+    "bad_fcs_excluded_count",
     "retry_eligible_frame_count",
     "retry_frame_count",
     "retry_percent",
@@ -57,6 +58,7 @@ RETRY_FRAME_AUDIT_FIELD_NAMES = (
     "captured_length",
     "original_length",
     "fcs_status",
+    "radiotap_bad_fcs",
     "ampdu_reference",
 )
 
@@ -88,6 +90,7 @@ class RetryAuditRow:
     retry_eligible_frame_count: int
     retry_frame_count: int
     retry_percent: Optional[float]
+    bad_fcs_excluded_count: int = 0
 
     @property
     def is_footer_bssid(self) -> bool:
@@ -136,6 +139,9 @@ def build_retry_debug_tshark_command(
         "occurrence=a",
         "-E",
         f"aggregator={TSHARK_MULTI_VALUE_SEPARATOR}",
+        "-o", "wlan.check_checksum:TRUE",
+        "-o", "wlan.defragment:FALSE",
+        "-o", "wlan.enable_decryption:FALSE",
     ]
     for field in field_names:
         command.extend(["-e", field])
@@ -339,6 +345,7 @@ def write_retry_audit_csv(
                     row.out_of_primary_scope_excluded_count
                 ),
                 "retry_eligible_frame_count": row.retry_eligible_frame_count,
+                "bad_fcs_excluded_count": row.bad_fcs_excluded_count,
                 "retry_frame_count": row.retry_frame_count,
                 "retry_percent": (
                     "" if row.retry_percent is None else f"{row.retry_percent:.6f}"
@@ -376,6 +383,7 @@ def write_retry_frame_audit_csv(
                 "captured_length": _optional(frame.captured_length),
                 "original_length": _optional(frame.original_length),
                 "fcs_status": _optional(frame.fcs_status),
+                "radiotap_bad_fcs": _optional(frame.radiotap_bad_fcs),
                 "ampdu_reference": _optional(frame.ampdu_reference),
             }
         )
@@ -445,6 +453,7 @@ def _audit_row(
         retry_eligible_frame_count=len(eligible_frames),
         retry_frame_count=retry_frame_count,
         retry_percent=retry_percent,
+        bad_fcs_excluded_count=reasons["bad_fcs"],
     )
 
 

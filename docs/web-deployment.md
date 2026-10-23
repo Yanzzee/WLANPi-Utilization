@@ -1,0 +1,235 @@
+# WLAN Pi Apps and authenticated Utilization hosting
+
+The standard installer adds **Utilization** to WLAN Pi's Apps menu and serves
+the existing application at `https://<your-pi>/utilization/`. It uses WLAN Pi's
+existing login, session revocation, idle expiry and maximum session age.
+Utilization remains a separate backend and managed capture consumer; no custom
+Core endpoint or additional analyzer is introduced.
+
+Implementation and local regression checks are complete. On October 20 the
+user confirmed Pi 4 Apps access, login/logout/expiry, existing-session attachment,
+and web-page availability after reboot/relogin. Remaining release/device checks
+below include failure recovery, download authorization and capture-idle startup.
+Use the [2.1.0 final checks](release-2.1.0.md#final-release-checks) for the bounded
+release pass; the longer matrix below supports troubleshooting and wider coverage.
+
+## Install on the Pi
+
+From the updated `~/WLANPi-Utilization` checkout, install or update everything
+with one command:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+This installs CLI/FPMS, the managed broker, web dependencies, Apps card, protected
+route and web service. It first validates the supported platform without writes,
+then installs application components and applies protected web integration.
+Saved backend/runtime choices are preserved; new FPMS installs default to managed
+direct capture. `--with-web` remains accepted for older instructions. Explicit
+`--without-web` skips web dependencies and integration without removing an
+existing route.
+
+The application installer restarts the capture broker and FPMS. Stop any
+active capture normally before this application update. If a manual
+`sudo wlanpi-utilization web` process is running, stop it with Ctrl-C.
+The protected web service replaces that manual process for direct hosting.
+
+For a read-only integration check or web-only repair, the component installer
+remains available:
+
+```bash
+sudo python3 scripts/install_web_integration.py --check
+sudo python3 scripts/install_web_integration.py
+```
+
+`--check` reads files and prepares the proposal without writing files or
+operating services. Installation also checks the app dependencies, existing
+Nginx syntax, the `www-data` Nginx worker identity and WebUI graceful-reload
+support before changing files. An unsupported platform revision stops with an
+error; collect `sudo python3 scripts/pi_web_preflight.py` for review rather
+than editing the authentication checks.
+
+From another computer on the same reachable network, open
+`https://wlanpi-r5.local/`, sign in normally, and choose **Apps → Utilization**.
+The direct address is `https://wlanpi-r5.local/utilization/`; substitute the Pi's
+hostname or IP address as appropriate. This uses the platform's existing TLS
+certificate and requires no SSH tunnel. An on-device browser can use the same
+application through the Pi's HTTPS address.
+
+The integration installer starts/enables `wlanpi-utilization-web.service` and
+gracefully reloads WebUI and Nginx. It does not stop/restart the capture broker,
+FPMS or an active capture, and never retunes the radio. Its web unit can start
+the broker if it is absent; the broker stays idle until an explicit capture
+start. Reinstallation updates the managed route/card without duplicating them
+and preserves the private proxy token and custom Apps cards outside the
+managed block. Initial copies of modified template/config files use the suffix
+`.utilization-web.bak`. Failed syntax, startup, readiness or reload checks
+restore pre-install files and web service state; a recovery failure is reported
+separately if manual attention is required.
+
+Default paths match the supplied Pi 5 preflight:
+
+| Component | Path |
+| --- | --- |
+| WebUI package | `/opt/wlanpi-webui/workingdirectory` |
+| Nginx site | `/etc/wlanpi-webui/nginx/sites-enabled/wlanpi_webui.conf` |
+| Platform service | `wlanpi-webui.service` |
+| Utilization web service | `/etc/systemd/system/wlanpi-utilization-web.service` |
+| Private web listener | `/run/wlanpi-utilization-web/web.sock` |
+| Proxy token and header include | `/etc/wlanpi-beacon-live/web-proxy.token`, `web-proxy.headers` |
+
+`--webui-root`, `--nginx-config` and `--webui-service` support path/unit
+differences, including an older `wlanpi_webui.service` name when appropriate.
+They do not bypass source validation. The supported auth-module and base Nginx
+hashes match the user's Pi preflight. Both the supplied Pi `app.py` hash and
+reviewed upstream `2b112f5a739e4647de4f5fd48948cd16e4d07d94` are accepted,
+with additional AST checks on the session-freshness and login gates. A later
+WebUI package upgrade may require review before reapplying this integration.
+
+### Apps card and route missing after an OS update
+
+The October 21 Pi report has WebUI **1.21.17-1** and FPMS **1.4.24-1**.
+Its auth, application, Apps-card and Nginx hashes match the reviewed original
+files, including application hash `b90723ca…`, card hash `d1fb8c9c…` and
+Nginx hash `8d4704f8…`. The managed card/route blocks are absent. This is
+consistent with a WebUI package update replacing the patched files, rather
+than an unsupported auth revision. The report does not include a successful
+reapplication of the protected integration after that update.
+
+Earlier versions of `install_wlanpi_fpms.sh --with-web` installed only web
+dependencies, requiring a separate protected integration command. The standard
+installer now performs both steps by default, including restoration after a
+WebUI update. Run the standard command above; no separate command is needed.
+To repair only the web integration without updating/restarting capture, run:
+
+```bash
+sudo python3 scripts/install_web_integration.py --check
+```
+
+```bash
+sudo python3 scripts/install_web_integration.py
+```
+
+No removal, downgrade or auth bypass is needed for these supplied hashes.
+The installer validates the platform before reapplying managed blocks and
+preserves the proxy token. It reloads the web services without restarting
+capture. Then verify Apps → Utilization and `/utilization/` after normal login.
+The preflight now reports `managed_integration.apps_card_installed` and
+`managed_integration.nginx_route_installed` separately to expose missing or
+partial patches. For a different revision rejected by `--check`, collect a new
+preflight and review the security/auth/routing changes before extending support.
+
+### Pi 4 revision rejected during installation
+
+The supplied Pi 4 report (`wlanpi-doug-2g`) stopped at **Unsupported WebUI
+application revision** before installing the Apps card or route. Its four
+reported file hashes exactly match upstream WebUI
+[`dc39a7e852113ff00f2654c005d588755ce753c9`](https://github.com/WLAN-Pi/wlanpi-webui/tree/dc39a7e852113ff00f2654c005d588755ce753c9).
+Review confirms that its auth module, Nginx config and login/freshness functions
+match the supported version; later differences concern polling and a Grafana
+package check. The application hash
+`02f2915fc819ce479805dc0975d4490cf5a4d72cfdb237d68b65dcd6212f0330`
+is now allowlisted, retaining all existing auth/config/function checks. A local
+proposal against those exact upstream files passes validation without writes.
+
+After updating the Pi checkout/application, rerun the two integration commands
+above. No removal is needed after that refused installation. Use
+`sudo python3 scripts/pi_web_preflight.py` for the preflight; the scripts are
+also now executable for direct invocation. Verify the Apps card and normal
+HTTPS URL on Pi 4 after installation. The user reports that the earlier
+protected integration test worked well on Pi 5; that report does not establish
+all logout/expiry/reboot cases below.
+
+## Authentication and process boundary
+
+Every page, asset, API control/status response and download passes Nginx's
+existing internal `/auth/check` subrequest. API expiry/revocation returns 401
+JSON; the page disables controls, retains the last received values and offers
+the normal WLAN Pi sign-in link. After signing in, polling reconnects to the
+same capture session. Signing out or closing all browsers leaves capture and
+logging running.
+
+Passive polling does not refresh the platform's idle timeout. Actual pointer
+or keyboard activity refreshes the normal platform cookie through `HEAD /apps`,
+at most once per minute; controls also check this activity path. The existing
+platform gates still enforce revocation, idle expiry and maximum age. No
+Utilization login store, password handler or session lifetime is added.
+
+The privileged broker socket stays root-only. The root web service accesses
+that broker and registered log files, with an empty capability set, no network
+address families other than Unix sockets, and a restricted filesystem view.
+Its web socket is root:`www-data`, mode 0660 inside a 0750 runtime directory.
+Nginx supplies a private token from root-only files on every proxied request;
+the backend rejects missing/incorrect tokens even for assets/downloads.
+Browser-provided token and forwarded headers are overwritten/cleared. Controls
+also require the current per-process CSRF token and matching HTTPS origin.
+Restarting the web service requires reloading open pages to renew CSRF tokens;
+it does not restart capture. No TCP backend listener is enabled in this mode.
+
+The original `sudo wlanpi-utilization web` loopback mode and SSH access remain
+available separately; see [web operation](web-interface.md). Direct capture
+remains the default in both modes, with Core optional.
+
+## Remove or diagnose
+
+```bash
+sudo systemctl status wlanpi-utilization-web --no-pager
+sudo journalctl -u wlanpi-utilization-web -u wlanpi-webui -u nginx \
+  --since "15 minutes ago" --no-pager
+sudo python3 scripts/pi_web_preflight.py
+```
+
+The preflight reports paths/hashes without private tokens or session contents.
+The private Nginx header include contains a credential and should not be shared
+as diagnostic output.
+
+To remove the integration:
+
+```bash
+sudo python3 scripts/install_web_integration.py --remove --check
+sudo python3 scripts/install_web_integration.py --remove
+```
+
+Removal deletes the managed route/card/web unit, disables/stops only the web
+service, and reloads the platform services. It preserves capture, logs, original
+backups, and the private token/header files for reinstallation. Custom Apps
+cards outside the managed block remain intact.
+
+## Installed Pi acceptance
+
+Record checkout revision, Pi image, WebUI/Nginx versions, adapter/driver,
+browser, direct/Core backend and session ID alongside a diagnostic bundle.
+
+1. Run `--check`, install, and confirm `systemctl is-active
+   wlanpi-utilization-web` succeeds. Open through normal HTTPS login and Apps
+   with no SSH tunnel. An idle broker must remain idle on page load.
+2. Start or attach to one managed session through web, CLI and FPMS. Reload,
+   open another tab, navigate back to Apps, close all browsers and reconnect.
+   Session ID/history/logging and the single capture owner must persist.
+3. Verify a signed-out browser cannot retrieve metrics, control capture or
+   download a closed CSV/JSONL file. While capturing, sign out in another tab:
+   the existing page must show sign-in required and disabled controls. A
+   revoked copied cookie must also fail; logging/capture must continue.
+4. Test actual idle and maximum-age expiry using the installed platform's
+   policy. Passive polling must not prolong login. Normal interaction before
+   expiry should refresh the idle cookie; signing in again must recover the
+   same session without reissuing controls. Verify phone/desktop layouts and
+   the sign-in link in the actual browsers.
+5. Reinstall the integration while capturing: confirm one Apps card and route,
+   unchanged capture ID and working downloads. Restart only the web service;
+   reload the page to renew CSRF and confirm retained history. Verify missing
+   backend/auth service fails closed, then recovers without capture restart.
+6. Check enabled web service and Apps access after reboot; radio restoration
+   and broker session persistence follow the existing managed-service policy
+   (an in-memory capture session does not survive reboot). The expected result
+   is an available login/Apps/Utilization page and an idle capture service;
+   no radio capture resumes until an explicit start. Test removal and
+   reinstallation, preserving other Apps cards and capture when applicable.
+
+Local tests exercise the production Nginx fragment over verified TLS, real
+Waitress Unix listeners and the real managed broker with a synthetic capture
+owner. A controlled auth checker supplies login/revocation/expiry outcomes;
+this is not a test of installed PAM, WebUI cookies or systemd on the Pi.
+Installer tests cover repeat installs, custom cards, preconditions and rollback
+after syntax/start/readiness/reload failures, including failed removal.

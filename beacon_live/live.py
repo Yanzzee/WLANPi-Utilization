@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 from beacon_live.analyzer import Analyzer
+from beacon_live.beacon_export import BeaconExport, ExportLimits
 from beacon_live.capture_target import CaptureTarget, as_capture_target, discover_capture_target
 from beacon_live.radio_session import RadioSession
 from beacon_live.channel import ChannelDefinition
@@ -43,6 +44,7 @@ from beacon_live.log_writer import LogMetadata
 from beacon_live.log_writer import LoggingEvent
 from beacon_live.log_writer import LoggingService
 from beacon_live.models import BeaconRecord
+from beacon_live.models import CaptureHealth
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import SecondStats
 from beacon_live.models import SurveySample
@@ -50,6 +52,7 @@ from beacon_live.parser import parse_tshark_live_record
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_REQUIRED_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_METADATA_FRAME_FIELD_NAMES
+from beacon_live.parser import TSHARK_HOST_FIELD_NAMES
 from beacon_live.parser import TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES
 from beacon_live.parser import TSHARK_MULTI_VALUE_SEPARATOR
 from beacon_live.parser import TSHARK_OPTIONAL_FRAME_FIELD_NAMES
@@ -152,6 +155,8 @@ class LiveAggregationMessage:
     capture_record_count: int = 0
     normalized_frame_count: int = 0
     malformed_capture_record_count: int = 0
+    bad_fcs_frame_count: int = 0
+    latest_capture_timestamp: Optional[float] = None
     eof: bool = False
 
 
@@ -492,6 +497,8 @@ def build_tshark_command(
         "wlan.defragment:FALSE",
         "-o",
         "wlan.enable_decryption:FALSE",
+        "-o",
+        "wlan.check_checksum:TRUE",
         "-N",
         "m",
         "-T",
@@ -567,7 +574,7 @@ def select_tshark_frame_fields(
     )
     return TSHARK_REQUIRED_FRAME_FIELD_NAMES + tuple(
         field
-        for field in TSHARK_METADATA_FRAME_FIELD_NAMES + optional_fields
+        for field in TSHARK_METADATA_FRAME_FIELD_NAMES + TSHARK_HOST_FIELD_NAMES + optional_fields
         if field in available_fields
     )
 
@@ -653,7 +660,7 @@ def build_tshark_stream_command(*, field_names: tuple[str, ...]) -> list[str]:
     return command
 
 
-def start_core_capture_process(target, definition, *, field_names, raw_capture_path=None):
+def start_core_capture_process(target, definition, *, field_names, raw_capture_path=None, exporter=None):
     from beacon_live.core_capture import CoreCaptureProcess, CoreRequest, validate_core_request
     request = CoreRequest(target, definition, raw_path=raw_capture_path)
     validate_core_request(request)
@@ -664,7 +671,7 @@ def start_core_capture_process(target, definition, *, field_names, raw_capture_p
     except OSError as exc:
         raise LiveCommandError(command=command, stderr=str(exc)) from exc
     try:
-        return CoreCaptureProcess(decoder, request)
+        return CoreCaptureProcess(decoder, request, **({"exporter": exporter} if exporter is not None else {}))
     except BaseException:
         terminate_tshark_process(decoder)
         raise
@@ -685,6 +692,8 @@ def _live_aggregation_worker(
     # the normal terminate behavior and never own radio state.
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if hasattr(stdout_fd, "detach"):
+        stdout_fd = stdout_fd.detach()
     analyzer = Analyzer(
         target_primary_frequency_mhz=target_primary_frequency_mhz,
         channel_definition_max_age_seconds=CHANNEL_DEFINITION_MAX_AGE_SECONDS,
@@ -696,6 +705,8 @@ def _live_aggregation_worker(
     capture_record_count = 0
     normalized_frame_count = 0
     malformed_capture_record_count = 0
+    bad_fcs_frame_count = 0
+    latest_capture_timestamp = None
     last_send = time.monotonic()
 
     def send(
@@ -712,6 +723,8 @@ def _live_aggregation_worker(
             capture_record_count=capture_record_count,
             normalized_frame_count=normalized_frame_count,
             malformed_capture_record_count=malformed_capture_record_count,
+            bad_fcs_frame_count=bad_fcs_frame_count,
+            latest_capture_timestamp=latest_capture_timestamp,
             eof=eof,
         )
         send_connection.send(message)  # type: ignore[attr-defined]
@@ -760,6 +773,8 @@ def _live_aggregation_worker(
                         malformed_capture_record_count += 1
                     normalized_frame_count += len(frames)
                     for frame in frames:
+                        bad_fcs_frame_count += frame.has_bad_fcs
+                        latest_capture_timestamp = max(latest_capture_timestamp or frame.timestamp, frame.timestamp)
                         first_live_frame = startup_filter.observe(frame.timestamp)
                         if first_live_frame:
                             analyzer.set_history_start_second(int(frame.timestamp) + 1)
@@ -839,18 +854,19 @@ def _start_live_aggregation_process(
     target_primary_frequency_mhz: int,
     actual_definition: ChannelDefinition,
     capabilities: RadioCapabilities,
+    use_spawn: bool = False,
 ) -> Optional[tuple[object, multiprocessing.Process]]:
     """Start the Pi live worker, falling back for non-file test streams."""
     try:
         stdout_fd = int(stdout.fileno())  # type: ignore[attr-defined]
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn" if use_spawn else "fork")
     except (AttributeError, OSError, TypeError, ValueError):
         return None
     receive, send = context.Pipe(duplex=False)
     worker = context.Process(
         target=_live_aggregation_worker,
         kwargs={
-            "stdout_fd": stdout_fd,
+            "stdout_fd": multiprocessing.reduction.DupFd(stdout_fd) if use_spawn else stdout_fd,
             "send_connection": send,
             "field_names": field_names,
             "band": band,
@@ -1186,10 +1202,18 @@ def run_live(
     min_free_bytes: int = DEFAULT_MIN_FREE_BYTES,
     disk_check_interval_seconds: float = DEFAULT_DISK_CHECK_INTERVAL_SECONDS,
     rotation_interval_seconds: float = DEFAULT_ROTATION_INTERVAL_SECONDS,
+    export_directory: Optional[Path] = None,
+    initial_export_enabled: bool = False,
+    export_limits: ExportLimits = ExportLimits(),
     _dashboard: Optional[LiveDashboard] = None,
 ) -> int:
     if capture_backend not in {"direct", "core"}:
         raise ValueError("capture_backend must be direct or core")
+    export_limits.validate()
+    if initial_export_enabled and export_directory is None:
+        raise ValueError("Beacon export requires an export directory")
+    if export_directory is not None and raw_capture_path is not None:
+        raise ValueError("Use raw diagnostic capture or managed beacon export in a session")
     if core_diagnostics_path is not None and capture_backend != "core":
         raise ValueError("Core diagnostics requires the Core backend")
     if capture_backend == "core":
@@ -1246,6 +1270,9 @@ def run_live(
                 min_free_bytes=min_free_bytes,
                 disk_check_interval_seconds=disk_check_interval_seconds,
                 rotation_interval_seconds=rotation_interval_seconds,
+                export_directory=export_directory,
+                initial_export_enabled=initial_export_enabled,
+                export_limits=export_limits,
                 _dashboard=curses_dashboard,
             )
         )
@@ -1321,6 +1348,9 @@ def run_live(
         if netns is not None:
             print(f"Capture interface: {target.label}", file=sys.stderr, flush=True)
     hardware_iface = target if netns is not None else iface
+    target_setter = getattr(dashboard, "set_capture_target", None)
+    if callable(target_setter):
+        target_setter(target)
     from beacon_live.core_diagnostics import CoreDiagnostics
     with (
         CoreDiagnostics(core_diagnostics_path) as core_diagnostics,
@@ -1329,6 +1359,10 @@ def run_live(
         ExitStack() as aggregation_resources,
         ExitStack() as capture_resources,
     ):
+        exporter = None
+        if export_directory is not None:
+            exporter = BeaconExport(export_directory, limits=export_limits, enabled=initial_export_enabled)
+            capture_resources.callback(exporter.close)
         core_diagnostics.bind_radio(radio)
         capabilities = _read_radio_capabilities_safely(hardware_iface)
         if capabilities.source_complete and not capabilities.supports_monitor:
@@ -1378,6 +1412,7 @@ def run_live(
             process = start_core_capture_process(
                 target, initial_definition, field_names=tshark_fields,
                 raw_capture_path=raw_capture_path,
+                **({"exporter": exporter} if exporter is not None else {}),
             )
             capture_resources.callback(process.close)
             core_diagnostics.update(process, force=True)
@@ -1469,6 +1504,9 @@ def run_live(
             dashboard,
             actual_definition.width.value,
         )
+        definition_setter = getattr(dashboard, "set_capture_definition", None)
+        if callable(definition_setter):
+            definition_setter(actual_definition, verified=actual_verified)
         logging_service: Optional[LoggingService] = None
         if stats_csv is not None or beacons_jsonl is not None:
             first_log_path = stats_csv if stats_csv is not None else beacons_jsonl
@@ -1522,12 +1560,13 @@ def run_live(
         if raw_capture_path is not None:
             raw_capture_path.parent.mkdir(parents=True, exist_ok=True)
         if capture_backend == "direct":
-            process = start_tshark_process(
-                hardware_iface,
-                field_names=tshark_fields,
-                raw_capture_path=raw_capture_path,
-            )
-            capture_resources.callback(terminate_tshark_process, process)
+            if exporter is not None:
+                from beacon_live.packet_source import DirectCaptureProcess
+                process = DirectCaptureProcess(hardware_iface, field_names=tshark_fields, exporter=exporter)
+                capture_resources.callback(process.close)
+            else:
+                process = start_tshark_process(hardware_iface, field_names=tshark_fields, raw_capture_path=raw_capture_path)
+                capture_resources.callback(terminate_tshark_process, process)
         aggregation_connection: Optional[object] = None
         aggregation_process: Optional[multiprocessing.Process] = None
         if process.stdout is not None:
@@ -1538,6 +1577,7 @@ def run_live(
                 target_primary_frequency_mhz=resolved_frequency_mhz,
                 actual_definition=actual_definition,
                 capabilities=capabilities,
+                **({"use_spawn": True} if exporter is not None or capture_backend == "core" else {}),
             )
             if aggregation is not None:
                 aggregation_connection, aggregation_process = aggregation
@@ -1558,10 +1598,22 @@ def run_live(
         capture_record_count = 0
         normalized_frame_count = 0
         malformed_capture_record_count = 0
+        bad_fcs_frame_count = 0
+        latest_capture_timestamp = None
         worker_snapshot = analyzer.snapshot
         worker_exhausted = False
         worker_failed = False
         local_cu_by_second: dict[int, Optional[float]] = {}
+
+        def publish_health():
+            setter = getattr(dashboard, "set_capture_health", None)
+            if callable(setter):
+                setter(CaptureHealth(
+                    capture_record_count, normalized_frame_count,
+                    malformed_capture_record_count, bad_fcs_frame_count,
+                    latest_capture_timestamp,
+                    bool({"radiotap.flags.badfcs", "wlan.fcs.status"} & set(tshark_fields)),
+                ))
 
         initial_logging_requested = (
             logging_service is not None
@@ -1595,6 +1647,8 @@ def run_live(
         ):
             dashboard_poll_interval = None
         next_dashboard_poll = next_logging_control_poll
+        next_export_publication = next_logging_control_poll
+        last_export_error = None
         survey_warning_printed = False
         low_disk_latched = False
 
@@ -1610,6 +1664,9 @@ def run_live(
                         _print_logging_started(logging_service)
             if process.stdout is None:
                 raise LiveCommandError(build_tshark_command(hardware_iface), stderr="missing stdout")
+            capture_started = getattr(dashboard, "set_capture_started", None)
+            if callable(capture_started):
+                capture_started()
             line_reader = (
                 None
                 if aggregation_connection is not None
@@ -1643,6 +1700,7 @@ def run_live(
                         _set_dashboard_collecting(dashboard, False)
                     _publish_live_stats(
                         visible_stats,
+                        dashboard=dashboard,
                         stats_writer=(
                             logging_service.write_stats
                             if logging_service is not None
@@ -1670,6 +1728,9 @@ def run_live(
                         tshark_stderr=tshark_stderr_text,
                     )
                 loop_now = time.monotonic()
+                if exporter is not None and loop_now >= next_export_publication:
+                    last_export_error = _publish_beacon_export(dashboard, exporter, last_export_error)
+                    next_export_publication = loop_now + 0.1
                 if dashboard_poll_interval is None:
                     if _dashboard_requests_exit(dashboard):
                         raise KeyboardInterrupt
@@ -1736,6 +1797,8 @@ def run_live(
                             malformed_capture_record_count = (
                                 message.malformed_capture_record_count
                             )
+                            bad_fcs_frame_count = message.bad_fcs_frame_count
+                            latest_capture_timestamp = message.latest_capture_timestamp
                             patched_stats: list[SecondStats] = []
                             for stats in message.stats:
                                 patched = replace(
@@ -1750,6 +1813,7 @@ def run_live(
                                 _set_dashboard_collecting(dashboard, False)
                                 _publish_live_stats(
                                     patched_stats,
+                                    dashboard=dashboard,
                                     stats_writer=(
                                         logging_service.write_stats
                                         if logging_service is not None
@@ -1878,6 +1942,8 @@ def run_live(
                     normalized_frame_count += len(frames)
                     for parsed_frame in frames:
                         frame = parsed_frame
+                        bad_fcs_frame_count += frame.has_bad_fcs
+                        latest_capture_timestamp = max(latest_capture_timestamp or frame.timestamp, frame.timestamp)
                         first_live_frame = startup_filter.observe(frame.timestamp)
                         if first_live_frame:
                             analyzer.set_history_start_second(int(frame.timestamp) + 1)
@@ -2030,6 +2096,7 @@ def run_live(
                                 _set_dashboard_collecting(dashboard, False)
                             _publish_live_stats(
                                 visible_stats,
+                                dashboard=dashboard,
                                 stats_writer=(
                                     logging_service.write_stats
                                     if logging_service is not None
@@ -2053,6 +2120,7 @@ def run_live(
                         raise LiveCommandError(build_tshark_stream_command(field_names=tshark_fields),
                                                stderr=process.capture_error)
                 if current >= next_display_refresh:
+                    publish_health()
                     # Paint on one hard wall-clock cadence. Capture publications
                     # only update shared state and logs; they never trigger a
                     # second dashboard refresh between these deadlines.
@@ -2074,6 +2142,10 @@ def run_live(
                     and current >= next_logging_control_poll
                 ):
                     requested = _read_logging_control(logging_control_path)
+                    if exporter is not None:
+                        export_requested = _read_export_control(logging_control_path)
+                        if export_requested is not None:
+                            exporter.set_enabled(export_requested)
                     if requested is False:
                         low_disk_latched = False
                     if logging_service is not None and requested is not None:
@@ -2148,6 +2220,9 @@ def run_live(
                         if not _set_dashboard_notice(dashboard, message):
                             print(f"Warning: {message}", file=sys.stderr, flush=True)
 
+                if logging_service is not None:
+                    _publish_closed_logs(dashboard, logging_service)
+
                 if survey_future is not None and survey_future.done():
                     try:
                         current_survey_samples = survey_future.result()
@@ -2217,20 +2292,31 @@ def run_live(
                 _set_dashboard_collecting(dashboard, False)
             _publish_live_stats(
                 visible_stats,
+                dashboard=dashboard,
                 stats_writer=(
                     logging_service.write_stats
                     if logging_service is not None
                     else _discard_stats
                 ),
             )
+            final_publisher = getattr(dashboard, "publish_final_snapshot", None)
+            if callable(final_publisher):
+                final_publisher(_wall_clock_snapshot(
+                    analyzer.snapshot if aggregation_connection is None else worker_snapshot,
+                    time.time(),
+                ))
             return 0
         finally:
             if survey_executor is not None:
                 survey_executor.shutdown(wait=True, cancel_futures=True)
+            publish_health()
             if logging_service is not None:
                 logging_service.stop()
+                _publish_closed_logs(dashboard, logging_service)
             selector.close()
             capture_resources.close()
+            if exporter is not None:
+                _publish_beacon_export(dashboard, exporter, last_export_error)
             if capture_backend == "core":
                 core_diagnostics.update(process, records=capture_record_count,
                     frames=normalized_frame_count, malformed=malformed_capture_record_count, force=True)
@@ -2390,11 +2476,15 @@ def _publish_live_stats(
     stats_rows: list[SecondStats],
     *,
     stats_writer: Callable[[SecondStats], None],
+    dashboard: Optional[LiveDashboard] = None,
 ) -> None:
     if not stats_rows:
         return
     for stats in stats_rows:
         stats_writer(stats)
+    publisher = getattr(dashboard, "publish_stats", None)
+    if callable(publisher):
+        publisher(tuple(stats_rows))
 
 
 def _empty_second_stats(second: int) -> SecondStats:
@@ -2466,6 +2556,8 @@ def _wall_clock_snapshot(
             composition=empty.composition,
             window_unique_client_mac_count=0,
             beacons=empty.beacons,
+            hosts=(),
+            host_details_limited=False,
         )
     return replace(snapshot, **replacements)
 
@@ -2491,6 +2583,12 @@ def _set_dashboard_collecting(
     setter = getattr(dashboard, "set_collecting", None)
     if callable(setter):
         setter(collecting)
+
+
+def _publish_closed_logs(dashboard: LiveDashboard, service: LoggingService) -> None:
+    setter = getattr(dashboard, "set_closed_logs", None)
+    if callable(setter):
+        setter(service.closed_logs)
 
 
 def _set_dashboard_logging_status(
@@ -2546,6 +2644,26 @@ def _read_logging_control(path: Path) -> Optional[bool]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         value = payload["logging_enabled"]
+    except (KeyError, OSError, TypeError, ValueError, UnicodeError):
+        return None
+    return value if isinstance(value, bool) else None
+
+
+def _publish_beacon_export(dashboard, exporter, previous_error):
+    status = exporter.read()
+    setter = getattr(dashboard, "set_beacon_export", None)
+    if callable(setter):
+        setter(status, exporter.closed_logs)
+    elif status.error and status.error != previous_error:
+        message = f"Beacon export: {status.error}. Live analysis continues."
+        if not _set_dashboard_notice(dashboard, message):
+            print(message, file=sys.stderr, flush=True)
+    return status.error
+
+
+def _read_export_control(path: Path) -> Optional[bool]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))["export_enabled"]
     except (KeyError, OSError, TypeError, ValueError, UnicodeError):
         return None
     return value if isinstance(value, bool) else None

@@ -289,7 +289,7 @@ def test_composition_screen_renders_only_analyzer_snapshot_fields() -> None:
     assert view.detail_lines == (
         "Est Radios 1",
         "Radio BSSIDs 2",
-        "AP Room-101",
+        "Room-101",
         "Vendor Example Wireless",
     )
     assert view.identity.ssid == "Alpha"
@@ -301,7 +301,7 @@ def test_composition_screen_uses_required_missing_name_placeholders() -> None:
     view = CompositionScreen().render(Analyzer().snapshot)
 
     assert view.detail_lines[-2:] == (
-        "AP <no AP name>",
+        "<no AP name>",
         "Vendor <unknown>",
     )
 

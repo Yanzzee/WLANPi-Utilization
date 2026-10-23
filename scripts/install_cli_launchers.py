@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install system-wide launchers for the isolated Beacon Live environment."""
+"""Install preferred Utilization commands and compatibility launchers."""
 
 from __future__ import annotations
 
@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Optional
 
 
-COMMANDS = ("wlanpi-beacon-live", "beacon-live")
-MANAGED_MARKER = "# Managed by the WLANPi Beacon Live installer."
+COMMANDS = ("wlanpi-utilization", "utilization", "wlanpi-beacon-live", "beacon-live")
+MANAGED_MARKER = "# Managed by the Utilization installer."
+LEGACY_MARKER = "# Managed by the WLANPi Beacon Live installer."
 
 
 def main() -> int:
@@ -34,7 +35,7 @@ def main() -> int:
 
 
 def install_launchers(*, app_bin: Path, launcher_dir: Path) -> tuple[Path, ...]:
-    """Atomically create or refresh the two managed command launchers."""
+    """Create or refresh the preferred commands and compatibility aliases."""
     app_bin = app_bin.absolute()
     launcher_dir = launcher_dir.absolute()
     targets = {command: app_bin / command for command in COMMANDS}
@@ -47,7 +48,7 @@ def install_launchers(*, app_bin: Path, launcher_dir: Path) -> tuple[Path, ...]:
     if invalid_targets:
         missing = ", ".join(str(path) for path in invalid_targets)
         raise SystemExit(
-            "Cannot install Beacon Live CLI launchers; target is missing or "
+            "Cannot install Utilization CLI launchers; target is missing or "
             f"not executable: {missing}"
         )
 
@@ -91,7 +92,7 @@ def _require_managed_or_absent(path: Path, target: Path) -> None:
         raise SystemExit(
             f"Refusing to replace unreadable CLI launcher {path}: {exc}"
         ) from exc
-    if MANAGED_MARKER not in text.splitlines()[:3]:
+    if not {MANAGED_MARKER, LEGACY_MARKER}.intersection(text.splitlines()[:3]):
         raise SystemExit(f"Refusing to replace unmanaged CLI launcher {path}")
 
 

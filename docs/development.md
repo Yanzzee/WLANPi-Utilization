@@ -1,12 +1,39 @@
 # Development Guide
 
+Package metadata is aligned at `2.1.0` for this release. Follow the
+[release checks](release-2.1.0.md#final-release-checks)
+and [managed runtime roadmap](managed-runtime-roadmap.md) for scope/evidence.
+External WiFi-Beacon-analysis validation is deferred and does not block 2.1.0.
+
 This guide is for contributors and future Codex runs. Read
 [AGENTS.md](../AGENTS.md) and [architecture.md](architecture.md) before changing
 application behavior.
 
+## Managed runtime foundation
+
+`ManagedRuntime` is the Python ownership API for the managed service. Construct
+one instance in the capture owner process and call
+`runtime.run(LiveSessionConfig(band="5", channel="36"))` on its main thread.
+It blocks until the live loop exits and resources are cleaned up. The default
+runner rejects other threads before capture starts, preserving signal handling
+and avoiding the existing Linux analyzer fork from a threaded web worker.
+Injected hardware-free runners support concurrent lifecycle tests.
+
+Consumers call `runtime.subscribe()`, then `consumer.read()` or
+`consumer.wait(after_revision, timeout=...)`. Pass `publication.snapshot` to an
+existing renderer; use `publication.completed_stats` as already completed rows.
+Do not reconstruct retry buckets in a consumer. Close the consumer to detach.
+An explicit owner control calls `runtime.stop(publication.session_id)`; a stale
+ID returns false. Stop requests during startup wait for the live loop to poll.
+This API does not install a daemon, expose HTTP, or change CLI/FPMS launchers.
+The installed service and renderer attachment are separate modules described in
+[managed service operation](managed-service.md). Test its process/socket
+boundary with `python -m pytest -q tests/test_service.py`; these tests need
+permission to bind a temporary private Unix socket, but need no radio hardware.
+
 ## Local setup
 
-WLANPi Beacon Live requires Python 3.13 or newer; the tested Trixie target is
+Utilization requires Python 3.13 or newer; the tested Trixie target is
 Python 3.13. Direct capture/replay use the standard library; Core capture adds
 the pinned `websockets==15.0.1` client through the `core` extra.
 
@@ -14,13 +41,58 @@ the pinned `websockets==15.0.1` client through the `core` extra.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,web,core]'
 python -m pytest
 ```
 
 The development extra installs `pytest>=8.3.5,<9`. Build requirements are
 `setuptools>=75.3` and `wheel`.
 For Core transport development/tests, install `python -m pip install -e '.[dev,core]'`.
+For the web consumer, install `python -m pip install -e '.[dev,web]'`.
+Run `python -m pytest -q tests/test_web.py tests/test_service.py` for web/API and
+real broker integration coverage. The latter uses a synthetic capture owner.
+For browser QA without hardware, run
+`python tests/fixtures/web_preview.py --port 8765`, then open
+`http://127.0.0.1:8765/utilization/`. This preview uses synthetic analyzer data;
+its controls affect only the preview. It starts with a populated 120-second
+history, explicit gaps, missing QBSS fields, and a retry percentage below 1%.
+Stop it with Ctrl-C after QA. See [web acceptance](web-interface.md).
+For reproducible frontend logic checks with Node available:
+
+```bash
+python tests/fixtures/web_preview.py --export /tmp/utilization-ui-cases
+node tests/web_ui_check.mjs /tmp/utilization-ui-cases
+```
+
+The preview has distinct QBSS/station/retry reporting BSSIDs, two strongest-radio
+members, gaps and retries below 1%. These simulated-DOM checks run the production
+JavaScript against exported publications, covering immediate existing-session
+display, source identities, AP sorting, PSC labels, center/width formatting,
+auth expiry/recovery and control tokens. They do not test rendered browser
+layout. Local browser automation availability and installed Pi browser checks
+must be reported separately.
+
+Protected-hosting unit and installer checks run with
+`python -m pytest -q tests/test_web.py tests/test_web_install.py`.
+`tests/test_web_nginx.py` additionally exercises the production route using an
+actual Nginx binary with `http_auth_request` and TLS support, OpenSSL, private
+Unix listeners, and a synthetic owner/auth checker. Set
+`UTILIZATION_TEST_NGINX=/path/to/nginx` when it is outside PATH; the test skips
+if Nginx or OpenSSL is absent. Its temporary certificate is trusted explicitly
+by the test client. It needs permission to bind local Unix sockets, but no radio,
+systemd, PAM or system configuration changes. Installed platform acceptance is
+documented separately in [protected deployment](web-deployment.md).
+The beacon-export foundation uses only standard-library stream/file I/O.
+Run `python -m pytest -q tests/test_pcapng.py tests/test_pcapng_export.py`.
+Pure block/filter/file-publication tests need no capture tools; independent
+TShark fidelity/analyzer checks skip when unavailable. `WLANPI_TEST_TSHARK`
+selects a non-default binary. The native FPMS stop regression in
+`tests/test_service.py` additionally needs a temporary local Unix socket and
+uses a synthetic owner, not hardware. See [export scope](beacon-export.md).
+
+The hardware-free `scripts/benchmark_live_replay.py` checks busy-channel
+parser/analyzer throughput and exact metrics; see
+[benchmark scope and Pi retest](busy-channel-validation.md).
 
 On a Pi, `scripts/pi_setup.sh` requires an activated, genuine venv without
 system site-packages. It verifies the interpreter/version before running pip,
@@ -120,14 +192,14 @@ hardware.
 Replay the included sample:
 
 ```bash
-.venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
+.venv/bin/utilization replay --input samples/tshark_qbss_sample.tsv
 ```
 
 Replay can combine copied smoke-test beacon data with before/after survey
 dumps:
 
 ```bash
-.venv/bin/beacon-live replay \
+.venv/bin/utilization replay \
   --beacons-tsv samples/pi_tshark_qbss_sample.tsv \
   --survey-before samples/pi_survey_before.txt \
   --survey-after samples/pi_survey_after.txt

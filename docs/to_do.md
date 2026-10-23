@@ -1,3 +1,8 @@
+Current release scope and acceptance are in [2.1.0 release notes](release-2.1.0.md)
+and the [managed runtime roadmap](managed-runtime-roadmap.md). This file retains
+older ideas/status, not current operating instructions. External offline beacon
+analysis is deferred beyond the 2.1.0 release checks at the user's request.
+
 Features & changes
 
 1. DONE     CU screen - review the BSSID that is shown/used for data - this is currently the strongest signal/latest.
@@ -42,12 +47,12 @@ Features & changes
 12. CANCELLED   look into the possibility of scanning multiple channels
         probably not very feasible, beacons are 10 per second per BSSID, and there are many channels
         it could possibly change channels with a button press, but this would necessitate restarting observations & clearing data
-13. classroom mode
-        find likely radios in classroom
-        scan beacons for those radios
-        record and show analytics from the study
-        alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
-14. return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
+13. DONE classroom mode
+        xfind likely radios in classroom
+        xscan beacons for those radios
+        xrecord and show analytics from the study
+        yes - alternatively - capture pcapng filtered to beacons only, save locally and rotate every hour
+14. DONE        return the wlan adapter to standard mode when application quits instead of monitor mode? what is default?
 15. DONE    optimize code for processor utilization and/or use multithreading for multiple cores
         there seems to be a delay when there are lots of frames. probably cpu time is restricted and it is delaying output
 16. DONE    change the channel screen label to "Utilization"
@@ -103,7 +108,7 @@ Features & changes
 34. include OBSS count in composition screen
         number of BSSIDs that overlap to the selected primary, but have a different primary
         can this be observed accurately without scanning multiple channels?
-35. add web interface
+35. DONE        add web interface
         accessible through existing web menu
         show same metrics as CLI
         better graphs

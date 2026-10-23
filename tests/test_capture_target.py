@@ -5,6 +5,7 @@ import pytest
 from beacon_live.capture_target import (
     CaptureTarget, CaptureTargetError, discover_capture_target,
     parse_iw_interfaces, parse_namespace_names,
+    list_wireless_interfaces,
 )
 
 
@@ -34,6 +35,45 @@ def runner_for(outputs: dict[tuple[str, ...], str | int]):
             stderr="namespace unavailable" if isinstance(value, int) else "",
         )
     return run, calls
+
+
+def test_interface_inventory_is_read_only_and_includes_all_modes_and_namespaces():
+    calls = []
+    responses = {("iw", "dev"): inventory(("wlan0", "managed", 0), ("mon0", "monitor", 0)),
+                 ("ip", "netns", "list"): "lab\n",
+                 ("ip", "netns", "exec", "lab", "iw", "dev"): inventory(("wlan0", "AP", 1))}
+    def run(command, **kwargs):
+        calls.append(command)
+        assert 0 < kwargs["timeout"] <= 1
+        return subprocess.CompletedProcess(command, 0, responses[tuple(command)], "")
+    result = list_wireless_interfaces(command_runner=run)
+    assert {item.target.label for item in result.interfaces} == {"root:wlan0", "root:mon0", "lab:wlan0"}
+    assert {item.mode for item in result.interfaces} == {"managed", "monitor", "AP"}
+    assert not result.errors
+    assert len(calls) == 3 and all("set" not in call for call in calls)
+
+
+def test_interface_inventory_retains_root_results_when_namespace_listing_fails():
+    def run(command, **kwargs):
+        if command[0] == "iw":
+            return subprocess.CompletedProcess(command, 0, inventory(("sniffer", "monitor", 1)), "")
+        raise FileNotFoundError("ip unavailable")
+    result = list_wireless_interfaces(command_runner=run)
+    assert result.interfaces[0].target == CaptureTarget("sniffer")
+    assert result.errors
+
+
+def test_interface_inventory_has_an_overall_deadline_and_partial_results():
+    now, calls = [0.0], []
+    def run(command, **kwargs):
+        calls.append(command)
+        now[0] += 1
+        text = "\n".join(f"ns{i}" for i in range(10)) if command[:3] == ["ip", "netns", "list"] else inventory(("sniffer", "monitor", 1))
+        return subprocess.CompletedProcess(command, 0, text, "")
+    result = list_wireless_interfaces(command_runner=run, clock=lambda: now[0])
+    assert len(calls) == 5
+    assert len(result.interfaces) == 4  # root plus three inspected namespaces
+    assert "timed out" in result.errors[-1]
 
 
 def test_parse_iw_dev_keeps_namespace_and_shared_phy() -> None:

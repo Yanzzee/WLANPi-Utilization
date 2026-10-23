@@ -1,75 +1,79 @@
 # Logging Reference
 
-WLANPi Beacon Live uses one logging service for live display logging and live
+Utilization uses one logging service for live display logging and live
 logging-only operation. Logging state is separate from analyzer state, so a log
 can close without resetting capture metrics or graph history.
 
-## Front-panel controls
+## Managed session controls
 
-Each band/channel menu offers four actions:
+Logging and beacon pcapng export are independent. CSV/JSONL use the logging
+controls; original beacon packets use the [export controls](beacon-export.md).
+Opening or leaving a web/CLI/FPMS display does not stop a managed session.
 
-| Action | Result |
+| FPMS action | Result |
 | --- | --- |
-| `Display` | Starts live display capture with logging inactive. |
-| `Display + Log` | Starts the same display runtime with both log formats active. |
-| `Start Logging` | Starts the same live capture/analyzer in logging-only mode with no graph page. |
-| `Stop Logging` | Stops the background logging-only session. |
+| `Start Session` | Starts the shared session and display with CSV/JSONL inactive. |
+| `Start + Log` | Starts the display with both log formats active. |
+| `Start Logging` | Enables logging on the active session, or starts background capture/logging if idle. |
+| `Stop Logging` | Closes CSV/JSONL while the shared session keeps analyzing. |
+| `Start Export` / `Stop Export` | Controls beacon pcapng independently of CSV/JSONL. |
+| `Connect Session` | Opens the existing session's display and history. |
+| `Stop Session` | Ends capture and closes active output through normal cleanup. |
 
-Pressing left from an active display stops that capture session and cleanly
-closes any active logs.
+When active, FPMS offers only the applicable logging/export action and updates
+when another consumer changes it. Starting already active logging reports
+**Logging already being saved** and preserves the current files. Left detaches
+the managed display and returns to its session menu; it does not close files.
+Legacy explicit standalone FPMS mode retains its foreground exit behavior.
 
-Successful logging start/stop notifications include the tuned channel,
-frequency, and `/var/log/wlanpi-beacon-live` folder. `Display + Log` shows the
-start notification once, before normal display operation, and the stop
-notification when exiting left; both overlays restore the existing display
-state. If disk pressure stops logging while the display remains active, a
-one-time low-disk notification is shown.
-
-The FPMS adapter prevents a separate display capture from starting while a
-logging-only capture is already active. Stop the logging-only session first.
+Web Start/Stop logging is beside the session and export buttons. The start
+session dialog can enable logging immediately. Closed segments appear under
+Log files; stop logging to close the current pair while analysis continues.
 
 ## Terminal controls
 
-Choose one or both live formats:
+Start background shared capture with both formats:
 
 ```bash
-sudo wlanpi-beacon-live \
-  --iface auto \
-  --channel 36 \
-  --stats-csv \
-  --beacons-jsonl \
-  --log-dir logs
+sudo wlanpi-utilization --managed --band 5 --channel 36 --start-only \
+  --log --log-dir /var/log/wlanpi-beacon-live
+sudo wlanpi-utilization session status --summary
 ```
 
-Use the convenience option to show the interactive terminal dashboard and
-write both formats together:
+The original session owns the log directory, formats and limits. Attaching a
+renderer preserves them. To toggle logging, obtain its actual ID once per session:
 
 ```bash
-sudo wlanpi-beacon-live \
-  --iface auto \
-  --channel 36 \
-  --log \
-  --log-dir logs
+UTILIZATION_SESSION_ID="$(sudo wlanpi-utilization session status --summary \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["session_id"] or "")')"
+sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" --enabled no --summary
+sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" --enabled yes --summary
 ```
 
-While logging is active, the TUI shows `Logging to <path>/<filename>` for each
-enabled file below the `Selected BSSIDs` section. Log rollover refreshes those
-paths. A manual or low-disk stop changes the status without stopping capture or
-analysis in display mode.
+Use `--stats-csv` or `--beacons-jsonl` instead of `--log` for one format. A
+session started without a format cannot enable that format later; start a new
+session with the required configuration. Web/FPMS sessions configure both for
+later toggling. Logging paths appear below Selected BSSIDs in the TUI.
 
-`--logging-only` disables terminal/LCD rendering and automatically enables both
-formats:
+Stop the managed capture explicitly and check asynchronous cleanup:
 
 ```bash
-sudo wlanpi-beacon-live \
-  --iface auto \
-  --channel 36 \
-  --logging-only \
-  --log-dir logs
+sudo wlanpi-utilization session stop --summary
+sudo wlanpi-utilization session status --summary
 ```
 
-Ctrl-C flushes pending analyzer statistics, closes enabled files, terminates
-TShark, and exits.
+Q/Ctrl+C in an attached managed display only detaches. For a foreground capture
+that ends on Ctrl+C, select standalone explicitly:
+
+```bash
+sudo wlanpi-utilization --standalone --band 5 --channel 36 \
+  --log --log-dir /var/log/wlanpi-beacon-live
+```
+
+`--logging-only` writes both formats without a renderer. In managed mode it
+attaches to or starts the shared owner; in standalone mode it runs in the
+foreground. Normal standalone Ctrl+C flushes/closes output and restores the
+radio. A managed stop request performs cleanup in the capture owner.
 
 ## Locations and filenames
 
@@ -94,8 +98,8 @@ Live filenames are generated by the app and include local time plus a UTC
 offset:
 
 ```text
-beacon_live_20260720T120000123456-0600_stats.csv
-beacon_live_20260720T120000123456-0600_beacons.jsonl
+utilization_20260720T120000123456-0600_stats.csv
+utilization_20260720T120000123456-0600_beacons.jsonl
 ```
 
 The two formats in one segment share a prefix. The directory is created
@@ -208,8 +212,9 @@ When free space falls below the threshold:
 
 1. the service writes an end-of-log marker to each enabled format;
 2. both files are flushed and closed;
-3. display mode keeps capturing/analyzing with logging inactive; or
-4. logging-only mode terminates capture and exits cleanly.
+3. a managed session keeps capturing/analyzing with logging inactive;
+4. standalone display mode also keeps running, while standalone logging-only
+   mode terminates capture and exits cleanly.
 
 A disk-usage query failure is handled conservatively like low disk. If the
 filesystem becomes completely full between checks, the app still closes the
@@ -245,8 +250,8 @@ default. The current files close before the next pair opens. Later segments use
 a timestamped prefix plus a predictable part suffix such as:
 
 ```text
-beacon_live_20260720T130000000000-0600_part0002_stats.csv
-beacon_live_20260720T130000000000-0600_part0002_beacons.jsonl
+utilization_20260720T130000000000-0600_part0002_stats.csv
+utilization_20260720T130000000000-0600_part0002_beacons.jsonl
 ```
 
 Rollover does not restart capture, the analyzer, or graph history.
@@ -260,7 +265,7 @@ Rollover does not restart capture, the analyzer, or graph history.
 ```
 
 All values must be nonnegative/positive as appropriate. Run
-`wlanpi-beacon-live --help` or `beacon-live live --help` for the current CLI.
+`wlanpi-utilization --help` or `utilization live --help` for the current CLI.
 
 ## Replay logging
 
@@ -268,7 +273,7 @@ Replay accepts explicit output paths because it processes a bounded saved
 input rather than an open-ended live session:
 
 ```bash
-beacon-live replay \
+utilization replay \
   --input samples/tshark_qbss_sample.tsv \
   --stats-csv logs/replay-stats.csv \
   --beacons-jsonl logs/replay-beacons.jsonl

@@ -1,4 +1,4 @@
-# WLANPi Beacon Live
+# Utilization
 
 This project builds a Python live 802.11 beacon and channel-utilization analyzer for Raspberry Pi / WLAN Pi hardware.
 

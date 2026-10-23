@@ -12,6 +12,24 @@ from beacon_live.models import FrameRecord
 from beacon_live.retry_debug import RetryCaptureData
 
 
+@pytest.mark.parametrize("standalone", [False, True])
+def test_cli_adopts_active_managed_session_unless_standalone_is_explicit(monkeypatch, standalone):
+    from beacon_live.models import MetricsSnapshot
+    from beacon_live.runtime import LiveSessionConfig, RuntimePublication, SessionPhase
+    calls = []
+    publication = RuntimePublication("a" * 32, 5, SessionPhase.RUNNING,
+                                     LiveSessionConfig(band="6", channel="5"), MetricsSnapshot.empty())
+    monkeypatch.setattr("beacon_live.service_client.ServiceClient.read", lambda self: publication)
+    monkeypatch.setattr("beacon_live.service_client.managed_live",
+                        lambda options, **kwargs: calls.append(("attach", options, kwargs)) or 0)
+    monkeypatch.setattr("beacon_live.cli.run_live", lambda **kwargs: calls.append(("standalone", kwargs)) or 0)
+    args = ["live", "--band", "2.4", "--channel", "11"]
+    assert main(args + (["--standalone"] if standalone else [])) == 0
+    assert calls[0][0] == ("standalone" if standalone else "attach")
+    if not standalone:
+        assert calls[0][2]["attach_only"] is True
+
+
 def test_live_passes_explicit_interface_and_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     monkeypatch.setattr("beacon_live.cli.run_live", lambda **kwargs: (calls.append(kwargs) or 0))
@@ -354,9 +372,9 @@ def test_live_generates_log_filenames_in_configured_directory(
     assert isinstance(beacons_jsonl, Path)
     assert stats_csv.parent == log_dir
     assert beacons_jsonl.parent == log_dir
-    assert stats_csv.name.startswith("beacon_live_")
+    assert stats_csv.name.startswith("utilization_")
     assert stats_csv.name.endswith("_stats.csv")
-    assert beacons_jsonl.name.startswith("beacon_live_")
+    assert beacons_jsonl.name.startswith("utilization_")
     assert beacons_jsonl.name.endswith("_beacons.jsonl")
     assert stats_csv.name.removesuffix("_stats.csv") == (
         beacons_jsonl.name.removesuffix("_beacons.jsonl")
@@ -759,3 +777,30 @@ def test_live_reports_setup_failure(
     assert "Command failed: iw dev wlan0 set channel 36 HT20" in captured.err
     assert "Exit status: 1" in captured.err
     assert "channel set failed" in captured.err
+
+
+@pytest.mark.parametrize("managed", [False, True])
+def test_live_beacon_export_flags_configure_one_source_and_bounded_storage(monkeypatch, tmp_path, managed):
+    calls = []
+    if managed:
+        monkeypatch.setattr("beacon_live.service_client.managed_live", lambda options, **kwargs: calls.append(options) or 0)
+    else:
+        monkeypatch.setattr("beacon_live.cli.run_live", lambda **options: calls.append(options) or 0)
+    assert main(["live", "--managed" if managed else "--standalone", "--band", "2.4", "--channel", "6",
+        "--log-dir", str(tmp_path), "--beacon-pcapng", "--beacon-segment-mb", "8",
+        "--beacon-retained-mb", "32", "--beacon-retained-files", "4", "--beacon-rotation-seconds", "60",
+        "--min-free-mb", "16"]) == 0
+    options = calls[0]
+    assert options["export_directory"] == tmp_path / "beacons" and options["initial_export_enabled"]
+    assert options.get("capture_backend", "direct") == "direct"
+    assert options["export_limits"].segment_bytes == 8 * 1024 * 1024
+    assert options["export_limits"].retained_bytes == 32 * 1024 * 1024
+    assert options["export_limits"].retained_files == 4
+    assert options["export_limits"].rotation_seconds == 60
+    assert options["export_limits"].min_free_bytes == 16 * 1024 * 1024
+
+
+def test_raw_diagnostic_and_beacon_export_are_explicitly_exclusive(tmp_path):
+    with pytest.raises(SystemExit) as error:
+        main(["live", "--beacon-pcapng", "--raw-pcapng", str(tmp_path / "raw.pcapng")])
+    assert error.value.code == 2

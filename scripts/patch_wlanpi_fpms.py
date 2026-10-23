@@ -39,6 +39,7 @@ def main() -> int:
     parser.add_argument("--adapter", required=True, type=Path)
     parser.add_argument("--restart-service", action="store_true")
     parser.add_argument("--capture-backend", choices=("direct", "core"))
+    parser.add_argument("--runtime-mode", choices=("standalone", "managed"))
     parser.add_argument("--backend-config", type=Path, default=Path("/etc/wlanpi-beacon-live/fpms.json"))
     args = parser.parse_args()
 
@@ -46,7 +47,8 @@ def main() -> int:
         package = args.fpms_package or _find_fpms_package()
         print(f"Resolved FPMS Python package: {package}", flush=True)
         install_fpms(package, args.adapter, restart_service=args.restart_service,
-                     capture_backend=args.capture_backend, backend_config=args.backend_config)
+                     capture_backend=args.capture_backend, backend_config=args.backend_config,
+                     runtime_mode=args.runtime_mode)
     except (FPMSInstallError, OSError, SyntaxError, UnicodeError) as error:
         raise SystemExit(f"Utilization FPMS installation failed: {error}") from error
     print(f"Installed Utilization FPMS adapter in {package}")
@@ -61,6 +63,7 @@ def install_fpms(
     command_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     sleep: Callable[[float], None] = time.sleep,
     capture_backend: str | None = None,
+    runtime_mode: str | None = None,
     backend_config: Path = Path("/etc/wlanpi-beacon-live/fpms.json"),
 ) -> None:
     """Validate first, then install and recover the pre-install files on failure."""
@@ -92,9 +95,11 @@ def install_fpms(
     for path, content in replacements.items():
         compile(content, str(path), "exec")
 
-    if capture_backend is not None:
-        if capture_backend not in {"direct", "core"}:
+    if capture_backend is not None or runtime_mode is not None:
+        if capture_backend is not None and capture_backend not in {"direct", "core"}:
             raise FPMSInstallError("Capture backend must be direct or core")
+        if runtime_mode is not None and runtime_mode not in {"standalone", "managed"}:
+            raise FPMSInstallError("Runtime mode must be standalone or managed")
         original = FileState.read(backend_config)
         try:
             settings = json.loads(original.content) if original.content is not None else {}
@@ -102,7 +107,10 @@ def install_fpms(
                 raise ValueError("expected a JSON object")
         except ValueError as error:
             raise FPMSInstallError(f"Invalid backend configuration {backend_config}: {error}") from error
-        settings["capture_backend"] = capture_backend
+        if capture_backend is not None:
+            settings["capture_backend"] = capture_backend
+        if runtime_mode is not None:
+            settings["runtime_mode"] = runtime_mode
         originals[backend_config] = original
         replacements[backend_config] = (json.dumps(settings, indent=2) + "\n").encode()
 
@@ -300,6 +308,24 @@ def _patch_fpms(text: str, path: Path) -> str:
             path=path,
         )
 
+    poll_code = (
+        "                menu_poll = g_vars.get('channel_utilization_menu_poll')\n"
+        "                if callable(menu_poll) and menu_poll(menu):\n"
+        "                    Page(g_vars).draw_page(g_vars, menu)\n"
+    )
+    if "menu_poll = g_vars.get('channel_utilization_menu_poll')" not in text:
+        condition = ast.parse('g_vars["display_state"] != "menu"', mode="eval").body
+        branches = [node for node in ast.walk(_find_function(text, "main", path))
+                    if isinstance(node, ast.If) and node.orelse
+                    and ast.dump(node.test) == ast.dump(condition)]
+        if len(branches) != 1:
+            raise FPMSInstallError(f"FPMS menu refresh branch not found in {path}")
+        insertion = _line_offset(text, branches[0].orelse[0].lineno)
+        # Use the installed branch's indentation, including synthetic fixtures.
+        indent = " " * branches[0].orelse[0].col_offset
+        code = "\n".join(indent + line[16:] for line in poll_code.rstrip("\n").splitlines()) + "\n"
+        text = text[:insertion] + code + text[insertion:]
+
     return text
 
 
@@ -323,6 +349,16 @@ def _patch_buttons(text: str, path: Path) -> str:
         insertion = _line_offset(text, branches[0].body[0].lineno)
         text = text[:insertion] + handler_code + text[insertion:]
 
+    return_code = (
+        "            menu_return = g_vars.get('channel_utilization_menu_return')\n"
+        "            if callable(menu_return):\n"
+        "                menu_return(menu)\n"
+    )
+    if return_code not in text:
+        # Runs after the renderer detaches, before native FPMS redraws. Upgrade
+        # the previous managed exit hook without duplicating its cleanup.
+        text = text.replace(handler_code, handler_code + return_code, 1)
+
     text = _insert_page_handler(
         text,
         method_name="menu_up",
@@ -335,6 +371,19 @@ def _patch_buttons(text: str, path: Path) -> str:
         handler_name="page_down_handler",
         path=path,
     )
+    # Refresh only while entering a menu, never during the periodic display
+    # action. The adapter checks list identity so other apps are unaffected.
+    for name in ("menu_right", "menu_center"):
+        handler = (
+            "        if g_vars.get('display_state') == 'menu':\n"
+            "            menu_enter = g_vars.get('channel_utilization_menu_enter')\n"
+            "            if callable(menu_enter):\n"
+            "                menu_enter()\n"
+        )
+        method = _find_function(text, name, path)
+        if handler not in ast.get_source_segment(text, method):
+            insertion = _line_offset(text, method.body[0].lineno)
+            text = text[:insertion] + handler + text[insertion:]
     return text
 
 

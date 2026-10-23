@@ -153,10 +153,7 @@ class CompositionScreen:
                     "Radio BSSIDs "
                     f"{composition.strongest_radio_bssid_count}"
                 ),
-                (
-                    "AP "
-                    f"{composition.strongest_radio_ap_name or '<no AP name>'}"
-                ),
+                composition.strongest_radio_ap_name or "<no AP name>",
                 (
                     "Vendor "
                     f"{composition.strongest_radio_vendor or '<unknown>'}"

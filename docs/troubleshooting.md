@@ -3,6 +3,56 @@
 Start with the [README](../README.md) for supported hardware and installation.
 This guide covers common WLAN Pi, capture, display, metric, and logging issues.
 
+## Session keeps running after leaving a display
+
+This is expected in managed mode. FPMS Left or Q/Ctrl+C in an attached terminal
+detaches that consumer; the shared capture, logging/export and history continue.
+Use **Stop Session** in web/FPMS, or:
+
+```bash
+sudo wlanpi-utilization session stop --summary
+sudo wlanpi-utilization session status --summary
+```
+
+Stop is asynchronous; wait for cleanup before selecting a new source. No copied
+ID is required for this stop command. A stale explicit ID must be refreshed from
+status, not replaced with the literal `SESSION_ID`. Standalone foreground capture
+still stops on Ctrl+C. After reboot the managed broker starts idle and does not
+resume the old capture automatically.
+
+## Apps entry or web page missing after an update
+
+FPMS/WebUI package updates can overwrite integration files. From the updated
+repository, stop any active session normally, then rerun the full installer:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+The standard command includes protected web hosting; no SSH tunnel or manual web
+command is needed. Sign in to WLAN Pi and open **Apps → Utilization** or
+`https://<your-pi>/utilization/`. If installation rejects the platform or the page
+is still unavailable, collect read-only evidence:
+
+```bash
+sudo python3 scripts/pi_web_preflight.py
+sudo python3 scripts/install_web_integration.py --check
+systemctl --no-pager --full status wlanpi-utilization wlanpi-utilization-web wlanpi-webui nginx
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
+```
+
+Run each command on its own line. Keep the unsupported-revision error and package
+versions for review; do not bypass authentication validation. See
+[protected deployment and repair](web-deployment.md).
+
+## Exported capture is not in downloads
+
+Only successfully closed, registered files appear. Stop beacon export to flush
+and close its current segment while analysis continues, or wait for rotation.
+CSV/JSONL need Stop logging instead. A broker restart clears the in-memory
+download catalog; it does not delete saved files. Check the configured output
+directory and [export status/policy](beacon-export.md) for storage or queue errors.
+
 ## Installer cannot find FPMS
 
 The front-panel installer expects:
@@ -39,7 +89,7 @@ files, or change its Python environment. Rerun the installer afterward:
 sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-The patcher keeps one-time `.beacon-live.bak` copies of modified FPMS files.
+The patcher keeps one-time `.utilization.bak` copies of modified FPMS files.
 It validates all proposed files before writing. If writing or the FPMS restart
 fails, it restores the files as they were immediately before that installation
 attempt, including any existing adapter and backups. A failed restart also
@@ -61,7 +111,7 @@ sudo journalctl -u wlanpi-fpms -n 100 --no-pager
 ## `sudo: unable to resolve host`
 
 This warning means the device hostname is not represented correctly in
-`/etc/hosts`. It is separate from the Beacon Live installer and does not cause
+`/etc/hosts`. It is separate from the Utilization installer and does not cause
 an FPMS patch-anchor failure.
 
 Compare the configured hostname with the local host entry:
@@ -151,7 +201,7 @@ error output; check that output and connectivity before retrying. The script
 does not install packages into system Python or bypass Debian's packaging
 protections. Production installation uses the separate `/opt` venv.
 
-## `sudo: beacon-live: command not found`
+## `sudo: utilization: command not found`
 
 The normal FPMS installer creates both commands in `/usr/local/bin`. Rerun it
 after an application or FPMS upgrade, then inspect the launchers and their
@@ -159,17 +209,17 @@ isolated targets:
 
 ```bash
 sudo ./scripts/install_wlanpi_fpms.sh
-command -v wlanpi-beacon-live beacon-live
-ls -l /usr/local/bin/wlanpi-beacon-live /usr/local/bin/beacon-live
-ls -l /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live \
-  /opt/wlanpi-beacon-live/bin/beacon-live
+command -v wlanpi-utilization utilization
+ls -l /usr/local/bin/wlanpi-utilization /usr/local/bin/utilization
+ls -l /opt/wlanpi-beacon-live/bin/wlanpi-utilization \
+  /opt/wlanpi-beacon-live/bin/utilization
 ```
 
 If a custom `sudo` configuration omits `/usr/local/bin` from its secure PATH,
 use the absolute system launcher:
 
 ```bash
-sudo /usr/local/bin/wlanpi-beacon-live --band 5 --channel 36
+sudo /usr/local/bin/wlanpi-utilization --band 5 --channel 36
 ```
 
 The `.venv/bin` commands are separate and are intended only for repository
@@ -200,7 +250,7 @@ For example:
 ```bash
 ip netns list
 sudo ip netns exec capture-lab iw dev
-sudo wlanpi-beacon-live --iface capture1 --netns capture-lab --band 2.4 --channel 1
+sudo wlanpi-utilization --iface capture1 --netns capture-lab --band 2.4 --channel 1
 ```
 
 To configure another front-panel interface, run `sudo systemctl edit wlanpi-fpms`
@@ -258,7 +308,7 @@ at 20 MHz. An explicit override undergoes the same capability check and is not
 silently changed:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --frequency-mhz 5180 \
+sudo wlanpi-utilization --iface auto --frequency-mhz 5180 \
   --channel-width 80 --center-frequency1-mhz 5210
 ```
 
@@ -296,7 +346,7 @@ and presented as current. Check the TShark and `beacon-live-aggregate`
 processes separately:
 
 ```bash
-pgrep -af 'wlanpi-beacon-live|beacon-live-aggregate|tshark'
+pgrep -af 'wlanpi-utilization|beacon-live-aggregate|tshark'
 free -m
 vmstat 1
 ```
@@ -309,13 +359,13 @@ waiting to replay a 120-second frame-object queue.
 Use an explicit primary frequency when testing 5 GHz or 6 GHz:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --frequency-mhz 5975
+sudo wlanpi-utilization --iface auto --frequency-mhz 5975
 ```
 
 For band-qualified channel notation, 6 GHz channel 5 maps to 5975 MHz:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --band 6 --channel 5
+sudo wlanpi-utilization --iface auto --band 6 --channel 5
 ```
 
 Do not pass a frequency to `--channel`; `--channel 5975` means channel number
@@ -340,7 +390,7 @@ sudo journalctl -u wlanpi-fpms -n 100 --no-pager
 Look for leftover processes only after the app should have stopped:
 
 ```bash
-pgrep -af 'wlanpi-beacon-live|tshark'
+pgrep -af 'wlanpi-utilization|tshark'
 ```
 
 ## The radio is busy
@@ -421,7 +471,7 @@ when Utilization shows `<No QBSS Beacons>` or graph gaps.
 Exit Utilization in FPMS, then save one application-owned capture:
 
 ```bash
-sudo wlanpi-beacon-live --iface auto --band 5 --channel 36 \
+sudo wlanpi-utilization --iface auto --band 5 --channel 36 \
   --raw-pcapng /tmp/utilization-qbss.pcapng
 ```
 
@@ -443,7 +493,7 @@ AP's advertised QBSS utilization.
 Enable diagnostics:
 
 ```bash
-sudo wlanpi-beacon-live \
+sudo wlanpi-utilization \
   --iface auto --band 5 --channel 36 --local-cu --survey-debug
 ```
 
@@ -460,7 +510,7 @@ related BSSID MAC patterns. AP-name fields are vendor-specific and may be
 absent. The Composition screen intentionally favors conservative grouping, so
 it can overcount physical radios rather than merge uncertain BSSIDs.
 
-See [screens.md](screens.md#5-composition) and
+See [screens.md](screens.md#6-composition) and
 [architecture.md](architecture.md#radio-grouping).
 
 ## Retry data is blank or unexpected
@@ -488,7 +538,7 @@ Use the offline retry audit to inspect numerator, denominator, and exclusion
 reasons:
 
 ```bash
-beacon-live retry-debug \
+utilization retry-debug \
   --input /path/to/capture.pcapng \
   --output-csv /tmp/retry-audit.csv
 ```
@@ -512,8 +562,8 @@ from missing decoded beacon rows.
 
 ## Logs are missing
 
-- `Display` intentionally does not start logging.
-- Use `Display + Log` for a graph and logs.
+- `Start Session` does not enable logging; joining preserves existing logging.
+- Use `Start + Log` for a graph and logs.
 - Use `Start Logging` for a logging-only background session.
 - FPMS files are under `/var/log/wlanpi-beacon-live`.
 - CLI files are under `--log-dir` (default `logs`).

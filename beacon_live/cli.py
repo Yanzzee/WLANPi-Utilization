@@ -69,8 +69,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 def live_main(argv: Optional[Sequence[str]] = None) -> int:
     """Run only the live CLI, for the dedicated on-device entrypoint."""
     parser = argparse.ArgumentParser(
-        prog="wlanpi-beacon-live",
-        description="Run foreground WLANPi beacon analysis.",
+        prog="wlanpi-utilization",
+        description="Run Utilization with standalone capture or a shared managed session.",
+        epilog="Other commands: web, serve, session status|stop|logging|export, replay, retry-debug. "
+               "Stop the current managed session: wlanpi-utilization session stop --summary.",
     )
     _add_live_arguments(parser)
     return _run_live_command(parser.parse_args(argv), parser)
@@ -80,7 +82,9 @@ def _run_live_command(
     args: argparse.Namespace,
     parser: argparse.ArgumentParser,
 ) -> int:
-    command_prefix = "live " if parser.prog == "beacon-live" else ""
+    command_prefix = "live " if hasattr(args, "command") else ""
+    if args.start_only and not args.managed:
+        parser.error("--start-only requires --managed")
     if args.interval_seconds <= 0:
         parser.error(
             f"{command_prefix}--interval-seconds must be greater than zero"
@@ -107,14 +111,16 @@ def _run_live_command(
             f"{command_prefix}--logging-only cannot be combined with "
             "--log"
         )
+    if args.beacon_pcapng and args.raw_pcapng is not None:
+        parser.error("--beacon-pcapng cannot be combined with --raw-pcapng")
     write_stats_csv = args.stats_csv or args.logging_only or args.log
     write_beacons_jsonl = (
         args.beacons_jsonl or args.logging_only or args.log
     )
     log_paths = build_live_log_paths(
         args.log_dir,
-        write_stats_csv=write_stats_csv,
-        write_beacons_jsonl=write_beacons_jsonl,
+        write_stats_csv=write_stats_csv or args.managed,
+        write_beacons_jsonl=write_beacons_jsonl or args.managed,
     )
     try:
         live_options = dict(
@@ -144,6 +150,17 @@ def _run_live_command(
             live_options["center_frequency2_mhz"] = args.center_frequency2_mhz
         if args.raw_pcapng is not None:
             live_options["raw_capture_path"] = args.raw_pcapng
+        if args.beacon_pcapng:
+            live_options["export_directory"] = (args.log_dir / "beacons").absolute()
+            live_options["initial_export_enabled"] = True
+        from beacon_live.beacon_export import ExportLimits
+        export_limits = ExportLimits(segment_bytes=args.beacon_segment_mb * 1024 * 1024,
+            rotation_seconds=args.beacon_rotation_seconds,
+            retained_bytes=args.beacon_retained_mb * 1024 * 1024,
+            retained_files=args.beacon_retained_files, min_free_bytes=args.min_free_mb * 1024 * 1024)
+        export_limits.validate()
+        if export_limits != ExportLimits():
+            live_options["export_limits"] = export_limits
         if args.logging_only:
             live_options["logging_only"] = True
         if args.logging_control is not None:
@@ -161,6 +178,37 @@ def _run_live_command(
             live_options["disk_check_interval_seconds"] = args.disk_check_seconds
         if args.rotation_seconds != DEFAULT_ROTATION_INTERVAL_SECONDS:
             live_options["rotation_interval_seconds"] = args.rotation_seconds
+        if args.managed or args.attach:
+            from beacon_live.service_client import ServiceError, managed_live
+
+            if args.managed:
+                if args.raw_pcapng is None:
+                    live_options.setdefault("export_directory", (args.log_dir / "beacons").absolute())
+                for key in ("stats_csv", "beacons_jsonl", "raw_capture_path", "core_diagnostics_path"):
+                    if live_options.get(key) is not None:
+                        live_options[key] = live_options[key].absolute()
+                live_options.setdefault("initial_logging_enabled", write_stats_csv or write_beacons_jsonl)
+            try:
+                return managed_live(live_options, socket_path=args.service_socket,
+                                    attach_only=args.attach, start_only=args.start_only)
+            except ServiceError as error:
+                print(str(error), file=sys.stderr)
+                return 1
+        if not args.standalone:
+            from beacon_live.runtime import ACTIVE_PHASES
+            from beacon_live.service_client import ServiceClient, ServiceError, managed_live
+            try:
+                existing = ServiceClient(args.service_socket).read()
+            except ServiceError:
+                existing = None
+            if existing is not None and existing.phase in ACTIVE_PHASES:
+                # A plain CLI open adopts the managed owner rather than trying
+                # to acquire its radio. Requested tuning never changes it.
+                try:
+                    return managed_live(live_options, socket_path=args.service_socket, attach_only=True)
+                except ServiceError as error:
+                    print(str(error), file=sys.stderr)
+                    return 1
         return run_live(**live_options)
     except ValueError as exc:
         parser.error(f"{command_prefix}{exc}")
@@ -175,7 +223,7 @@ def _run_live_command(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="beacon-live",
+        prog="utilization",
         description="Analyze WLAN beacon QBSS samples from replay or live capture.",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -278,6 +326,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
+    from beacon_live.ipc import DEFAULT_SOCKET
+
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--managed", action="store_true",
+                      help="Display an existing shared session or start one if idle; exit detaches.")
+    mode.add_argument("--attach", action="store_true",
+                      help="Display the current service session without starting or configuring capture.")
+    mode.add_argument("--standalone", action="store_true",
+                      help="Run foreground capture instead of automatically attaching to an active service session.")
+    parser.add_argument("--start-only", action="store_true",
+                        help="With --managed, start/join the session and return without a display.")
+    parser.add_argument("--service-socket", type=Path, default=DEFAULT_SOCKET,
+                        help="Local Utilization service socket.")
     parser.add_argument(
         "--capture-backend", choices=("direct", "core"), default="direct",
         help="Capture provider. Core is an explicit owner prototype; default: direct.",
@@ -386,6 +447,16 @@ def _add_live_arguments(parser: argparse.ArgumentParser) -> None:
         default=Path("logs"),
         help="Directory for generated live log filenames. Default: logs.",
     )
+    parser.add_argument("--beacon-pcapng", action="store_true",
+                        help="Start beacon-only pcapng export in --log-dir/beacons from the shared full-packet source.")
+    parser.add_argument("--beacon-segment-mb", type=int, default=256,
+                        help="Maximum beacon pcapng segment size in MiB. Default: 256.")
+    parser.add_argument("--beacon-rotation-seconds", type=float, default=3600,
+                        help="Rotate beacon pcapng after this many seconds. Default: 3600.")
+    parser.add_argument("--beacon-retained-mb", type=int, default=0,
+                        help="Optional retained beacon pcapng limit in MiB; 0 disables deletion by size (default).")
+    parser.add_argument("--beacon-retained-files", type=int, default=0,
+                        help="Optional retained beacon pcapng file limit; 0 disables deletion by count (default).")
     parser.add_argument(
         "--logging-only",
         action="store_true",

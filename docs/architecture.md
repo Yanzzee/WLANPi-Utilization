@@ -1,7 +1,7 @@
 # Architecture
 
-This document is the technical source of truth for WLANPi Beacon Live. It
-describes the current Phase 1–5 architecture and the constraints future work
+This document is the technical source of truth for Utilization. It
+describes the current architecture and the constraints future work
 must preserve.
 
 User operation belongs in the [README](../README.md). Detailed display and log
@@ -132,8 +132,9 @@ disables WLAN decryption and defragmentation. The analyzer still receives every
 decoded 802.11 frame; retry eligibility then excludes control and extension
 frames without a separate capture pipeline. None of the metrics requires
 payload or higher-layer protocol dissection. A 16 MiB capture buffer provides
-headroom during short scheduler stalls. Normal live capture uses a 1024-byte
-snapshot length and warns once per BSSID when a larger beacon is truncated and
+headroom during short scheduler stalls. Managed/export-capable sessions use
+full packet lengths from the shared source. Legacy non-export standalone
+capture uses a 1024-byte snapshot and warns when a larger beacon is truncated and
 later information elements may be unavailable. Interactive terminal renderers
 show runtime capture warnings, including confirmed partial coverage, inside
 their managed footer instead of writing beneath the curses screen.
@@ -197,9 +198,12 @@ The parser normalizes available fields into `FrameRecord`, including:
 
 TShark fields are negotiated from `tshark -G fields`, retaining compatibility
 with older installations. The export uses `occurrence=a` with a fixed
-aggregator. Drivers normally supply one capture record per MPDU; if a dissector
-does expose multiple WLAN headers in one record, the parser emits each aligned
-MPDU and Retry bit rather than retaining only the first occurrence.
+aggregator. Actual frame-type occurrences establish WLAN header count;
+repeated address fields do not establish extra frames. Aligned headers retain
+their Retry bits; ambiguous missing fields are not copied between headers.
+Known bad-FCS frames retain diagnostic counts/timestamps but cannot supply
+beacon identities, QBSS values, clients or retry samples. Missing/unverified FCS
+is accepted. See [busy-channel validation](busy-channel-validation.md).
 
 A valid beacon can also be represented as `BeaconRecord`. Replay inputs feed
 the same aggregation behavior without requiring Wi-Fi hardware.
@@ -420,6 +424,76 @@ See [logging.md](logging.md) for formats and policy.
 
 ## Runtime modes
 
+The v2.1.0 runtime in `beacon_live/runtime.py` wraps `run_live`
+with explicit ownership, lifecycle state, session IDs, and immutable
+publications. `ManagedRuntime.run` blocks on the capture owner's main thread;
+read-only consumers can read or wait from other threads. Each consumer sees
+the same latest publication without a frame queue or analyzer. Revision gaps
+indicate skipped publications, rather than dropped analyzer input.
+
+Snapshots follow the existing display cadence; completed statistics arrive
+from the existing capture-watermark publication path. Their delivery cadences
+are independent. The runtime retains original completed rows for up to 120
+capture seconds and never creates completed rows from wall-clock gaps. Stop is
+cooperative: a startup stop request stays pending until the live loop can poll
+it, and no replacement session starts before cleanup returns. Final published
+state remains readable until an explicit new session.
+
+`service.py` hosts the managed broker with a private local Unix socket and
+one isolated capture owner process. `service_client.py` attaches terminal/LCD
+renderers to the owner's typed JSON publications. Start/join, explicit stop,
+and logging controls share this boundary. Renderer exit detaches and preserves
+the owner. Consumer opens atomically join an active session using its actual
+configuration; explicit conflicting starts still fail until it stops. A plain
+CLI open adopts an active managed session and otherwise retains foreground
+capture; `--standalone` explicitly selects that mode. New FPMS installs use
+managed attachment; saved explicit standalone settings are preserved. See
+[managed service operation](managed-service.md) and the
+[managed runtime roadmap](managed-runtime-roadmap.md).
+
+`web.py` provides a separate Flask/Waitress consumer at `/utilization/`.
+HTTP threads share a one-second publication cache and render the existing
+snapshot/screen views; controls use the same broker as CLI and FPMS. Browser
+lifetimes do not own capture. Local assets support compact phone views and
+expanded desktop graphs/table without an additional analysis pipeline.
+The initial page embeds the cached publication, so an existing session renders
+without waiting for a first status response. Composition/strongest-radio members
+and selected QBSS/station/retry identities remain separate, using the existing
+screen definitions and snapshot fields. The owner additionally publishes capture
+tuning and verification status for center-frequency/width display. Local survey
+reporting is hidden in the web UI pending adapter validation; analyzer/API/log
+definitions are retained.
+
+WLAN Pi hosting, included by the standard installer, uses the existing Nginx `/auth/check` guard on every
+Utilization route and a separate web unit listening only on a private Unix
+socket. Nginx overwrites a private proxy-token header; the backend validates
+that token and checks CSRF/HTTPS origin for controls. Broker permissions remain
+root-only. Polling does not extend the platform idle cookie; actual interaction
+uses the existing Apps endpoint for that platform behavior. The integration
+installer validates supported sources, edits only managed route/card blocks,
+and rolls back failed deployment without restarting capture. See
+[protected deployment](web-deployment.md).
+
+The logging worker records closed-file descriptor identities after flushing
+and closing each CSV/JSONL segment. The broker retains a bounded session-owned
+catalog across capture sessions. The web process opens registered files under
+its log root, verifies their identity, and streams downloads independently of
+capture. Active files are excluded. See [web operation](web-interface.md).
+
+`packet_source.py` fans one original full-length pcapng source to the all-frame
+decoder and a bounded beacon export branch. `pcapng.py` selects original beacon
+packet blocks, retaining timestamp/interface/radiotap context. `beacon_export.py`
+isolates blocking writes in a spawned process with bounded queues, rotation,
+free-space checks, optional retention and closed-file registration. Export
+failure cannot block analyzer delivery. Direct capture uses one Dumpcap source;
+Core feeds the same boundary. The offline `scripts/export_beacons.py` helper
+reuses the writer without starting capture. See [beacon export](beacon-export.md).
+
+`host_tracking.py` builds bounded host detail alongside the existing client
+observations in that same analyzer pass. Immutable `HostState` rows are part of
+`MetricsSnapshot`; web sorting/navigation never recomputes frame statistics.
+See [host observation rules](web-interface.md#hosts-tab).
+
 - **FPMS display:** live capture plus LCD artifacts and screen navigation.
 - **FPMS display and log:** the same runtime with logging active.
 - **FPMS logging-only:** the same capture/analyzer with rendering disabled.
@@ -428,8 +502,8 @@ See [logging.md](logging.md) for formats and policy.
   hardware.
 - **Retry debug:** offline PCAP/PCAPNG audit with explicit exclusion counts.
 
-The FPMS adapter prevents simultaneous display and logging-only capture
-sessions so the device never starts two capture pipelines for one app session.
+Managed FPMS display/logging/export consumers attach to one owner. Legacy
+standalone exclusion still prevents competing capture pipelines on the radio.
 
 ## Module boundaries
 
@@ -442,7 +516,13 @@ sessions so the device never starts two capture pipelines for one app session.
 | Screens and UI state | `beacon_live/screens.py`, `beacon_live/screen_manager.py` |
 | Terminal/LCD rendering | `beacon_live/dashboard.py`, `beacon_live/lcd_dashboard.py` |
 | Live hardware boundary | `beacon_live/live.py`, `beacon_live/survey.py` |
+| Managed ownership and consumer publications | `beacon_live/runtime.py` |
+| Local owner service and typed IPC | `beacon_live/service.py`, `beacon_live/ipc.py` |
+| Shared renderer attachment and controls | `beacon_live/service_client.py` |
+| Web API and responsive renderer | `beacon_live/web.py`, `beacon_live/templates/`, `beacon_live/web_static/` |
 | Logging | `beacon_live/log_writer.py` |
+| Same-source beacon export | `beacon_live/packet_source.py`, `beacon_live/pcapng.py`, `beacon_live/beacon_export.py`, `scripts/export_beacons.py` |
+| Bounded shared host detail | `beacon_live/host_tracking.py` |
 | CLI/device entrypoints | `beacon_live/cli.py`, `beacon_live/device.py` |
 | FPMS integration | `integration/wlanpi_fpms/channel_utilization.py` |
 

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Optional
+from pathlib import Path
 
 from beacon_live.channel import ChannelDefinition
 
@@ -12,6 +13,28 @@ QBSS_ADMISSION_CAPACITY_MAX = 31_250
 BEACON_LOSS_RSSI_THRESHOLD_DBM = -75
 TOP_STATION_SOURCE_QBSS = "qbss"
 TOP_STATION_SOURCE_MAC = "mac"
+
+
+@dataclass(frozen=True)
+class ClosedLog:
+    """Identity of a flushed, closed log, captured from its original descriptor."""
+
+    path: Path
+    device: int
+    inode: int
+    size_bytes: int
+    mtime_ns: int
+    closed_at: float
+
+
+@dataclass(frozen=True)
+class CaptureHealth:
+    capture_records: int = 0
+    decoded_frames: int = 0
+    rejected_records: int = 0
+    bad_fcs_frames: int = 0
+    latest_timestamp: Optional[float] = None
+    fcs_metadata_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -63,6 +86,15 @@ class FrameRecord:
     fragment_number: Optional[int] = None
     qos_tid: Optional[int] = None
     ampdu_reference: Optional[int] = None
+    radiotap_bad_fcs: Optional[bool] = None
+    transmitter_vendor: Optional[str] = None
+    receiver_vendor: Optional[str] = None
+
+    @property
+    def has_bad_fcs(self) -> bool:
+        # Wireshark: 0=Bad, 1=Good, 2=Unverified, 3=Not present.
+        # Unknown/missing FCS is not evidence of corruption.
+        return self.radiotap_bad_fcs is True or self.fcs_status == 0
 
     @property
     def is_management_frame(self) -> bool:
@@ -85,6 +117,8 @@ class FrameRecord:
     @property
     def retry_exclusion_reason(self) -> Optional[str]:
         """Return why the frame is excluded from retry calculations."""
+        if self.has_bad_fcs:
+            return "bad_fcs"
         return retry_exclusion_reason(
             frame_type=self.frame_type,
             frame_subtype=self.frame_subtype,
@@ -110,7 +144,7 @@ class FrameRecord:
 
     def beacon_record(self) -> Optional[BeaconRecord]:
         """Return the beacon projection used by existing Phase 1/2 metrics."""
-        if not self.is_beacon or self.bssid is None:
+        if not self.is_beacon or self.bssid is None or self.has_bad_fcs:
             return None
         return BeaconRecord(
             timestamp=self.timestamp,
@@ -335,6 +369,23 @@ class RetryBssidState:
 
 
 @dataclass(frozen=True)
+class HostState:
+    """Observed wireless data endpoint in the shared rolling capture window."""
+
+    mac: str
+    vendor: Optional[str]
+    locally_administered: bool
+    ssid: Optional[str]
+    bssid: str
+    last_activity: float
+    last_tx_timestamp: Optional[float]
+    last_tx_rssi_dbm: Optional[int]
+    tx_frames: int
+    rx_frames: int
+    tx_retry_percent: Optional[float]
+
+
+@dataclass(frozen=True)
 class MetricsSnapshot:
     """Read-only analyzer state shared by every display renderer."""
 
@@ -356,6 +407,8 @@ class MetricsSnapshot:
     beacons: BeaconReceptionSnapshot = field(
         default_factory=BeaconReceptionSnapshot.empty
     )
+    hosts: tuple[HostState, ...] = ()
+    host_details_limited: bool = False
 
     @classmethod
     def empty(cls, *, window_seconds: int = 120) -> "MetricsSnapshot":

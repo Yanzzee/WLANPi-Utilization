@@ -20,6 +20,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from beacon_live.parser import TSHARK_FRAME_FIELD_NAMES, TSHARK_OPTIONAL_FRAME_FIELD_NAMES, TSHARK_REQUIRED_FRAME_FIELD_NAMES
 from scripts.patch_wlanpi_fpms import FPMSInstallError, _find_fpms_package
+from scripts.pi_web_preflight import inspect as inspect_web_integration
 
 
 class Collector:
@@ -135,27 +136,31 @@ def collect_deployment(bundle: Collector, package: Path | None, app_python: Path
     status = ('mismatch' if any(f.get('matches_checkout') is False for f in files)
               else 'unavailable' if any('error' in f for f in files) else 'ok')
     bundle.record('deployment.json', json.dumps(files, indent=2) + '\n', status=status)
-    for index, path in enumerate((Path('/usr/local/bin/wlanpi-beacon-live'), Path('/usr/local/bin/beacon-live'))):
+    for index, path in enumerate((Path('/usr/local/bin/wlanpi-utilization'), Path('/usr/local/bin/utilization'),
+                                 Path('/usr/local/bin/wlanpi-beacon-live'), Path('/usr/local/bin/beacon-live'))):
         bundle.read(f'cli_launcher_{index}.txt', path)
     bundle.command('core_client.txt', [str(app_python), '-I', '-c',
         "import websockets; print(websockets.__version__); print(websockets.__file__)"])
 
 
 def collect_backend_config(bundle: Collector, path=Path('/etc/wlanpi-beacon-live/fpms.json')):
-    report = {'path': str(path), 'capture_backend': 'direct', 'source': 'default'}
+    report = {'path': str(path), 'capture_backend': 'direct', 'runtime_mode': 'standalone', 'source': 'default'}
     status = 'ok'
     try:
         settings = json.loads(path.read_text())
         backend = settings.get('capture_backend', 'direct')
         if not isinstance(backend, str) or backend not in {'direct', 'core'}:
             raise ValueError('invalid capture_backend')
-        report.update(capture_backend=backend, source='file')
+        runtime_mode = settings.get('runtime_mode', 'standalone')
+        if not isinstance(runtime_mode, str) or runtime_mode not in {'standalone', 'managed'}:
+            raise ValueError('invalid runtime_mode')
+        report.update(capture_backend=backend, runtime_mode=runtime_mode, source='file')
     except FileNotFoundError:
         pass
     except (OSError, ValueError, AttributeError) as error:
         report.update(capture_backend=None, error=str(error))
         status = 'failed'
-    # Retain just the backend selection, not arbitrary configuration values.
+    # Retain only backend/runtime selections, not arbitrary configuration values.
     bundle.record('fpms_backend.json', json.dumps(report, indent=2) + '\n', status=status)
 
 
@@ -249,18 +254,25 @@ def collect_runtime(bundle: Collector, directory: Path = Path('/run/wlanpi-beaco
 def collect(bundle: Collector, *, repo_root: Path, since: str, launcher=Path('/usr/sbin/fpms'), app_python=Path('/opt/wlanpi-beacon-live/bin/python')):
     bundle.read('os_release.txt', Path('/etc/os-release'))
     bundle.read('wlanpi_release.txt', Path('/etc/wlanpi-release'))
+    bundle.record('web_integration_preflight.json', json.dumps(inspect_web_integration(
+        Path('/opt/wlanpi-webui/workingdirectory'),
+        Path('/etc/wlanpi-webui/nginx/sites-enabled/wlanpi_webui.conf')), indent=2) + '\n')
     service_output = ''
     for filename, command in (
         ('uname.txt', ['uname', '-a']), ('python_version.txt', ['python3', '--version']),
         ('packages.txt', ['dpkg-query', '-W', '-f=${Package}\t${Version}\t${Status}\n',
-                          'wlanpi-fpms', 'wlanpi-core', 'wlanpi-common', 'python3', 'python3-venv', 'tshark', 'wireshark-common', 'iw', 'iproute2']),
+                          'wlanpi-fpms', 'wlanpi-core', 'wlanpi-common', 'wlanpi-webui', 'nginx', 'python3', 'python3-venv', 'tshark', 'wireshark-common', 'iw', 'iproute2']),
         ('tshark_version.txt', ['tshark', '--version']), ('dumpcap_version.txt', ['dumpcap', '--version']),
         ('fpms_service.txt', ['systemctl', 'show', 'wlanpi-fpms', '--no-pager',
                               '-p', 'FragmentPath', '-p', 'DropInPaths', '-p', 'ExecStart', '-p', 'User', '-p', 'Group',
                               '-p', 'ActiveState', '-p', 'SubState', '-p', 'MainPID', '-p', 'Result', '-p', 'ExecMainStatus']),
         ('fpms_journal.txt', ['journalctl', '-u', 'wlanpi-fpms', '--since', since, '-n', '300', '--no-pager', '-o', 'short-iso']),
+        ('utilization_journal.txt', ['journalctl', '-u', 'wlanpi-utilization', '--since', since, '-n', '300', '--no-pager', '-o', 'short-iso']),
+        ('utilization_session.txt', [str(app_python), '-m', 'beacon_live.device', 'session', 'status', '--summary']),
         ('dmesg_tail.txt', ['journalctl', '-k', '-n', '200', '--no-pager', '-o', 'short-iso']),
-        ('processes.txt', ['ps', '-eo', 'pid,ppid,user,comm,args']),
+        ('processes.txt', ['ps', '-eo', 'pid,ppid,user,pcpu,rss,etime,comm,args']),
+        ('usb_devices.txt', ['lsusb']),
+        ('usb_topology.txt', ['lsusb', '-t']),
         ('radio_locks.txt', ['lslocks']),
         ('rfkill.txt', ['rfkill', 'list']), ('disk.txt', ['df', '-h', str(repo_root), '/var/log', '/run']),
         ('memory.txt', ['free', '-m']),

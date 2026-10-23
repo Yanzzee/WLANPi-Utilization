@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import tzinfo
@@ -235,6 +236,7 @@ class CursesDashboard:
         channel: Optional[str] = None,
         frequency_mhz: Optional[int] = None,
         curses_module: Optional[Any] = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.snapshot = MetricsSnapshot.empty(window_seconds=max_seconds)
         self.include_local_cu = include_local_cu
@@ -251,6 +253,9 @@ class CursesDashboard:
         self.logging_paths: tuple[str, ...] = ()
         self.logging_message: Optional[str] = None
         self.notice_message: Optional[str] = None
+        self.transient_notice: Optional[str] = None
+        self._transient_deadline = 0.0
+        self._clock = clock
         self.collecting = False
         self.last_layout: Optional[DashboardLayout] = None
         self._window: Optional[Any] = None
@@ -324,11 +329,21 @@ class CursesDashboard:
     def set_collecting(self, collecting: bool) -> None:
         self.collecting = collecting
 
+    def set_transient_notice(self, message: str, *, seconds: float = 10) -> None:
+        """Show connection information separately from persistent warnings."""
+        self.transient_notice = message
+        self._transient_deadline = self._clock() + seconds
+        if self._window is not None:
+            self.draw()
+
     def poll_input(self) -> bool:
         """Consume pending keys without waiting and redraw interaction changes."""
         if self._window is None:
             return self.exit_requested
         changed = False
+        if self.transient_notice and self._clock() >= self._transient_deadline:
+            self.transient_notice = None
+            changed = True
         while True:
             try:
                 key = self._window.getch()
@@ -346,6 +361,8 @@ class CursesDashboard:
 
     def handle_key(self, key: int) -> bool:
         """Apply one curses key code and return whether the display changed."""
+        dismissed = self.transient_notice is not None
+        self.transient_notice = None
         if key in (ord("q"), ord("Q"), 3):
             self.exit_requested = True
             return True
@@ -358,7 +375,7 @@ class CursesDashboard:
                 self.viewport.follow_newest = True
             return True
         if self._window is None:
-            return False
+            return dismissed
 
         height, width = self._window.getmaxyx()
         layout = calculate_layout(
@@ -423,7 +440,7 @@ class CursesDashboard:
         elif key == key_resize:
             return True
         else:
-            return False
+            return dismissed
         return True
 
     def draw(self) -> None:
@@ -457,7 +474,7 @@ class CursesDashboard:
         )
         title = (
             f" {tuning} "
-            "| WLANPi Beacon Live "
+            "| Utilization "
             f"| {self.snapshot.window_seconds}s history "
             f"| rows {len(self.snapshot.history)} "
             f"| {_format_dashboard_state(self.display_paused, self.viewport)} "
@@ -472,6 +489,8 @@ class CursesDashboard:
         footer = (
             f" Warning: {self.notice_message} "
             if self.notice_message
+            else f" {self.transient_notice} "
+            if self.transient_notice
             else " Collecting "
             if self.collecting
             else (
@@ -483,7 +502,7 @@ class CursesDashboard:
         self._window.refresh()
 
     def _draw_too_small(self, layout: DashboardLayout) -> None:
-        self._add(0, 0, "WLANPi Beacon Live", layout.width, self._attr("A_BOLD"))
+        self._add(0, 0, "Utilization", layout.width, self._attr("A_BOLD"))
         if layout.height > 1:
             message = (
                 f"Terminal too small: {layout.width}x{layout.height}; "

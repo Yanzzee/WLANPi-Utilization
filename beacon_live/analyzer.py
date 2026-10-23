@@ -20,6 +20,8 @@ from beacon_live.models import BeaconReceptionSnapshot
 from beacon_live.models import BssidState
 from beacon_live.models import CompositionSnapshot
 from beacon_live.models import FrameRecord
+from beacon_live.models import HostState
+from beacon_live.host_tracking import HostSummary, observe_host, merge_hosts, host_states
 from beacon_live.models import MetricsSnapshot
 from beacon_live.models import RetryBssidState
 from beacon_live.models import SecondStats
@@ -68,10 +70,14 @@ class _RetainedFrame(NamedTuple):
     receiver_address: Optional[str]
     source_address: Optional[str]
     destination_address: Optional[str]
+    has_bad_fcs: bool = False
+    rssi_dbm: Optional[int] = None
+    transmitter_vendor: Optional[str] = None
+    receiver_vendor: Optional[str] = None
 
     @property
     def retry_eligible(self) -> bool:
-        return retry_exclusion_reason(
+        return not self.has_bad_fcs and retry_exclusion_reason(
             frame_type=self.frame_type,
             frame_subtype=self.frame_subtype,
             retry_flag=self.retry_flag,
@@ -104,6 +110,8 @@ class _FrameProjection:
     retry_count: int
     by_bssid: dict[str, _BssidFrameSummary]
     unique_client_macs: frozenset[str]
+    hosts: dict[str, HostSummary] = field(default_factory=dict)
+    hosts_limited: bool = False
 
 
 @dataclass
@@ -122,6 +130,8 @@ class _MutableFrameProjection:
     retry_count: int = 0
     by_bssid: dict[str, _BssidFrameSummary] = field(default_factory=dict)
     unique_client_macs: set[str] = field(default_factory=set)
+    hosts: dict[str, HostSummary] = field(default_factory=dict)
+    hosts_limited: bool = False
 
     def freeze(self) -> _FrameProjection:
         return _FrameProjection(
@@ -131,6 +141,8 @@ class _MutableFrameProjection:
             retry_count=self.retry_count,
             by_bssid=self.by_bssid,
             unique_client_macs=frozenset(self.unique_client_macs),
+            hosts=self.hosts,
+            hosts_limited=self.hosts_limited,
         )
 
 
@@ -143,6 +155,8 @@ class _CompletedProjection:
     second_frames: _FrameProjection
     retry_states: tuple[RetryBssidState, ...]
     window_unique_client_mac_count: int
+    hosts: tuple[HostState, ...]
+    hosts_limited: bool
 
 
 @dataclass(frozen=True)
@@ -556,6 +570,8 @@ class Analyzer:
             second_frames=second_frames,
             retry_states=retry_states,
             window_unique_client_mac_count=len(window_frames.unique_client_macs),
+            hosts=host_states(window_frames, states),
+            hosts_limited=window_frames.hosts_limited,
         )
         self._completed_seconds.add(second)
         self._pending_seconds.discard(second)
@@ -637,6 +653,7 @@ class Analyzer:
             window_unique_client_mac_count = (
                 completed_projection.window_unique_client_mac_count
             )
+            hosts, hosts_limited = completed_projection.hosts, completed_projection.hosts_limited
         else:
             retry_scope = self._retry_scope_entries()
             states, window_frames = self._states_at(
@@ -670,6 +687,7 @@ class Analyzer:
             window_unique_client_mac_count = len(
                 window_frames.unique_client_macs
             )
+            hosts, hosts_limited = host_states(window_frames, states), window_frames.hosts_limited
         self._current_selected_bssid = select_bssid(
             states,
             self._current_selected_bssid,
@@ -748,6 +766,8 @@ class Analyzer:
             composition=composition,
             window_unique_client_mac_count=window_unique_client_mac_count,
             beacons=beacon_reception,
+            hosts=hosts,
+            host_details_limited=hosts_limited,
         )
 
     def _beacon_reception_snapshot(
@@ -1253,6 +1273,9 @@ class Analyzer:
         )
         projection.frame_count += 1
 
+        if frame.has_bad_fcs:
+            return
+
         known_by_address = self._known_bssid_addresses
         associated_bssid = _associated_bssid(frame, known_by_address)
         retry_in_scope = (
@@ -1302,6 +1325,7 @@ class Analyzer:
                 and _is_unicast_mac(address)
             ):
                 projection.unique_client_macs.add(address)
+                projection.hosts_limited |= observe_host(projection.hosts, address, frame, frame_bssid, retry_eligible)
                 if summary is not None:
                     summary.unique_client_macs.add(address)
 
@@ -1582,6 +1606,7 @@ def _merge_frame_projections(
             ):
                 target.last_timestamp = source.last_timestamp
 
+    hosts, hosts_limited = merge_hosts(projections)
     return _FrameProjection(
         frame_count=frame_count,
         retry_observed_count=retry_observed_count,
@@ -1589,6 +1614,8 @@ def _merge_frame_projections(
         retry_count=retry_count,
         by_bssid=by_bssid,
         unique_client_macs=frozenset(clients),
+        hosts=hosts,
+        hosts_limited=hosts_limited,
     )
 
 
@@ -1610,8 +1637,12 @@ def _project_frames(
     retry_count = 0
     by_bssid: dict[str, _BssidFrameSummary] = {}
     clients: set[str] = set()
+    hosts = {}
+    hosts_limited = False
 
     for frame in frames:
+        if frame.has_bad_fcs:
+            continue
         associated_bssid = _associated_bssid(frame, known_by_address)
         retry_in_scope = (
             target_primary_frequency_mhz is None
@@ -1677,6 +1708,7 @@ def _project_frames(
                 and _is_unicast_mac(address)
             ):
                 clients.add(address)
+                hosts_limited |= observe_host(hosts, address, frame, frame_bssid, retry_eligible)
                 client_bssid = known_by_address[frame_bssid]
                 by_bssid[client_bssid].unique_client_macs.add(address)
     return _FrameProjection(
@@ -1686,6 +1718,8 @@ def _project_frames(
         retry_count=retry_count,
         by_bssid=by_bssid,
         unique_client_macs=frozenset(clients),
+        hosts=hosts,
+        hosts_limited=hosts_limited,
     )
 
 
@@ -1814,6 +1848,10 @@ def _retain_frame(frame: FrameRecord) -> _RetainedFrame:
         receiver_address=address(frame.receiver_address),
         source_address=address(frame.source_address),
         destination_address=address(frame.destination_address),
+        has_bad_fcs=frame.has_bad_fcs,
+        rssi_dbm=frame.rssi_dbm,
+        transmitter_vendor=frame.transmitter_vendor,
+        receiver_vendor=frame.receiver_vendor,
     )
 
 

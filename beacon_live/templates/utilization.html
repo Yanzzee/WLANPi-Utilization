@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="utilization-csrf" content="{{ csrf }}">
+  <meta name="utilization-api" content="{{ prefix }}api/">
+  <meta name="utilization-hosted" content="{{ 'yes' if platform_hosted else 'no' }}">
+  <title>Utilization</title>
+  {% if platform_hosted %}
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png">
+  {% endif %}
+  <script id="capture-options" type="application/json">{{ capture_options|tojson }}</script>
+  <script id="initial-status" type="application/json">{{ initial|tojson }}</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='utilization.css') }}">
+  <script src="{{ url_for('static', filename='utilization.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to metrics</a>
+  <header class="masthead">
+    <div class="brand"><svg class="brand-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 24h5V16H3zm8 0h5V10h-5zm8 0h5V4h-5zm8 0h3V13h-3z"/></svg><div><h1>Utilization</h1><p>Live wireless metrics</p></div></div>
+    <div class="connection">{% if platform_hosted %}<a class="muted" href="/apps">WLAN Pi Apps</a>{% endif %}<span id="connection" class="status neutral">Connecting</span><span id="updated" class="muted">Waiting for the service</span></div>
+  </header>
+  <main id="main" class="shell">
+    <section class="session-bar" aria-label="Capture session">
+      <div><div class="eyebrow">Capture session</div><div class="session-title"><span id="phase" class="status neutral">—</span><strong id="tuning">No session</strong></div><p id="session-detail" class="muted">Open this page without changing capture.</p></div>
+      <div class="actions"><span id="logging-state" class="logging-state">Logging —</span><button id="logging-toggle" class="button secondary" disabled>Start logging</button><button id="export-toggle" class="button secondary" disabled>Start beacon export</button><button id="session-toggle" class="button primary" disabled>Start session</button></div>
+    </section>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <div id="error" class="notice error" role="alert" hidden></div>
+    <p id="login-required" class="notice" hidden>Sign in to WLAN Pi to reconnect. Capture continues in the managed service. <a href="/login" target="_blank" rel="noopener">Open WLAN Pi sign-in</a></p>
+    <p id="capture-health" class="method-note" aria-live="off">Capture quality unavailable</p>
+    <nav class="navigation" aria-label="Views">
+      <button class="nav-item selected" data-tab="overview" aria-current="page">Overview</button>
+      <button class="nav-item" data-tab="bssids">BSSIDs <span id="bssid-count" class="count">—</span></button>
+      <button class="nav-item" data-tab="hosts">Hosts <span id="host-count" class="count">—</span></button>
+      <button class="nav-item" data-tab="logs">Log files <span id="file-count" class="count">—</span></button>
+      <span class="nav-caption">Shared <span id="window-label">120</span>-second history</span>
+    </nav>
+    <section id="overview" class="panel" aria-label="Overview">
+      <section class="composition" aria-labelledby="composition-title">
+        <div class="section-heading"><h2 id="composition-title">Channel composition</h2><div id="composition-counts" class="composition-counts"></div></div>
+        <div class="composition-layout">
+          <div class="radio-details"><h3>Strongest radio</h3><p id="composition-detail">Waiting for beacon observations</p><p id="composition-current" class="radio-identity"></p><p id="radio-counts" class="muted"></p>
+            <div class="table-wrap"><table><caption class="sr-only">BSSIDs grouped with the strongest radio. The QBSS source is marked when it belongs to this radio.</caption><thead><tr><th scope="col">SSID / BSSID</th><th scope="col">RSSI</th><th scope="col">QBSS stations</th></tr></thead><tbody id="radio-bssids"></tbody></table></div>
+          </div>
+          <div class="selection-details"><h3>Selected BSSIDs</h3><div id="selected-bssids" class="selected-bssids"></div><p class="muted">Automatic metric sources; these may belong to different radios.</p></div>
+        </div>
+      </section>
+      <div class="section-heading"><h2>On this channel</h2><span id="sample-time" class="muted">No completed sample</span></div>
+      <div id="metrics" class="metric-grid"></div>
+      <div class="section-heading graph-heading"><h2>Rolling history</h2><label class="mobile-graph">Graph <select id="graph-choice" aria-label="Visible graph on small screens"><option value="cu">Utilization</option><option value="total_station_count">Stations &amp; clients</option><option value="retry">Retries</option><option value="beacons">Beacon loss</option><option value="admission_capacity">Admission capacity</option><option value="bssid_history">BSSIDs</option></select></label><span class="muted desktop-caption">Gaps mean unavailable data</span></div>
+      <div id="graphs" class="graph-grid"></div>
+      <p class="method-note">AP QBSS utilization and station counts are advertised measurements. Observed active clients are distinct eligible client MAC addresses heard on the channel.</p>
+    </section>
+    <section id="bssids" class="panel" aria-label="BSSID table" hidden>
+      <div class="section-heading"><h2>Observed BSSIDs</h2><span class="muted">Latest beacon values · automatically selected reporting source</span></div>
+      <div class="table-wrap"><table><caption class="sr-only">Latest beacon values and rolling-window observations. Column buttons change table order only.</caption><thead><tr>
+        <th scope="col"><button data-sort="ssid">SSID / BSSID</button></th><th scope="col"><button data-sort="latest_ap_name">AP name</button></th><th scope="col" aria-sort="descending"><button data-sort="latest_rssi_dbm">RSSI ↓</button></th><th scope="col"><button data-sort="latest_qbss_cu_percent">QBSS CU</button></th><th scope="col"><button data-sort="latest_station_count">QBSS stations</button></th><th scope="col"><button data-sort="window_unique_client_mac_count">Observed clients · 120s</button></th><th scope="col"><button data-sort="window_retry_percent">Retries · 120s</button></th><th scope="col">Admission · 32µs units</th><th scope="col">Last beacon</th>
+      </tr></thead><tbody id="bssid-rows"></tbody></table><p id="bssid-empty" class="empty">No beacon observations in the current window.</p></div>
+      <p class="method-note">QBSS fields come from each BSSID's latest beacon. Missing fields remain unavailable. Sorting changes only this table, never the reporting BSSID.</p>
+    </section>
+    <section id="hosts" class="panel" aria-label="Observed wireless hosts" hidden>
+      <div class="section-heading"><h2>Observed wireless clients</h2><span id="host-summary" class="muted">Shared 120-second window</span></div>
+      <p id="host-limit" class="notice" role="status" hidden>Showing the most recently tracked hosts. Some host detail counters may be incomplete on very busy channels; the observed client count is unchanged.</p>
+      <div class="table-wrap"><table><caption class="sr-only">Observed wireless clients and data frames in the shared rolling window. Column buttons change table order only.</caption><thead><tr>
+        <th scope="col"><button data-host-sort="mac">MAC</button></th><th scope="col"><button data-host-sort="vendor">Vendor / local indicator</button></th><th scope="col"><button data-host-sort="ssid">SSID</button></th><th scope="col"><button data-host-sort="bssid">BSSID</button></th><th scope="col" aria-sort="descending"><button data-host-sort="last_activity">Last activity ↓</button></th><th scope="col"><button data-host-sort="last_tx_rssi_dbm">Last transmitted RSSI</button></th><th scope="col"><button data-host-sort="tx_frames">Tx frames</button></th><th scope="col"><button data-host-sort="rx_frames">Rx frames</button></th><th scope="col"><button data-host-sort="tx_retry_percent">Tx retry %</button></th>
+      </tr></thead><tbody id="host-rows"></tbody></table><p id="host-empty" class="empty">No observed wireless clients in the current window.</p></div>
+      <p class="method-note">Tx/Rx counts describe captured data frames between a client and a known BSSID. BSSID/SSID show the latest observed context, not confirmed association. Last activity includes traffic to or from the client. RSSI is measured at the WLAN Pi only when the client transmits; unavailable values show —. Tx retries use eligible transmitted data frames, including each captured retry. Locally administered addresses do not identify a manufacturer reliably.</p>
+    </section>
+    <section id="logs" class="panel" aria-label="Log downloads" hidden>
+      <div class="section-heading"><h2>Log files</h2><button id="refresh-files" class="button secondary small">Refresh files</button></div>
+      <div class="section-heading"><div><h3>Beacon pcapng export</h3><p id="export-status" class="muted" role="status">Beacon export off</p></div><button id="export-toggle-files" class="button secondary small" disabled>Start beacon export</button></div>
+      <p id="export-policy" class="method-note">Original beacon packets from the shared capture. Closed files appear below.</p>
+      <div class="log-intro"><div><h3 id="log-heading">Logging status unavailable</h3><p id="log-detail">CSV statistics and beacon JSONL use the same capture session.</p><ul id="active-files" class="active-files"></ul></div><div class="log-hint">Downloads appear after a segment closes. Stop logging to close the current files while capture and history continue.</div></div>
+      <div id="file-error" class="notice error" role="status" hidden></div><div id="file-list" class="file-list"></div><p id="file-empty" class="empty">No closed log segments yet.</p>
+    </section>
+    <footer><span>Utilization</span><span id="session-id">No capture session</span><span>One session. Every view.</span></footer>
+  </main>
+  <dialog id="start-dialog" aria-labelledby="dialog-title"><form id="start-form">
+    <div class="dialog-header"><div><span class="eyebrow">New capture</span><h2 id="dialog-title">Start a session</h2></div><button type="button" id="cancel-start" class="icon-button" aria-label="Close session setup">×</button></div>
+    <p class="muted">All views will share this channel and its rolling history.</p>
+    <div class="form-grid">
+      <label>Band<select name="band" id="band"><option value="2.4">2.4 GHz</option><option value="5">5 GHz</option><option value="6">6 GHz</option></select></label>
+      <label>Capture width<select name="channel_width" id="channel-width"><option value="">Band default (20 MHz)</option><option value="20">20 MHz</option><option value="40">40 MHz</option></select></label>
+      <label class="wide"><span id="channel-label">Primary channel</span><select name="channel" id="channel" data-channels='{{ channel_choices|tojson }}' required>{% for channel in channel_choices["2.4"] %}<option value="{{ channel }}">{{ channel }}</option>{% endfor %}</select></label>
+      <div class="centers wide" id="centers" hidden><label id="center-one-field" hidden>Center frequency 1<select name="center_frequency1_mhz" id="center-one"></select></label><label id="center-two" hidden>Center frequency 2<select name="center_frequency2_mhz" id="center-two-choice"></select></label></div>
+    </div>
+    <label class="check"><input id="start-logging" name="logging_enabled" type="checkbox"> Start CSV and beacon JSONL logging</label>
+    <label class="check"><input id="start-export" name="export_enabled" type="checkbox"> Start beacon pcapng export</label>
+    <details><summary>Capture source</summary><div class="form-grid"><label>Backend<select name="capture_backend"><option value="direct">Direct capture</option><option value="core">Core · optional</option></select></label><label>Interface<select name="iface" id="iface"><option value="auto">Automatic discovery</option></select></label><button type="button" id="refresh-interfaces" class="button secondary small">Refresh interfaces</button><label class="wide">Network namespace · optional<input name="netns" id="netns" spellcheck="false" placeholder="Automatic discovery"></label></div><p id="interface-note" class="muted" role="status"></p></details>
+    <div id="form-error" class="notice error" role="alert" hidden></div><div class="dialog-footer"><button type="button" id="cancel-bottom" class="button secondary">Cancel</button><button type="submit" id="start-submit" class="button primary">Start session</button></div>
+  </form></dialog>
+</body>
+</html>

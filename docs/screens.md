@@ -1,6 +1,6 @@
 # Screen Reference
 
-This document explains the six WLANPi Beacon Live screens and their metric
+This document explains the six Utilization screens and their metric
 selection rules. For a short operational overview, start with the
 [README](../README.md). For analyzer invariants, see
 [architecture.md](architecture.md).
@@ -62,7 +62,7 @@ removing it would label a partial interval as a full one-second RET/BL sample.
 The Utilization screen graphs AP-advertised QBSS channel utilization for the
 automatically selected QBSS BSSID.
 
-![WLANPi Beacon Live utilization screen](docs/images/channel-utilization_screen.png)
+![Utilization utilization screen](images/channel-utilization_screen.png)
 
 Summary fields:
 
@@ -82,7 +82,7 @@ currently retained BSSID advertises usable QBSS information.
 The Admission screen uses the same selected QBSS BSSID as Utilization and shows
 its latest advertised admission capacity.
 
-![WLANPi Beacon Live admission capacity screen](docs/images/admission-capacity_screen.png)
+![Utilization admission capacity screen](images/admission-capacity_screen.png)
 
 Summary fields:
 
@@ -101,7 +101,7 @@ It also reports unique client MAC addresses observed in eligible data frames.
 These remain separate metrics: the displayed QBSS sum is AP-advertised, while
 the MAC count is locally observed.
 
-![WLANPi Beacon Live station count screen](docs/images/total-station-count_screen.png)
+![Utilization station count screen](images/total-station-count_screen.png)
 
 Summary fields:
 
@@ -145,7 +145,7 @@ The analyzer excludes:
 
 Retries graphs one independent percentage for each completed capture second:
 
-![WLANPi Beacon Live retry screen](docs/images/retry-percentage_screen.png)
+![Utilization retry screen](images/retry-percentage_screen.png)
 
 ```text
 frames with Retry bit set / retry-eligible frames × 100
@@ -175,6 +175,11 @@ Exclude:
 - group-addressed frames;
 - control and extension frames; and
 - frames without a readable Retry bit.
+
+Frames explicitly reported with bad FCS are excluded because header identities
+and Retry bits are not trustworthy. Unknown/unverified FCS remains accepted.
+The same guard prevents damaged headers from creating observed clients or
+beacon BSSIDs. See [busy-channel validation](busy-channel-validation.md).
 
 Every retry transmission is counted. Multiple retries of one original frame
 are not deduplicated.
@@ -206,7 +211,7 @@ beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 Beacon Loss graphs the percentage of expected beacons not received during each
 completed capture second across all recently heard BSSIDs above -75 dBm.
 
-![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
+![Utilization beacon loss screen](images/beacon-loss_screen.png)
 
 Summary fields:
 
@@ -249,7 +254,7 @@ It is refreshed on the same timer as every graph screen and reflects the newest
 published analyzer state; a temporarily missing right-edge graph slot does not
 erase it.
 
-![WLANPi Beacon Live composition screen](docs/images/composition_screen.png)
+![Utilization composition screen](images/composition_screen.png)
 
 It shows:
 
@@ -260,7 +265,8 @@ It shows:
 - `Radio Stations` in the interactive CLI: sum of the newest advertised QBSS
   station counts for those strongest-radio BSSIDs; missing counts are zero and
   client MACs are not deduplicated across BSSIDs;
-- `AP`: supported vendor AP-name information when present;
+- AP name: supported vendor AP-name information when present; the 128×128
+  composition line omits the `AP ` prefix to leave more room for long names;
 - `Vendor`: supported vendor identification when present.
 
 The footer cycles every two seconds through BSSIDs grouped with the strongest
@@ -304,3 +310,27 @@ BSSIDs and timing is not used as a selection tie-breaker.
 
 These values describe different observations and must not be presented as
 interchangeable measurements.
+
+## Web organization
+
+The web overview applies the interactive TUI's separation of radio membership
+and selected metric sources. **Channel composition** comes first: channel-wide
+rolling counts, strongest estimated radio AP/vendor, its displayed SSID/BSSID,
+and all BSSIDs grouped with that radio. Mark the analyzer-selected QBSS source
+when it belongs to the displayed radio. Keep the full BSSID visible alongside
+SSID, RSSI and advertised stations. The strongest-radio footer continues using
+the analyzer's automatic cycling; it is not a manual selector.
+
+**Selected BSSIDs** appears separately and identifies the existing shared-screen
+sources: QBSS for Utilization/Admission, `TOP` for station maximum, highest
+one-second retry percentage for retries, and strongest eligible beacon BSSID
+for loss. Include each source's SSID, BSSID and RSSI, with AP name when known.
+Station maximum may come from a different BSSID than QBSS; its source label
+distinguishes advertised stations from rolling observed clients. These maxima
+do not replace the channel-wide sums/ratios in the metric cards or graphs.
+
+Graphs use the same identities as their corresponding screens. Table sorting,
+navigation and browser lifetime cannot change a reporting source, recompute
+metrics, restart capture or clear history. A future local survey curve will
+remain separate from AP-advertised CU; it is hidden in the current web interface
+pending adapter verification.

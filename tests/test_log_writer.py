@@ -37,10 +37,10 @@ def test_live_log_paths_use_generated_timestamped_filenames() -> None:
     )
 
     assert paths.stats_csv == (
-        log_dir / "beacon_live_20260710T123045123456-0600_stats.csv"
+        log_dir / "utilization_20260710T123045123456-0600_stats.csv"
     )
     assert paths.beacons_jsonl == (
-        log_dir / "beacon_live_20260710T123045123456-0600_beacons.jsonl"
+        log_dir / "utilization_20260710T123045123456-0600_beacons.jsonl"
     )
 
 
@@ -330,6 +330,7 @@ def test_low_disk_stops_logging_and_writes_markers_to_both_formats(
     assert LOW_DISK_END_MESSAGE in jsonl_rows[-1]["message"]
     assert jsonl_rows[-1]["free_bytes"] == 400
     assert jsonl_rows[-1]["threshold_bytes"] == 500
+    assert {item.path for item in service.closed_logs} == {paths.stats_csv, paths.beacons_jsonl}
 
 
 def test_logging_service_rolls_to_predictable_new_files(
@@ -353,12 +354,34 @@ def test_logging_service_rolls_to_predictable_new_files(
     assert second_paths != first_paths
     assert second_paths.beacons_jsonl is not None
     assert second_paths.beacons_jsonl.name.endswith("_part0002_beacons.jsonl")
+    assert {item.path for item in service.closed_logs} == {first_paths.stats_csv, first_paths.beacons_jsonl}
+    assert not {second_paths.stats_csv, second_paths.beacons_jsonl} & {item.path for item in service.closed_logs}
     service.write_beacon(_beacon(timestamp=1001.0))
     service.stop()
 
     assert first_paths.beacons_jsonl is not None
     assert len(first_paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()) == 1
     assert len(second_paths.beacons_jsonl.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(service.closed_logs) == 4
+    for item in service.closed_logs:
+        info = item.path.stat()
+        assert (item.device, item.inode, item.size_bytes, item.mtime_ns) == (
+            info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
+def test_closed_log_identity_comes_from_open_descriptor_not_replaced_path(tmp_path):
+    path = tmp_path / "stats.csv"
+    writer = CaptureLogWriter(stats_csv=path, metadata=LogMetadata(interface="wlan0", channel="1"))
+    writer.open()
+    original = path.stat()
+    path.rename(tmp_path / "moved.csv")
+    path.write_text("different file\n")
+    writer.close()
+    assert len(writer.closed_logs) == 1
+    assert writer.closed_logs[0].inode == original.st_ino
+    assert writer.closed_logs[0].inode != path.stat().st_ino
+    writer.close()
+    assert len(writer.closed_logs) == 1
 
 
 def _logging_service(tmp_path: Path, **kwargs: object) -> LoggingService:

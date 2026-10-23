@@ -168,30 +168,35 @@ def test_production_copy_rejects_inherited_system_packages(tmp_path, isolated_en
         install_app_venv._venv_site_packages()
 
 
-def test_core_client_install_stays_isolated_and_can_use_offline_wheels(tmp_path, isolated_env, monkeypatch):
+@pytest.mark.parametrize("extra", ["core", "web"])
+def test_optional_dependencies_stay_isolated_and_can_use_offline_wheels(tmp_path, isolated_env, monkeypatch, extra):
     monkeypatch.setattr(install_app_venv.sys, 'prefix', str(isolated_env))
     monkeypatch.setattr(install_app_venv.site, 'getsitepackages',
                         lambda: [str(isolated_env / 'lib/python3.13/site-packages')])
     wheels = tmp_path / 'wheels'
     wheels.mkdir()
     commands = []
-    install_app_venv._install_core_client(ROOT, wheel_directory=wheels,
+    install_app_venv._install_runtime_extra(ROOT, extra=extra, wheel_directory=wheels,
         command_runner=lambda command, **kw: commands.append((command, kw)))
     command, kwargs = commands[0]
     assert command[:5] == [sys.executable, '-I', '-m', 'pip', '--isolated']
     assert '--only-binary=:all:' in command and '--no-index' in command
     assert command[command.index('--find-links') + 1] == str(wheels)
     assert kwargs == {'check': True}
+    import tomllib
+    declared = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['optional-dependencies'][extra]
+    assert command[-len(declared):] == declared
 
 
-def test_core_dependency_failure_preserves_the_existing_app(tmp_path, isolated_env):
+@pytest.mark.parametrize("extra", ["core", "web"])
+def test_dependency_failure_preserves_the_existing_app(tmp_path, isolated_env, extra):
     site_packages = next(isolated_env.glob('lib/python*/site-packages'))
     package = site_packages / 'beacon_live'
     package.mkdir()
     marker = package / 'previous.py'
     marker.write_text('# previous working app\n')
     result = subprocess.run([str(isolated_env / 'bin/python'), str(INSTALL),
-        '--source-root', str(ROOT), '--with-core', '--wheel-dir', str(tmp_path / 'missing')],
+        '--source-root', str(ROOT), '--with-' + extra, '--wheel-dir', str(tmp_path / 'missing')],
         capture_output=True, text=True)
     assert result.returncode != 0 and 'wheel directory not found' in result.stderr
     assert marker.exists()
@@ -201,7 +206,7 @@ def test_core_client_refuses_system_python_before_pip(monkeypatch, tmp_path):
     monkeypatch.setattr(install_app_venv.sys, 'prefix', str(tmp_path))
     monkeypatch.setattr(install_app_venv.sys, 'base_prefix', str(tmp_path))
     with pytest.raises(SystemExit, match='system Python will not be modified'):
-        install_app_venv._install_core_client(ROOT, command_runner=lambda *a, **kw: pytest.fail('No pip'))
+        install_app_venv._install_runtime_extra(ROOT, extra="core", command_runner=lambda *a, **kw: pytest.fail('No pip'))
 
 
 def test_fresh_production_install_launchers_replay_and_repeat_install(tmp_path, isolated_env):
@@ -209,7 +214,7 @@ def test_fresh_production_install_launchers_replay_and_repeat_install(tmp_path, 
     command = [str(isolated_env / "bin/python"), str(INSTALL), "--source-root", str(ROOT)]
     installed = subprocess.run(command, cwd=tmp_path, env=variables, capture_output=True, text=True)
     assert installed.returncode == 0, installed.stderr
-    for launcher in ("beacon-live", "wlanpi-beacon-live"):
+    for launcher in ("utilization", "wlanpi-utilization", "beacon-live", "wlanpi-beacon-live"):
         help_result = subprocess.run(
             [str(isolated_env / "bin" / launcher), "--help"], cwd=tmp_path,
             env=variables, capture_output=True, text=True,
@@ -228,6 +233,11 @@ def test_fresh_production_install_launchers_replay_and_repeat_install(tmp_path, 
     assert replay.returncode == 0, replay.stderr
     assert "duration_seconds: 1.15" in replay.stdout
     package = next(isolated_env.glob("lib/python*/site-packages/beacon_live"))
+    for asset in ("templates/utilization.html", "web_static/utilization.css", "web_static/utilization.js"):
+        assert (package / asset).read_bytes() == (ROOT / "beacon_live" / asset).read_bytes()
+    web_help = subprocess.run([str(isolated_env / "bin/wlanpi-utilization"), "web", "--help"],
+        cwd=tmp_path, env=variables, capture_output=True, text=True)
+    assert web_help.returncode == 0 and "--url-prefix" in web_help.stdout
     stale = package / "old_module.py"
     stale.write_text("# obsolete installation\n")
     repeated = subprocess.run(command, cwd=tmp_path, env=variables, capture_output=True, text=True)

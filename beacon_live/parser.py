@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from functools import lru_cache
+import math
 from typing import Iterable, Iterator, Optional, Union
 
 from beacon_live.channel import definition_from_operation_fields
@@ -50,6 +51,7 @@ TSHARK_FRAME_FIELD_NAMES = (
 # address resolution are useful metadata, but are not capture prerequisites.
 TSHARK_REQUIRED_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[:14]
 TSHARK_METADATA_FRAME_FIELD_NAMES = TSHARK_FRAME_FIELD_NAMES[14:]
+TSHARK_HOST_FIELD_NAMES = ("wlan.ta.oui_resolved", "wlan.ra.oui_resolved")
 
 # Request optional fields only when the installed TShark reports them.
 TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
@@ -72,6 +74,8 @@ TSHARK_LIVE_OPTIONAL_FRAME_FIELD_NAMES = (
     "wlan.eht.eht_operation_information.disabled_subchannel_bitmap",
     "frame.cap_len",
     "frame.len",
+    "radiotap.flags.badfcs",
+    "wlan.fcs.status",
 )
 
 TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES = (
@@ -82,8 +86,6 @@ TSHARK_DIAGNOSTIC_FRAME_FIELD_NAMES = (
     "radiotap.he_mu.bw_from_sig_a",
     "radiotap.u_sig.common.bw",
     "radiotap.u_sig.value.mu_ppdu.punctured_channel_information",
-    "radiotap.flags.badfcs",
-    "wlan.fcs.status",
     "wlan.seq",
     "wlan.frag",
     "wlan.qos.tid",
@@ -106,11 +108,14 @@ _TSHARK_OCCURRENCE_FIELD_NAMES = frozenset(
         "wlan.bssid",
         "wlan.ta",
         "wlan.ra",
+        "wlan.ta.oui_resolved",
+        "wlan.ra.oui_resolved",
         "wlan.sa",
         "wlan.da",
         "wlan.seq",
         "wlan.frag",
         "wlan.qos.tid",
+        "wlan.fcs.status",
     }
 )
 
@@ -143,6 +148,8 @@ def parse_tshark_row(row: str, *, ssid_encoding: str = 'text') -> Optional[Beaco
     try:
         timestamp = float(timestamp_text)
     except ValueError:
+        return None
+    if not math.isfinite(timestamp):
         return None
 
     bssid = bssid_text.strip()
@@ -314,6 +321,8 @@ def parse_tshark_frame_row(
         timestamp = float(timestamp_text)
     except ValueError:
         return None
+    if not math.isfinite(timestamp):
+        return None
 
     frame_type = _parse_optional_int(frame_type_text, minimum=0, maximum=3)
     frame_subtype = _parse_optional_int(
@@ -418,14 +427,12 @@ def parse_tshark_capture_record(
         return (record,) if record is not None else ()
 
     split_fields = [value.split(TSHARK_MULTI_VALUE_SEPARATOR) for value in fields]
-    occurrence_count = max(
-        (
-            len(values)
-            for name, values in zip(field_names, split_fields)
-            if name in _TSHARK_OCCURRENCE_FIELD_NAMES
-        ),
-        default=1,
-    )
+    # Addresses can repeat within one WLAN header (e.g. nested information
+    # elements). They do not establish additional MPDUs. Only actual frame
+    # type occurrences establish header count. Flat -T fields output does not
+    # insert missing values; never copy a singleton address/Retry bit into
+    # several headers when its association is ambiguous.
+    occurrence_count = len(split_fields[field_names.index("wlan.fc.type")])
     records: list[FrameRecord] = []
     for index in range(occurrence_count):
         expanded = []
@@ -438,7 +445,7 @@ def parse_tshark_capture_record(
                 expanded.append(values[0])
             elif len(values) == occurrence_count:
                 expanded.append(values[index])
-            elif len(values) == 1:
+            elif occurrence_count == 1:
                 expanded.append(values[0])
             else:
                 expanded.append("")
@@ -502,6 +509,8 @@ def parse_tshark_live_record(
         frame_subtype = int(value("wlan.fc.subtype"), 0)
     except (TypeError, ValueError):
         return ()
+    if not math.isfinite(timestamp) or not 0 <= frame_type <= 3 or not 0 <= frame_subtype <= 15:
+        return ()
 
     # Beacon rows need QBSS, operation, vendor, and truncation fields.
     if frame_type == 0 and frame_subtype == 8:
@@ -509,7 +518,9 @@ def parse_tshark_live_record(
         return (record,) if record is not None else ()
 
     retry = _parse_optional_bool(value("wlan.fc.retry"))
-    if retry is _MALFORMED:
+    bad_fcs = _parse_optional_bool(value("radiotap.flags.badfcs"))
+    fcs_status = _parse_optional_int(value("wlan.fcs.status"), minimum=0)
+    if retry is _MALFORMED or bad_fcs is _MALFORMED or fcs_status is _MALFORMED:
         return ()
     if retry is None:
         frame_control = _parse_optional_int(value("wlan.fc"), minimum=0)
@@ -529,6 +540,11 @@ def parse_tshark_live_record(
             receiver_address=_parse_optional_mac(value("wlan.ra")),
             source_address=_parse_optional_mac(value("wlan.sa")),
             destination_address=_parse_optional_mac(value("wlan.da")),
+            rssi_dbm=_host_rssi(value("radiotap.dbm_antsignal")),
+            transmitter_vendor=value("wlan.ta.oui_resolved").strip() or None,
+            receiver_vendor=value("wlan.ra.oui_resolved").strip() or None,
+            radiotap_bad_fcs=bad_fcs,
+            fcs_status=fcs_status,
         ),
     )
 
@@ -545,6 +561,8 @@ def _parse_named_tshark_frame_fields(
     record = parse_tshark_frame_row(core_row, ssid_encoding=ssid_encoding)
     if record is None or record.frame_type is None:
         return None
+    record = replace(record, transmitter_vendor=values.get("wlan.ta.oui_resolved", "").strip() or None,
+                     receiver_vendor=values.get("wlan.ra.oui_resolved", "").strip() or None)
 
     integers: dict[str, Optional[int]] = {}
     for name in TSHARK_OPTIONAL_FRAME_FIELD_NAMES:
@@ -633,6 +651,7 @@ def _parse_named_tshark_frame_fields(
         radio_frequency_mhz=radio_frequency,
         phy_bandwidth=(";".join(phy_bandwidth_parts) or None),
         fcs_status=integers.get("wlan.fcs.status"),
+        radiotap_bad_fcs=_parse_optional_bool(values.get("radiotap.flags.badfcs", "")),
         sequence_number=integers.get("wlan.seq"),
         fragment_number=integers.get("wlan.frag"),
         qos_tid=integers.get("wlan.qos.tid"),
@@ -692,6 +711,11 @@ def _vendor_ap_identity(
         if name:
             return name, vendor
     return None, None
+
+
+def _host_rssi(value):
+    parsed = _parse_optional_int(value, minimum=-200, maximum=100)
+    return None if parsed is _MALFORMED else parsed
 
 
 def _vendor_from_resolved_bssid(

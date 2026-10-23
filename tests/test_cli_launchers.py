@@ -7,6 +7,7 @@ import pytest
 
 from scripts.install_cli_launchers import COMMANDS
 from scripts.install_cli_launchers import MANAGED_MARKER
+from scripts.install_cli_launchers import LEGACY_MARKER
 from scripts.install_cli_launchers import install_launchers
 
 
@@ -119,3 +120,13 @@ def test_install_launchers_does_not_replace_an_unmanaged_command(
 
     assert unmanaged.read_text(encoding="utf-8") == "#!/bin/sh\nexit 0\n"
     assert not (launcher_dir / "wlanpi-beacon-live").exists()
+
+
+def test_legacy_managed_launchers_upgrade_with_aliases_intact(tmp_path):
+    app_bin, commands = tmp_path / "app", tmp_path / "commands"
+    _create_targets(app_bin)
+    commands.mkdir()
+    (commands / "wlanpi-beacon-live").write_text(f"#!/bin/sh\n{LEGACY_MARKER}\nexit 1\n")
+    install_launchers(app_bin=app_bin, launcher_dir=commands)
+    assert {path.name for path in commands.iterdir()} == set(COMMANDS)
+    assert MANAGED_MARKER in (commands / "wlanpi-beacon-live").read_text()

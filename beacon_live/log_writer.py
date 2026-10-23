@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import queue
 import shutil
 import threading
@@ -18,6 +19,7 @@ from typing import IO, Callable, Optional
 
 from beacon_live.channel import ChannelDefinition
 from beacon_live.models import BeaconRecord
+from beacon_live.models import ClosedLog
 from beacon_live.models import SecondStats
 
 STATS_CSV_FIELDS = [
@@ -134,7 +136,7 @@ def build_live_log_paths(
     else:
         capture_time = timestamp
     stamp = capture_time.strftime("%Y%m%dT%H%M%S%f%z")
-    basename = f"beacon_live_{stamp}"
+    basename = f"utilization_{stamp}"
     if part_number is not None:
         basename = f"{basename}_part{part_number:04d}"
     return LiveLogPaths(
@@ -164,6 +166,7 @@ class CaptureLogWriter:
         self._stats_writer: Optional[csv.DictWriter] = None
         self._beacons_file: Optional[IO[str]] = None
         self._defer_flush = False
+        self.closed_logs: list[ClosedLog] = []
 
     def __enter__(self) -> "CaptureLogWriter":
         self.open()
@@ -199,13 +202,31 @@ class CaptureLogWriter:
             raise
 
     def close(self) -> None:
-        if self._stats_file is not None:
-            self._stats_file.close()
-            self._stats_file = None
-            self._stats_writer = None
-        if self._beacons_file is not None:
-            self._beacons_file.close()
-            self._beacons_file = None
+        error = None
+        for attribute, path in (("_stats_file", self._stats_csv_path),
+                                ("_beacons_file", self._beacons_jsonl_path)):
+            stream = getattr(self, attribute)
+            if stream is None:
+                continue
+            try:
+                stream.flush()
+                info = os.fstat(stream.fileno())
+                stream.close()
+                self.closed_logs.append(ClosedLog(
+                    path.absolute(), info.st_dev, info.st_ino, info.st_size,
+                    info.st_mtime_ns, time.time(),
+                ))
+            except OSError as exc:
+                error = exc
+            finally:
+                setattr(self, attribute, None)
+                try:
+                    stream.close()
+                except OSError as exc:
+                    error = exc
+        self._stats_writer = None
+        if error is not None:
+            raise error
 
     def set_metadata(self, metadata: LogMetadata) -> None:
         self._metadata = metadata
@@ -366,6 +387,11 @@ class LoggingService:
         self._next_rotation: Optional[float] = None
         self._current_paths: Optional[LiveLogPaths] = None
         self._pending_event: Optional[LoggingEvent] = None
+        self._closed_logs: tuple[ClosedLog, ...] = ()
+
+    @property
+    def closed_logs(self) -> tuple[ClosedLog, ...]:
+        return self._closed_logs
 
     @property
     def active(self) -> bool:
@@ -546,6 +572,8 @@ class LoggingService:
                 writer.close()
             except OSError:
                 pass
+
+            self._closed_logs = (self._closed_logs + tuple(writer.closed_logs))[-128:]
 
     def _enqueue(self, record: object) -> None:
         work_queue = self._write_queue

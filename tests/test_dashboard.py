@@ -183,6 +183,18 @@ def test_terminal_dashboard_renders_runtime_notice_in_band() -> None:
     )
 
 
+def test_terminal_attachment_notice_expires_but_runtime_warning_remains():
+    now = [0.0]
+    dashboard = TerminalDashboard(clock=lambda: now[0])
+    dashboard.set_notice("Capture data incomplete")
+    dashboard.set_transient_notice("Session already running")
+    assert "Session already running" in dashboard.render()
+    now[0] = 10.0
+    rendered = dashboard.render()
+    assert "Session already running" not in rendered
+    assert "Warning: Capture data incomplete" in rendered
+
+
 def _stats(
     second: int,
     *,

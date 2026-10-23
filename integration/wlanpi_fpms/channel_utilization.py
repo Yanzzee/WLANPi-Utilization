@@ -1,4 +1,4 @@
-"""Thin WLAN Pi FPMS adapter for the beacon-live foreground command.
+"""Thin WLAN Pi FPMS adapter for the Utilization command.
 
 This module deliberately contains launch, display, and menu wiring only. QBSS
 capture, selection, aggregation, summaries, logging, and frame rendering remain
@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
-EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-beacon-live"
+EXECUTABLE = "/opt/wlanpi-beacon-live/bin/wlanpi-utilization"
 FRAME_PATH = Path("/run/wlanpi-beacon-live/display.ppm")
 LOG_DIR = Path("/var/log/wlanpi-beacon-live")
 INTERFACE = os.environ.get("WLANPI_UTILIZATION_IFACE", "auto")
@@ -30,6 +30,7 @@ NAVIGATION_DEBOUNCE_SECONDS = 0.2
 CAPTURE_STOP_TIMEOUT_SECONDS = 30
 CORE_CAPTURE_STOP_TIMEOUT_SECONDS = 90
 LOGGING_STATUS_SECONDS = 1.0
+MENU_POLL_SECONDS = 2.0
 LOW_DISK_STATUS_REASON = "disk_space_nearly_full"
 
 _WHITE = (255, 255, 255)
@@ -100,6 +101,18 @@ def _capture_stop_timeout(command: list[str]) -> int:
     return CAPTURE_STOP_TIMEOUT_SECONDS
 
 
+def configured_runtime_mode() -> str:
+    mode = os.environ.get("WLANPI_UTILIZATION_RUNTIME_MODE")
+    if mode is None:
+        try:
+            mode = json.loads(BACKEND_CONFIG.read_text()).get("runtime_mode", "managed")
+        except FileNotFoundError:
+            mode = "managed"
+        except (OSError, ValueError, AttributeError):
+            return "invalid"
+    return mode if isinstance(mode, str) and mode in {"standalone", "managed"} else "invalid"
+
+
 def build_launch_command(
     *,
     band: str,
@@ -137,13 +150,20 @@ def build_launch_command(
     if NETWORK_NAMESPACE is not None:
         command.extend(["--netns", NETWORK_NAMESPACE])
     command.extend(["--capture-backend", configured_capture_backend()])
+    mode = configured_runtime_mode()
+    if mode == "managed":
+        command.append("--managed")
+    elif mode == "standalone":
+        command.append("--standalone")
+    elif mode == "invalid":
+        command.append("--invalid-runtime-mode")  # Reject before touching a radio.
     return command
 
 
 def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, object]:
     """Return one FPMS Apps menu node with band/channel-first selection."""
     app = ChannelUtilizationApp(g_vars)
-    return {
+    menu = {
         "name": "Utilization",
         "action": [
             _band_menu(app, "2.4 GHz", "2.4", _24_GHZ_CHANNELS),
@@ -158,6 +178,132 @@ def build_channel_utilization_menu(g_vars: dict[str, object]) -> dict[str, objec
             ),
         ],
     }
+    if configured_runtime_mode() == "managed":
+        controller = _SessionMenu(app, menu)
+        g_vars["channel_utilization_menu_enter"] = controller.enter
+        g_vars["channel_utilization_menu_return"] = controller.returned
+        g_vars["channel_utilization_menu_poll"] = controller.poll
+    return menu
+
+
+class _SessionMenu:
+    """Read shared status off-thread; change menu state only on FPMS's UI path."""
+
+    def __init__(self, app, menu):
+        self.app, self.menu, self.g_vars = app, menu, app.g_vars
+        self.idle_actions = list(menu["action"])
+        self.signature = ("uninitialized",)
+        self.last_poll = float("-inf")
+        self.lock = threading.Lock()
+        self.in_flight = False
+        self.result = None
+        self.generation = 0
+        self.worker = None
+
+    def _read(self):
+        try:
+            state = _managed_session_status()
+            if state is not None:
+                _session_channel(state)  # Validate before handing it to the UI.
+            return state
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            LOGGER.exception("Unable to refresh Utilization menu")
+            return {"unavailable": True}
+
+    def _apply(self, state):
+        if state is None:
+            signature, actions = ("idle",), self.idle_actions
+        elif state.get("unavailable"):
+            signature = ("unavailable",)
+            actions = [{"name": "Session unavailable", "action": _resume_action(self.app)}]
+        elif state["phase"] == "stopping":
+            signature = ("stopping", state.get("session_id"))
+            def waiting():
+                _display_status(self.g_vars, "Session stopping. Please wait.")
+                _return_to_menu(self.g_vars)
+            actions = [{"name": "Stopping Session", "action": waiting}]
+        else:
+            band, channel = _session_channel(state)
+            logging_active = bool(state.get("logging", {}).get("active"))
+            exported = state.get("beacon_export") or {}
+            export_active = bool(exported.get("requested") or exported.get("active"))
+            signature = ("active", state.get("session_id"), band, channel, logging_active, export_active)
+            actions = [
+                {"name": "Connect Session", "action": _resume_action(self.app)},
+                {"name": "Stop Session", "action": _stop_session_action(self.app)},
+                {"name": "Stop Logging" if logging_active else "Start Logging",
+                 "action": _stop_logging_action(self.app) if logging_active else _logging_only_action(self.app, band, channel)},
+                {"name": "Stop Export" if export_active else "Start Export",
+                 "action": _export_action(self.app, not export_active)},
+            ]
+        if signature == self.signature:
+            return False
+        self.menu["action"][:] = actions
+        self.signature = signature
+        return True
+
+    def _refresh(self):
+        with self.lock:
+            self.generation += 1  # Discard any read started before this action.
+            self.result = None
+        self.last_poll = self.app.clock()
+        return self._apply(self._read())
+
+    def _location(self, root_menu):
+        location = self.g_vars.get("current_menu_location", [])
+        level = root_menu
+        for depth, index in enumerate(location):
+            if not isinstance(level, list) or not 0 <= index < len(level):
+                return None
+            item = level[index]
+            if item is self.menu:
+                return location[:depth + 1] if len(location) > depth + 1 else None
+            level = item["action"]
+        return None
+
+    def enter(self):
+        if self.g_vars.get("option_selected") is self.menu["action"]:
+            self._refresh()
+
+    def returned(self, root_menu):
+        prefix = self._location(root_menu)
+        if prefix is not None:
+            self._refresh()
+            self.g_vars["current_menu_location"] = prefix + [0]
+
+    def poll(self, root_menu):
+        prefix = self._location(root_menu)
+        if self.g_vars.get("display_state") != "menu" or prefix is None:
+            return False
+        with self.lock:
+            result, self.result = self.result, None
+        changed = False
+        if result is not None:
+            generation, state = result
+            if generation == self.generation:
+                old_signature = self.signature
+                changed = self._apply(state)
+                if changed:
+                    location = self.g_vars["current_menu_location"]
+                    selection = location[-1] if len(location) == len(prefix) + 1 else 0
+                    if old_signature[0] != self.signature[0]:
+                        selection = 0
+                    self.g_vars["current_menu_location"] = prefix + [min(selection, len(self.menu["action"]) - 1)]
+        now = self.app.clock()
+        with self.lock:
+            if self.in_flight or now - self.last_poll < MENU_POLL_SECONDS:
+                return changed
+            self.in_flight = True
+            generation = self.generation
+            self.last_poll = now
+        def read_status():
+            state = self._read()
+            with self.lock:
+                self.result = (generation, state)
+                self.in_flight = False
+        self.worker = threading.Thread(target=read_status, name="utilization-menu-status", daemon=True)
+        self.worker.start()
+        return changed
 
 
 def _band_menu(
@@ -177,24 +323,25 @@ def _band_menu(
                 "name": f"{prefix} {channel} {frequency} MHz",
                 "action": [
                     {
-                        "name": "Display",
+                        "name": "Start Session",
                         "action": _launch_action(app, band, channel, False),
                     },
                     {
-                        "name": "Display + Log",
+                        "name": "Start + Log",
                         "action": _launch_action(app, band, channel, True),
                     },
                     {
                         "name": "Start Logging",
                         "action": _logging_only_action(app, band, channel),
                     },
-                    {
-                        "name": "Stop Logging",
-                        "action": _stop_logging_action(app),
-                    },
                 ],
             }
         )
+        if configured_runtime_mode() == "standalone":
+            # Preserve the explicit legacy background-logging exit control.
+            actions[-1]["action"].append({"name": "Stop Logging", "action": _stop_logging_action(app)})
+        else:
+            actions[-1]["action"].append({"name": "Start Export", "action": _export_action(app, True, band, channel)})
     return {"name": name, "action": actions}
 
 
@@ -217,6 +364,8 @@ def _logging_only_action(
 ) -> Callable[[], None]:
     def start_logging_only() -> None:
         app.start_logging_only(band=band, channel=channel)
+        if configured_runtime_mode() == "managed":
+            _return_to_menu(app.g_vars)
 
     return start_logging_only
 
@@ -226,8 +375,33 @@ def _stop_logging_action(
 ) -> Callable[[], None]:
     def stop_logging() -> None:
         app.stop_logging()
+        if configured_runtime_mode() == "managed":
+            _return_to_menu(app.g_vars)
 
     return stop_logging
+
+
+def _resume_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
+    def resume() -> None:
+        app.resume()
+
+    return resume
+
+
+def _export_action(app, enabled, band=None, channel=None):
+    def control_export():
+        app.set_beacon_export(enabled, band=band, channel=channel)
+        _return_to_menu(app.g_vars)
+    return control_export
+
+
+def _stop_session_action(app: "ChannelUtilizationApp") -> Callable[[], None]:
+    def stop_session() -> None:
+        app.stop_capture()
+        if configured_runtime_mode() == "managed":
+            _return_to_menu(app.g_vars)
+
+    return stop_session
 
 
 def _frequency_mhz(band: str, channel: int) -> int:
@@ -238,8 +412,52 @@ def _frequency_mhz(band: str, channel: int) -> int:
     return 5950 + channel * 5
 
 
+def _managed_session_status():
+    """Use the installed CLI boundary; FPMS has its own Python environment."""
+    result = subprocess.run([EXECUTABLE, "session", "status", "--summary"],
+                            capture_output=True, text=True, timeout=6)
+    if result.returncode != 0:
+        raise OSError("Utilization service status unavailable")
+    state = json.loads(result.stdout)
+    return state if state.get("phase") in {"starting", "running", "stopping"} else None
+
+
+def _session_channel(state):
+    config = state["config"]
+    actual = state.get("capture_definition") or {}
+    frequency = actual.get("primary_frequency_mhz") or config.get("frequency_mhz")
+    band = config.get("band")
+    if band is None and frequency is not None:
+        band = "2.4" if frequency < 2500 else "5" if frequency < 5925 else "6"
+    channel = actual.get("primary_channel")
+    if channel is None and frequency is not None:
+        channel = 14 if frequency == 2484 else (frequency - {"2.4": 2407, "5": 5000, "6": 5950}[band]) // 5
+    return band or ("2.4" if int(config["channel"]) <= 14 else "5"), int(channel or config["channel"])
+
+
+def _set_managed_logging(state, enabled: bool) -> None:
+    """Target the inspected owner so a replacement session cannot be changed."""
+    result = subprocess.run(
+        [EXECUTABLE, "session", "logging", "--session-id", state["session_id"],
+         "--enabled", "yes" if enabled else "no", "--summary"],
+        capture_output=True, text=True, timeout=6,
+    )
+    if result.returncode != 0:
+        raise OSError(result.stderr.strip() or "Utilization logging control failed")
+
+
+def _set_managed_export(state, enabled: bool) -> None:
+    result = subprocess.run(
+        [EXECUTABLE, "session", "export", "--session-id", state["session_id"],
+         "--enabled", "yes" if enabled else "no", "--summary"],
+        capture_output=True, text=True, timeout=6,
+    )
+    if result.returncode != 0:
+        raise OSError(result.stderr.strip() or "Utilization export control failed")
+
+
 class ChannelUtilizationApp:
-    """Own one child capture process and mirror its frames onto the FPMS LCD."""
+    """Launch a standalone owner or managed renderer and mirror its FPMS frames."""
 
     def __init__(
         self,
@@ -254,36 +472,61 @@ class ChannelUtilizationApp:
         self.clock = clock
         self.wall_clock = wall_clock
 
-    def launch(self, *, band: str, channel: int, logging: bool) -> None:
+    def resume(self) -> None:
+        self.launch(band="5", channel=36, logging=False, resume_only=True)
+
+    def launch(self, *, band: str, channel: int, logging: bool, resume_only: bool = False) -> None:
         if self.g_vars.get("channel_utilization_recovering"):
             return
+        session = self.g_vars.get("channel_utilization_session")
+        if isinstance(session, _DisplaySession):
+            # FPMS reruns the current page action every refresh. It is not a
+            # new connection or a request to change logging/source settings.
+            if session.finished:
+                session.report_exit()
+            return
+        running = None
+        if configured_runtime_mode() == "managed":
+            try:
+                running = _managed_session_status()
+                if running is not None:
+                    band, channel = _session_channel(running)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                LOGGER.exception("Unable to read managed Utilization session")
+                _display_error(self.g_vars, "Session unavailable. Check journal.")
+                return
+        if resume_only and running is None:
+            _display_status(self.g_vars, "No running session. Select a channel to start.")
+            return
+        logging_already_active = bool(running and running.get("logging", {}).get("active"))
         logging_only_session = self.g_vars.get(
             "channel_utilization_logging_session"
         )
         if isinstance(logging_only_session, _LoggingOnlySession):
             if not logging_only_session.finished:
-                _display_error(
-                    self.g_vars,
-                    "Logging-only capture is active.\nStop logging first.",
-                )
-                return
-            self.g_vars.pop("channel_utilization_logging_session", None)
+                if "--managed" not in logging_only_session.command:
+                    _display_error(
+                        self.g_vars,
+                        "Logging-only capture is active.\nStop logging first.",
+                    )
+                    return
+            else:
+                self.g_vars.pop("channel_utilization_logging_session", None)
 
         session = self.g_vars.get("channel_utilization_session")
         logging_started = False
         new_session = False
         if not isinstance(session, _DisplaySession):
-            _write_logging_enabled(logging)
+            _write_logging_enabled(logging, apply_managed=False)
+            command = build_launch_command(band=band, channel=channel, logging=logging and not logging_already_active)
+            if resume_only:
+                command[command.index("--managed")] = "--attach"
             session = _DisplaySession(
                 self.g_vars,
-                build_launch_command(
-                    band=band,
-                    channel=channel,
-                    logging=logging,
-                ),
+                command,
                 band=band,
                 channel=channel,
-                logging_enabled=logging,
+                logging_enabled=logging or bool(running and running.get("logging", {}).get("active")),
                 popen=self.popen,
                 clock=self.clock,
                 wall_clock=self.wall_clock,
@@ -297,7 +540,7 @@ class ChannelUtilizationApp:
                 self.g_vars["channel_utilization_recovering"] = True
                 try:
                     _display_status(
-                        self.g_vars, "Unable to start capture. Check journal."
+                        self.g_vars, "Unable to open session. Check journal."
                     )
                 finally:
                     try:
@@ -311,7 +554,8 @@ class ChannelUtilizationApp:
             session.report_exit()
             return
         else:
-            logging_started = session.set_logging(logging)
+            if running is None or logging:
+                logging_started = session.set_logging(logging)
 
         self.g_vars["page_exit_handler"] = session.stop
         self.g_vars["page_up_handler"] = session.navigate_up
@@ -321,13 +565,33 @@ class ChannelUtilizationApp:
         self.g_vars["page_key3_handler"] = session.save_screenshot
         self.g_vars["display_state"] = "page"
         self.g_vars["start_up"] = False
-        if logging_started:
+        if logging and logging_already_active:
+            session.show_logging_status("Logging already being saved")
+        elif new_session and running is not None and not (
+            isinstance(logging_only_session, _LoggingOnlySession) and not logging_only_session.finished
+        ):
+            session.show_status(f"{band} GHz · Ch {channel}")
+        elif logging_started:
             session.show_logging_status("Logging started")
         if new_session:
             # Install page handlers before the worker can observe a fast exit.
             session.start_display()
 
     def start_logging_only(self, *, band: str, channel: int) -> None:
+        if configured_runtime_mode() == "managed":
+            try:
+                running = _managed_session_status()
+                if running is not None:
+                    band, channel = _session_channel(running)
+                    if running.get("logging", {}).get("active"):
+                        _display_logging_status(self.g_vars, "Logging already being saved", band=band, channel=channel)
+                        return
+                    _set_managed_logging(running, True)
+                    _display_logging_status(self.g_vars, "Logging requested", band=band, channel=channel)
+                    return
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                _display_error(self.g_vars, "Session unavailable. Check journal.")
+                return
         display_session = self.g_vars.get("channel_utilization_session")
         if isinstance(display_session, _DisplaySession) and not display_session.finished:
             if display_session.set_logging(True):
@@ -338,13 +602,13 @@ class ChannelUtilizationApp:
         if isinstance(session, _LoggingOnlySession) and not session.finished:
             _display_logging_status(
                 self.g_vars,
-                "Logging already active",
+                "Logging already being saved",
                 band=session.band,
                 channel=session.channel,
             )
             return
 
-        _write_logging_enabled(True)
+        _write_logging_enabled(True, apply_managed=False)
         session = _LoggingOnlySession(
             self.g_vars,
             build_launch_command(
@@ -372,8 +636,87 @@ class ChannelUtilizationApp:
             channel=channel,
         )
 
+    def set_beacon_export(self, enabled: bool, *, band=None, channel=None) -> None:
+        try:
+            running = _managed_session_status()
+            if running is None:
+                if not enabled:
+                    _display_status(self.g_vars, "Beacon export already stopped")
+                    return
+                if band is None or channel is None:
+                    _display_status(self.g_vars, "No session. Select a channel first.")
+                    return
+                command = build_launch_command(band=band, channel=channel, logging=False)
+                result = subprocess.run(command + ["--start-only", "--beacon-pcapng"],
+                                        capture_output=True, text=True, timeout=10)
+                if result.returncode != 0:
+                    raise OSError(result.stderr.strip() or "Unable to start beacon export")
+            else:
+                if running["phase"] == "stopping":
+                    _display_status(self.g_vars, "Session stopping. Please wait.")
+                    return
+                state = running.get("beacon_export") or {}
+                if enabled == bool(state.get("requested") or state.get("active")):
+                    _display_status(self.g_vars, "Beacon export already requested" if enabled else "Beacon export already stopped")
+                    return
+                _set_managed_export(running, enabled)
+            _display_status(self.g_vars, "Beacon export requested" if enabled else "Export stopping; saving file")
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization beacon export control failed")
+            _display_error(self.g_vars, "Export control failed. Check journal.")
+
+    def stop_capture(self) -> None:
+        try:
+            result = subprocess.run([EXECUTABLE, "session", "status", "--summary"],
+                                    capture_output=True, text=True, timeout=6)
+            if result.returncode != 0:
+                raise OSError(result.stderr)
+            state = json.loads(result.stdout)
+            if state.get("phase") not in {"starting", "running", "stopping"}:
+                _display_status(self.g_vars, "Session already stopped")
+                return
+            result = subprocess.run(
+                [EXECUTABLE, "session", "stop", "--session-id", state["session_id"], "--summary"],
+                capture_output=True, text=True, timeout=6,
+            )
+            if result.returncode != 0:
+                raise OSError(result.stderr)
+            _display_status(self.g_vars, "Session stopping")
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization stop control failed")
+            _display_error(self.g_vars, "Stop failed. Check journal.")
+
     def stop_logging(self) -> None:
-        _write_logging_enabled(False)
+        if configured_runtime_mode() == "managed":
+            try:
+                running = _managed_session_status()
+                if running is None:
+                    _display_status(self.g_vars, "Logging already stopped")
+                    return
+                band, channel = _session_channel(running)
+                was_active = bool(running.get("logging", {}).get("active"))
+                if was_active:
+                    _set_managed_logging(running, False)
+                proxy = self.g_vars.pop("channel_utilization_logging_session", None)
+                if isinstance(proxy, _LoggingOnlySession):
+                    proxy.stop()
+                display = self.g_vars.get("channel_utilization_session")
+                message = "Logging stop requested" if was_active else "Logging already stopped"
+                if isinstance(display, _DisplaySession) and not display.finished:
+                    display.logging_enabled = False
+                    display.show_logging_status(message)
+                else:
+                    _display_logging_status(self.g_vars, message, band=band, channel=channel)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+                LOGGER.exception("Utilization logging control failed")
+                _display_error(self.g_vars, "Logging control failed. Check journal.")
+            return
+        try:
+            _write_logging_enabled(False)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization logging control failed")
+            _display_error(self.g_vars, "Logging control failed. Check journal.")
+            return
         stopped_channel: Optional[tuple[str, int]] = None
         stopped_display_session: Optional[_DisplaySession] = None
         display_session = self.g_vars.get("channel_utilization_session")
@@ -485,7 +828,8 @@ class _DisplaySession:
 
     def stop(self) -> None:
         was_logging = self.logging_enabled
-        self.set_logging(False)
+        if "--managed" not in self.command and "--attach" not in self.command:
+            self.set_logging(False)
         self.stop_event.set()
         process = self.process
         if process is not None and process.poll() is None:
@@ -501,7 +845,7 @@ class _DisplaySession:
                     process.wait(timeout=2)
         if self.thread is not None and self.thread is not threading.current_thread():
             self.thread.join(timeout=2)
-        if was_logging:
+        if was_logging and "--managed" not in self.command and "--attach" not in self.command:
             self.show_logging_status("Logging stopped")
         self.g_vars.pop("channel_utilization_session", None)
         self.g_vars.pop("page_exit_handler", None)
@@ -516,7 +860,12 @@ class _DisplaySession:
             return False
         if enabled == self.logging_enabled:
             return False
-        _write_logging_enabled(enabled)
+        try:
+            _write_logging_enabled(enabled)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            LOGGER.exception("Utilization logging control failed")
+            self.show_status("Logging control failed. Check journal.")
+            return False
         self.logging_enabled = enabled
         return True
 
@@ -640,6 +989,8 @@ class _DisplaySession:
             return
         if not isinstance(payload, dict):
             return
+        if type(payload.get("logging_enabled")) is bool:
+            self.logging_enabled = payload["logging_enabled"]
         if payload.get("reason") != LOW_DISK_STATUS_REASON:
             return
         self.low_disk_stopped = True
@@ -921,7 +1272,23 @@ def _logging_status_path() -> Path:
     return FRAME_PATH.with_name("logging.status.json")
 
 
-def _write_logging_enabled(enabled: bool) -> None:
+def _write_logging_enabled(enabled: bool, *, apply_managed: bool = True) -> None:
+    if apply_managed and configured_runtime_mode() == "managed":
+        # FPMS has its own interpreter. Use the isolated app's local controls
+        # rather than importing analysis code into the hardware UI process.
+        status = subprocess.run([EXECUTABLE, "session", "status", "--summary"],
+                                capture_output=True, text=True, timeout=6)
+        if status.returncode != 0:
+            raise OSError(status.stderr.strip() or "Utilization service unavailable")
+        state = json.loads(status.stdout)
+        if state.get("phase") in {"starting", "running"}:
+            result = subprocess.run(
+                [EXECUTABLE, "session", "logging", "--session-id", state["session_id"],
+                 "--enabled", "yes" if enabled else "no", "--summary"],
+                capture_output=True, text=True, timeout=6,
+            )
+            if result.returncode != 0:
+                raise OSError(result.stderr.strip() or "Utilization logging control failed")
     _atomic_write_text(
         _logging_control_path(),
         json.dumps({"logging_enabled": enabled}, separators=(",", ":")),

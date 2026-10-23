@@ -1,6 +1,10 @@
-# WLANPi Beacon Live
+# Utilization
 
-WLANPi Beacon Live is a live 802.11 beacon and channel analyzer for WLAN Pi
+**2.1.0** adds one managed capture session shared by web, CLI and FPMS,
+authenticated WLAN Pi Apps access, a Hosts table, and beacon-only pcapng export.
+See the [2.1.0 release notes and final checks](docs/release-2.1.0.md).
+
+Utilization is a live 802.11 beacon and channel analyzer for WLAN Pi
 hardware. It uses one fixed capture definition for the run: 20 MHz by default
 on 2.4 GHz and 80 MHz by default on 5 GHz and 6 GHz. Advertised HT/VHT/HE/EHT
 operation information scopes retry metrics to BSSIDs using the selected primary
@@ -11,23 +15,28 @@ and retry percentage.
 The app automatically chooses the BSSID used for each display. You select only
 the band and channel, not an SSID or BSSID.
 
-![WLANPi Beacon Live utilization screen](docs/images/channel-utilization_screen.png)
-![WLANPi Beacon Live admission capacity screen](docs/images/admission-capacity_screen.png)
-![WLANPi Beacon Live station count screen](docs/images/total-station-count_screen.png)
-![WLANPi Beacon Live retry screen](docs/images/retry-percentage_screen.png)
-![WLANPi Beacon Live beacon loss screen](docs/images/beacon-loss_screen.png)
-![WLANPi Beacon Live composition screen](docs/images/composition_screen.png)
+![Utilization utilization screen](docs/images/channel-utilization_screen.png)
+![Utilization admission capacity screen](docs/images/admission-capacity_screen.png)
+![Utilization station count screen](docs/images/total-station-count_screen.png)
+![Utilization retry screen](docs/images/retry-percentage_screen.png)
+![Utilization beacon loss screen](docs/images/beacon-loss_screen.png)
+![Utilization composition screen](docs/images/composition_screen.png)
 
 ## Requirements
 
-The primary target is a WLAN Pi R4 running WLAN Pi OS 26.10 DeadEye
+The target is WLAN Pi hardware running WLAN Pi OS 26.10 DeadEye
 (Debian 13 Trixie) with:
 
 - WLAN Pi FPMS 1.4.24 and its supported 128×128 display/control stick;
 - Python 3.13 or newer (the Trixie target is Python 3.13);
 - a monitor-mode-capable Wi-Fi interface supporting the selected frequency;
-- `git`, `ip`, `iw`, and TShark 4.4 (verified with 4.4.19); and
+- `git`, `ip`, `iw`, Dumpcap and TShark 4.4 (verified with 4.4.19); and
 - root access through `sudo`.
+
+Pi 4 and Pi 5 have been exercised during 2.1.0 testing. Protected web hosting
+also needs a supported WLAN Pi WebUI/Nginx installation; the installer checks
+its authentication integration before changing files. The standard installer
+includes the Flask/Waitress web dependencies.
 
 The adapter, driver, and regulatory domain must permit the selected channel
 definition, not only its primary frequency. The application checks `iw phy`,
@@ -56,8 +65,11 @@ sudo ./scripts/install_wlanpi_fpms.sh
 
 The installer creates an isolated app environment under
 `/opt/wlanpi-beacon-live`, adds `Utilization` to the FPMS Apps menu, creates the
-runtime and log directories, installs the system-wide `wlanpi-beacon-live` and
-`beacon-live` commands, and restarts `wlanpi-fpms`. The commands are launchers
+runtime and log directories, installs the system-wide `wlanpi-utilization` and
+`utilization` commands, and restarts `wlanpi-fpms`. New installs use the managed
+runtime and install/start its idle broker. Saved explicit runtime settings are
+preserved. It also installs web dependencies and the protected WLAN Pi Apps
+entry and `/utilization/` route by default. The commands are launchers
 in `/usr/local/bin` that run the existing executables in the isolated app
 environment; the installer does not copy the application into the system
 Python environment.
@@ -85,7 +97,7 @@ direct capture. The standard CLI does not read this FPMS setting; select Core
 explicitly with `--capture-backend core`:
 
 ```bash
-sudo wlanpi-beacon-live --capture-backend core --iface wlanpi0 \
+sudo wlanpi-utilization --capture-backend core --iface wlanpi0 \
   --band 2.4 --channel 1 --channel-width 20
 ```
 
@@ -93,10 +105,27 @@ Core starts log `Capture backend: core` to stderr/the FPMS journal. The owner
 backend still requires an existing `wlanpiN` monitor and supports verified
 20/80 MHz configurations; see [Core acceptance](docs/core-capture-evaluation.md).
 
-Rerun the installer after updating this repository or upgrading FPMS. It
+Rerun the same command after updating this repository or upgrading FPMS/WebUI. It
 safely refreshes its managed CLI launchers as well as the application and FPMS
-integration. It locates FPMS through its launcher's Python environment and
+integration, and restores the protected web integration. Platform validation
+runs before files are installed or capture is restarted. Installation restarts
+the broker/FPMS and ends an active capture. Use `--without-web` only when skipping
+web installation intentionally; `--with-web` remains a compatibility option.
+It locates FPMS through its launcher's Python environment and
 prints the resolved package path before patching.
+
+For an existing clone, stop the current session through the web/FPMS controls
+or CLI, then update everything:
+
+```bash
+git pull
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+On reboot, the broker and web services start, but capture stays idle. Sign in
+and open **Apps → Utilization** or `https://<your-pi>/utilization/`, then start
+a session explicitly. Reopening a browser or FPMS display attaches to an existing
+session; it does not reset history. Saved backend/runtime settings survive upgrades.
 
 The front panel and live CLI discover interfaces in the root and named network
 namespaces. They prefer an existing monitor interface supporting the selected
@@ -120,7 +149,7 @@ After installation, check TShark decoding without opening a radio:
 
 For installation or capture failures, collect a diagnostic bundle from this
 checkout with `sudo ./scripts/pi_collect_debug.sh`. See the
-[Trixie release checks](docs/trixie-release.md) for tested behavior, remaining
+[2.1.0 release checks](docs/release-2.1.0.md) for tested behavior, remaining
 hardware validation, and known follow-ups.
 
 SSID bytes from TShark are decoded once before analysis. Printable UTF-8 names
@@ -139,22 +168,23 @@ Apps
   Utilization
     <band>
       <channel and center frequency>
-        Display | Display + Log | Start Logging | Stop Logging
+        Start Session | Start + Log | Start Logging | Start Export
 ```
 
-- `Display` starts capture and the graphical screens without writing logs.
-- `Display + Log` starts the same display with CSV and JSONL logging enabled.
+- `Start Session` starts capture and opens the graphical screens.
+- `Start + Log` starts the same display with CSV and JSONL logging enabled.
 - `Start Logging` captures and logs in the background without opening a graph.
-- `Stop Logging` stops the background logging session.
+- `Start Export` starts beacon pcapng export in the background, with CSV/JSONL off.
+- `Stop Logging` disables logging while the managed capture session continues.
 
 Logging start/stop messages briefly show the tuned channel, frequency, and log
-folder. `Display + Log` shows the same information when it starts and when you
-exit left.
+folder. If shared logging is already active, the start action reports
+**Logging already being saved** and preserves the existing files.
 
 While a display is open:
 
 - move up or down to cycle through the six screens;
-- press left to stop capture and return to the menu;
+- press left to detach the display and return to the session menu;
 - the first auxiliary button is disabled;
 - the second auxiliary button rotates the display 180 degrees while capture
   continues; and
@@ -163,13 +193,123 @@ While a display is open:
   changing the active screen.
 
 Changing screens never restarts capture or clears graph history.
+In managed FPMS mode, opening Utilization checks the current session. When
+idle, the menu offers band/channel selection. When active, it starts with
+**Connect Session**, followed by **Stop Session** and either **Start Logging**
+or **Stop Logging**, and either **Start Export** or **Stop Export**, according
+to the shared owner's state.
+Connect Session loads the existing display without changing its source or history.
+The current band/channel appears briefly when connecting, with no
+repeated popups during display refresh. Left detaches that managed display;
+**Stop Session** explicitly ends capture. The visible menu updates after web/CLI
+session, logging or export changes, normally within a few seconds. During cleanup it
+shows Stopping Session, then returns to band/channel choices. Status checks run
+in the background only while Utilization's menu is visible. Explicit legacy
+standalone FPMS mode stops its foreground capture when leaving the display.
 
 ## Use the command line
 
+The app name is **Utilization** in FPMS, terminal views, and the web
+application at `/utilization/`. The preferred commands are
+`wlanpi-utilization` and `utilization`. `wlanpi-beacon-live` and `beacon-live`
+remain compatibility aliases. The Python package and existing `/opt`, `/etc`,
+and log directories retain their original names so upgrades preserve saved
+configuration and files.
+
+### Shared managed session
+
+New FPMS installs use managed mode, and web capture uses the managed broker.
+The plain CLI attaches when a managed session is active; otherwise it starts
+foreground capture. Use `--managed` to start a persistent shared session from
+the CLI. If upgrading an older standalone FPMS configuration, select managed
+attachment explicitly:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh --fpms-runtime managed
+sudo wlanpi-utilization --managed --band 5 --channel 36 \
+  --start-only --log-dir /var/log/wlanpi-beacon-live
+sudo wlanpi-utilization --attach
+sudo wlanpi-utilization session status --summary
+```
+
+The service starts idle; an explicit managed request starts capture. CLI and
+managed FPMS opens join an active session, reporting **Session already running**
+and retaining its actual tuning even if another channel was requested. Changing
+source requires an explicit stop and new session. Closing a managed display or
+leaving FPMS detaches the renderer and retains capture, logging, and history.
+To stop the current managed session directly:
+
+```bash
+sudo wlanpi-utilization session stop --summary
+```
+
+The CLI reads the current session once and submits its actual ID. A replacement
+session cannot be stopped by that request; a stale-ID error is not retried.
+Stopping is asynchronous; use `session status --summary` to confirm cleanup.
+Foreground standalone capture still stops with Ctrl+C.
+
+Explicit controls use the actual `session_id` from status. The commands below read
+it automatically; rerun the assignment after starting a new session. The word
+`SESSION_ID` alone is not a valid session ID.
+
+```bash
+UTILIZATION_SESSION_ID="$(sudo wlanpi-utilization session status --summary \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["session_id"] or "")')"
+sudo wlanpi-utilization session logging --session-id "$UTILIZATION_SESSION_ID" --enabled yes --summary
+sudo wlanpi-utilization session stop --session-id "$UTILIZATION_SESSION_ID" --summary
+```
+
+The plain live command automatically attaches to an active managed session;
+otherwise it starts foreground capture. `--standalone` explicitly selects
+foreground mode. To restore standalone FPMS behavior, reinstall with
+`--fpms-runtime standalone`. See [managed service operation](docs/managed-service.md)
+for permissions, shutdown, failure behavior, and device checks.
+
+### Web interface
+
+The standard install/update command includes protected web hosting:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+Open `https://<your-pi>/utilization/` or choose **Apps → Utilization** after
+signing in normally. No SSH tunnel or separate integration command is needed.
+
+For manual local development instead, start `sudo wlanpi-utilization web`, open
+an SSH tunnel from your laptop and visit `http://127.0.0.1:8765/utilization/`:
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
+```
+
+The responsive page provides metrics, shared history graphs, sortable BSSID and Hosts tables,
+session/logging/export controls, and closed CSV/JSONL/pcapng downloads. One session button
+switches between Start session and Stop session. The start dialog has a logging
+checkbox; Start logging/Stop logging remains a separate button during a session.
+Beacon pcapng export has its own start-dialog checkbox and synchronized live
+controls beside logging at the top and under Log files. Managed FPMS also offers
+dynamic Start Export/Stop Export actions.
+Export retains original beacon bytes/times/radiotap from the shared source,
+rotates every hour or 256 MiB, and saves files without a default count/total-size
+cap. It stops export at a 256 MiB free-space reserve and closes buffered output. See [export controls and policy](docs/beacon-export.md).
+Opening, refreshing, or closing the page leaves capture running. The manual
+development server listens on loopback.
+
+Hosts shows observed wireless client MACs, vendor/local indicator, latest observed
+SSID/BSSID context, last activity, last transmitted RSSI, Tx/Rx data-frame counts
+and Tx retry percentage from the same rolling two-minute window. Missing signal
+or retry data stays unavailable. See [host observation rules](docs/web-interface.md#hosts-tab).
+See [protected deployment and Pi acceptance](docs/web-deployment.md)
+for supported platform checks, rollback and login/logout acceptance, and
+[web operation](docs/web-interface.md) for controls and metric behavior.
+
+### Standalone commands
+
 The normal FPMS installation makes both CLI commands available system-wide:
 
-- `wlanpi-beacon-live` runs live capture directly; and
-- `beacon-live` provides the `live`, `replay`, and `retry-debug` workflows.
+- `wlanpi-utilization` runs live capture directly; and
+- `utilization` provides the `live`, `replay`, and `retry-debug` workflows.
 
 Live capture configures the wireless interface, tunes it, and starts TShark,
 so it normally requires `sudo`. Replay and help do not require root. Writing
@@ -177,41 +317,41 @@ to `/var/log/wlanpi-beacon-live` also requires appropriate permissions, which
 the examples below obtain with `sudo`.
 
 ```bash
-# Live terminal display on channel 36
-sudo wlanpi-beacon-live --band 5 --channel 36
+# Explicit foreground terminal display on channel 36
+sudo wlanpi-utilization --standalone --band 5 --channel 36
 
 # Logging-only capture (both CSV and JSONL, with no display rendering)
-sudo wlanpi-beacon-live --band 5 --channel 36 \
+sudo wlanpi-utilization --standalone --band 5 --channel 36 \
   --logging-only --log-dir /var/log/wlanpi-beacon-live
 
 # Interactive display plus both log formats
-sudo wlanpi-beacon-live --band 5 --channel 36 \
+sudo wlanpi-utilization --standalone --band 5 --channel 36 \
   --log --log-dir /var/log/wlanpi-beacon-live
 
 # Hardware-free replay of the included sample (run from the repository)
-beacon-live replay --input samples/tshark_qbss_sample.tsv
+utilization replay --input samples/tshark_qbss_sample.tsv
 
 # Explicit 6 GHz center frequency instead of band/channel mapping
-sudo wlanpi-beacon-live --frequency-mhz 5975
+sudo wlanpi-utilization --frequency-mhz 5975
 
 # Explicit 160 MHz override: primary 5180 MHz, center 5250 MHz
-sudo wlanpi-beacon-live --frequency-mhz 5180 \
+sudo wlanpi-utilization --frequency-mhz 5180 \
   --channel-width 160 --center-frequency1-mhz 5250
 
-# Save full packets from the exact live-analysis process and a JSON sidecar
-sudo wlanpi-beacon-live --band 5 --channel 36 \
-  --raw-pcapng /tmp/beacon-live-channel36.pcapng
+# Save all frame types for diagnostics, plus a JSON sidecar
+sudo wlanpi-utilization --standalone --band 5 --channel 36 \
+  --raw-pcapng /tmp/utilization-channel36.pcapng
 
 # Explicit interface in an existing named network namespace
-sudo wlanpi-beacon-live --iface capture1 --netns capture-lab --band 2.4 --channel 1
+sudo wlanpi-utilization --iface capture1 --netns capture-lab --band 2.4 --channel 1
 
 # General and workflow-specific help
-wlanpi-beacon-live --help
-beacon-live --help
-beacon-live live --help
+wlanpi-utilization --help
+utilization --help
+utilization live --help
 ```
 
-`beacon-live live` accepts the same live options as `wlanpi-beacon-live`. Use
+`utilization live` accepts the same live options as `wlanpi-utilization`. Use
 `--frequency-mhz` when the exact primary/control frequency is clearest, or combine
 `--band` and `--channel` when a channel number is ambiguous across bands.
 `--channel-width auto` is the default: 20 MHz on 2.4 GHz and the standard
@@ -246,7 +386,7 @@ scrollable per-second table.
 An abridged wide-terminal example looks like this:
 
 ```text
- 5180 MHz | Band 5 GHz | Channel 36 | WLANPi Beacon Live | 120s history | FOLLOW
+ 5180 MHz | Band 5 GHz | Channel 36 | Utilization | 120s history | FOLLOW
 BSSIDs 8 QBSS 6 Radios 3 Radio BSSIDs 4 Radio Stations 28       Selected BSSIDs
 Strongest AP: AP-Lobby  Vendor: Example Vendor  Metric   Value BSSID ...
   # BSSID                RSSI STA SSID             STA max     17 aa:aa:... -45dBm Alpha
@@ -328,7 +468,7 @@ Scrolling table columns:
 | `LOSS%` | Percentage of `BCN_EXP` slots for which no matching beacon was received. |
 
 If the command is piped, redirected, run without a TTY, or Python lacks
-`curses`, Beacon Live uses the existing plain renderer. This also keeps
+`curses`, Utilization uses the existing plain renderer. This also keeps
 automated invocations usable. Logging remains independent in either display
 mode: `--log` enables both formats alongside the interactive TUI,
 and the TUI shows each active output path below `Selected BSSIDs`.
@@ -339,8 +479,8 @@ terminal dashboard.
 For troubleshooting, the system launchers and their isolated targets are:
 
 ```text
-/usr/local/bin/wlanpi-beacon-live -> /opt/wlanpi-beacon-live/bin/wlanpi-beacon-live
-/usr/local/bin/beacon-live        -> /opt/wlanpi-beacon-live/bin/beacon-live
+/usr/local/bin/wlanpi-utilization -> /opt/wlanpi-beacon-live/bin/wlanpi-utilization
+/usr/local/bin/utilization        -> /opt/wlanpi-beacon-live/bin/utilization
 /opt/wlanpi-beacon-live/bin/python
 /opt/wlanpi-beacon-live/lib/python*/site-packages/beacon_live
 ```
@@ -348,7 +488,7 @@ For troubleshooting, the system launchers and their isolated targets are:
 The arrows describe which executable each launcher invokes; the launchers are
 small managed shell scripts, not filesystem symlinks. You can bypass the PATH
 launcher while diagnosing an installation with, for example,
-`/opt/wlanpi-beacon-live/bin/beacon-live --help`.
+`/opt/wlanpi-beacon-live/bin/utilization --help`.
 
 ## Screens
 
@@ -380,8 +520,8 @@ JSONL.
 Logging checks free space every 30 seconds, stops below 256 MiB free, and adds
 an end-of-log marker explaining the disk-pressure stop. Long-running sessions
 roll to a new file pair every hour. If low disk stops logging while the display
-is active, capture, analysis, and graph history continue. Logging-only mode
-exits cleanly.
+is active, capture, analysis, and graph history continue. Standalone logging-only
+mode exits cleanly; stopping managed logging leaves its shared session running.
 
 See the [logging reference](docs/logging.md) for formats, filenames, rollover,
 markers, and configurable CLI limits.
@@ -397,7 +537,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
 python -m pip install -e '.[dev]'
-.venv/bin/beacon-live replay --input samples/tshark_qbss_sample.tsv
+.venv/bin/utilization replay --input samples/tshark_qbss_sample.tsv
 .venv/bin/python -m pytest -q
 ```
 
@@ -410,6 +550,17 @@ before copying the application into `/opt/wlanpi-beacon-live`.
 
 ## Documentation
 
+- [2.1.0 release notes](docs/release-2.1.0.md) — changes, upgrade behavior,
+  limitations, deferred offline analysis and final release checks.
+- [Managed runtime roadmap](docs/managed-runtime-roadmap.md) — v2.1.0 plan for
+  shared web/CLI/FPMS sessions and beacon pcapng export, acceptance evidence and
+  deferred follow-ups.
+- [Web interface](docs/web-interface.md) — installation, shared-session controls,
+  closed log downloads, and browser acceptance checks.
+- [Beacon pcapng export](docs/beacon-export.md) — live/offline controls, packet
+  fidelity, rotation/retention limits, storage isolation and device acceptance.
+- [Busy-channel validation](docs/busy-channel-validation.md) — corrupt-frame
+  identity guards, capture-quality evidence, and Pi performance/retest steps.
 - [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones
   and acceptance checks for WLAN Pi OS 26.10 DeadEye.
 - [Architecture](docs/architecture.md) — design rules, pipeline, data flow, and

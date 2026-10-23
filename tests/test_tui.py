@@ -441,6 +441,39 @@ def test_runtime_notice_replaces_curses_footer_without_adding_a_row() -> None:
     assert "PgUp/PgDn" not in window.lines[dashboard.last_layout.footer_row]
 
 
+@pytest.mark.parametrize("dismissal", ["timeout", "key", "paused"])
+def test_attachment_notice_expires_or_dismisses_without_losing_warnings_or_history(dismissal):
+    now = [0.0]
+    window = _FakeWindow(40, 180)
+    dashboard = CursesDashboard(curses_module=_FakeCurses(window), clock=lambda: now[0])
+    snapshot = _snapshot(20)
+    def exercise():
+        dashboard.refresh(snapshot)
+        dashboard.set_transient_notice("Session already running; displaying the existing session")
+        footer = dashboard.last_layout.footer_row
+        assert "Session already running" in window.lines[footer]
+        assert "Warning:" not in window.lines[footer]
+        now[0] = 9.9
+        dashboard.poll_input()
+        assert "Session already running" in window.lines[footer]
+        if dismissal == "key":
+            # An unbound key dismisses the message without navigating.
+            window.keys.append(ord("x"))
+        else:
+            dashboard.display_paused = dismissal == "paused"
+            now[0] = 10.0
+        dashboard.poll_input()
+        assert "Session already running" not in window.lines[footer]
+        assert dashboard.snapshot is snapshot
+        dashboard.set_notice("Capture data incomplete")
+        dashboard.set_transient_notice("Joined existing session")
+        now[0] = 30.0
+        dashboard.poll_input()
+        assert "Warning: Capture data incomplete" in window.lines[footer]
+        return 0
+    dashboard.run(exercise)
+
+
 def test_table_headers_use_single_tokens_and_hide_requested_display_fields() -> None:
     assert _format_table_header(include_local_cu=False).split() == [
         "TIME",

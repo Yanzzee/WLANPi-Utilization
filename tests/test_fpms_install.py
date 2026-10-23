@@ -88,6 +88,16 @@ def test_backend_selection_is_persistent_and_preserves_other_configuration(packa
     assert json.loads(config.read_text())['capture_backend'] == 'direct'
 
 
+def test_managed_runtime_selection_preserves_backend_and_survives_reinstall(package, tmp_path):
+    config = tmp_path / "fpms.json"
+    config.write_text('{"capture_backend":"core","other_setting":42}')
+    patcher.install_fpms(package, ADAPTER, runtime_mode="managed", backend_config=config)
+    expected = {"runtime_mode": "managed", "capture_backend": "core", "other_setting": 42}
+    assert json.loads(config.read_text()) == expected
+    patcher.install_fpms(package, ADAPTER, backend_config=config)
+    assert json.loads(config.read_text()) == expected
+
+
 @pytest.mark.parametrize('previous', [None, b'{"capture_backend":"direct"}\n'])
 def test_service_failure_rolls_back_backend_selection_and_menu(package, tmp_path, previous):
     before = snapshot(package)
@@ -149,6 +159,82 @@ def test_trixie_buttons_dispatch_and_exit_return_to_menu(package: Path) -> None:
     assert calls == ["up", "down", "exit", "menu"]
     assert state["display_state"] == "menu"
     assert "page_exit_handler" not in state
+
+
+@pytest.mark.parametrize("entry_button", ["menu_right", "menu_center"])
+def test_native_menu_refreshes_on_entry_without_changing_other_apps(package, tmp_path, monkeypatch, entry_button):
+    from integration.wlanpi_fpms import channel_utilization as adapter
+    from types import FunctionType
+    patcher.install_fpms(package, ADAPTER)
+    settings = tmp_path / "settings.json"
+    settings.write_text('{"runtime_mode":"managed"}')
+    monkeypatch.delenv("WLANPI_UTILIZATION_RUNTIME_MODE", raising=False)
+    monkeypatch.setattr(adapter, "BACKEND_CONFIG", settings)
+    current, reads = None, []
+    def status():
+        reads.append(True)
+        return current
+    monkeypatch.setattr(adapter, "_managed_session_status", status)
+    tree = ast.parse((package / "modules/nav/buttons.py").read_text())
+    button_class = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+    namespace = {}
+    exec(compile(ast.Module(body=[button_class], type_ignores=[]), "native_buttons", "exec"), namespace)
+    button = object.__new__(namespace["Button"])
+    state = {"display_state": "menu", "current_menu_location": [0, 0]}
+    app = adapter.build_channel_utilization_menu(state)
+    other = {"name": "Other", "action": [{"name": "Other child", "action": lambda: None}]}
+    menu = [{"name": "Apps", "action": [app, other]}]
+    class Page:
+        def draw_page(self, g_vars, menu):
+            level = menu
+            for index in g_vars["current_menu_location"][:-1]:
+                level = level[index]["action"]
+            g_vars["option_selected"] = level[g_vars["current_menu_location"][-1]]["action"]
+    button.page_obj = Page()
+    enter = getattr(button, entry_button)
+    for phase in (None, "starting", "running", "stopping", None):
+        current = None if phase is None else {
+            "phase": phase, "config": {"band": "6", "channel": "5"},
+        }
+        state["current_menu_location"] = [0, 0]
+        state["option_selected"] = app["action"]
+        enter(state, menu)
+        assert state["current_menu_location"] == [0, 0, 0]
+        names = [item["name"] for item in app["action"]]
+        if phase is None:
+            assert names == ["2.4 GHz", "5 GHz", "6 GHz PSC", "6 GHz All"]
+        elif phase == "stopping":
+            assert names == ["Stopping Session"]
+        else:
+            assert names == ["Connect Session", "Stop Session", "Start Logging", "Start Export"]
+            assert all(isinstance(item["action"], FunctionType) for item in app["action"])
+    assert len(reads) == 5
+    state["current_menu_location"] = [0, 1]
+    state["option_selected"] = other["action"]
+    enter(state, menu)
+    assert len(reads) == 5
+    assert state["current_menu_location"] == [0, 1, 0]
+    assert state["option_selected"] is other["action"][0]["action"]
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_menu_loop_redraws_only_when_poll_reports_changes(package, changed):
+    patcher.install_fpms(package, ADAPTER)
+    tree = ast.parse((package / "fpms.py").read_text())
+    condition = ast.parse('g_vars["display_state"] != "menu"', mode="eval").body
+    branch = next(node for node in ast.walk(tree) if isinstance(node, ast.If)
+                  and ast.dump(node.test) == ast.dump(condition))
+    calls = []
+    state = {"display_state": "menu", "button_press_count": 0, "last_button_press_count": 0,
+             "channel_utilization_menu_poll": lambda menu: calls.append("poll") or changed}
+    class Page:
+        def __init__(self, state):
+            pass
+        def draw_page(self, state, menu):
+            calls.append("draw")
+    exec(compile(ast.Module(body=[branch], type_ignores=[]), "native_menu_loop", "exec"),
+         {"g_vars": state, "menu": [], "Page": Page})
+    assert calls == (["poll", "draw"] if changed else ["poll"])
 
 
 @pytest.mark.parametrize(

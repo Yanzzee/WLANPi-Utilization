@@ -19,6 +19,7 @@ def test_retry_debug_command_exports_same_fields_as_live_capture() -> None:
 
     assert command[:4] == ["tshark", "-n", "-r", "capture.pcapng"]
     assert command[command.index("-Y") + 1] == "wlan"
+    assert "wlan.check_checksum:TRUE" in command
     assert _field_args(command) == list(TSHARK_FRAME_FIELD_NAMES)
 
 
