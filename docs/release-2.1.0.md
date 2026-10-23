@@ -1,7 +1,8 @@
 # Utilization 2.1.0
 
-These notes describe the 2.1.0 release scope. The checkout remains
-`2.1.0.dev0` until final release acceptance and version finalization.
+These notes describe the 2.1.0 release. Package metadata is aligned at `2.1.0`.
+Device smoke acceptance is complete for the agreed scope; external offline
+analysis remains deferred. Repository merge/tag/publication are separate steps.
 
 ## What changes
 
@@ -106,27 +107,50 @@ logging/export controls are in the [service guide](managed-service.md).
 
 The user reports successful output rotation and buffered closure, use of web,
 CLI and FPMS with one session, and working start/stop. Reboot and authentication
-also appear to work as designed. This accepts those reported smoke-test areas;
-the exact adapter/build details and physical radio restoration are not inferred.
+also appear to work as designed. The user subsequently confirmed no differences
+between the radio's before-session and after-stop snapshots, completing the
+physical radio-restoration check. This accepts the reported smoke-test areas;
+exact adapter/build details and untested hardware combinations are not inferred.
 Earlier Pi 4 login/logout/expiry tests and Pi 4/5 display/performance observations
 remain recorded in the roadmap. External offline analysis remains deferred.
 
 ## Final release checks
 
-No additional feature is required by the current scope. Before finalizing:
+No additional feature or device smoke check is required by the agreed scope.
+The [restoration procedure](pi_testing.md#quick-final-radio-restoration-check)
+remains available for future regressions. Final preparation verifies tests,
+distribution contents, fresh installation/replay and version consistency.
 
-1. **Physical radio restoration:** use the short
-   [before/after check](pi_testing.md#quick-final-radio-restoration-check).
-   Confirm interface types, administrative UP flags and original known monitor
-   tuning return after normal stop. Other smoke areas above have been reported
-   working; repeat them only if the final code changes or a new finding warrants it.
-2. **Release finalization:** resolve any blocking findings, rerun regressions
-   against the exact final code, align `pyproject.toml`, `setup.py` and
-   `beacon_live.__version__` at `2.1.0`, check existing remote versions and
-   prepare the release/tag. This documentation update does not publish a release.
+For publication, merge the accepted release commit from `dev` into `main`,
+then create `v2.1.0` on that exact commit and use these notes for the release.
+Remote review found only `v1.0.0` and `v2.0.0`; `main` still points to v2.0.0.
+Recheck remote state before publishing. This preparation does not push a branch,
+create a remote tag or publish a GitHub/PyPI release.
 
-The last code regression run passed **976 tests** with two existing fork
-deprecation warnings; hosted/local frontend logic checks also passed. Reported
+## Distribution artifacts
+
+The Python wheel supplies the package, CLI entrypoints and local web assets.
+It does not install FPMS/systemd/Nginx integration by itself. The source archive
+also includes the Pi installer, integration files, documentation, sample inputs
+and hardware-free tests. For a Pi installation, use the repository or extracted
+source archive and run `sudo ./scripts/install_wlanpi_fpms.sh` there.
+
+Release preparation builds both distributions under `dist/` and generates
+`dist/SHA256SUMS`. Contributor reproduction in an isolated development venv:
+
+```bash
+python -m pip install 'build>=1.2,<2' 'setuptools>=75.3' wheel
+python -m build --no-isolation
+```
+
+The final 2.1.0 regression run passed **976 tests in 43.66 seconds** with two
+existing fork deprecation warnings; hosted/local frontend logic checks also
+passed. Wheel/source contents and versions were checked against the working
+tree. Fresh isolated wheel installation, all four CLI entrypoints and sample
+replay passed. The source archive includes all tracked project files except
+the development `.gitignore`, plus its manifest and generated package metadata.
+Packaging-tool notices about duplicate legacy `setup.py` extras are benign:
+`pyproject.toml` is authoritative and their declarations agree. Reported
 Pi 4/5 speedtests produced no significant display/graph delay; `top` showed
 about 8% CPU on a lightly used Pi 5 channel and similar Pi 4 CPU. Multiple
 beacon exports and Wireshark opening were reported successful. These are

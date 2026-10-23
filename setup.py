@@ -9,7 +9,7 @@ README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 
 setup(
     name="wlanpi-beacon-live",
-    version="2.1.0.dev0",
+    version="2.1.0",
     description="Utilization live WLAN metrics and beacon replay tools.",
     long_description=README,
     long_description_content_type="text/markdown",

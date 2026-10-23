@@ -489,8 +489,10 @@ checks that could not be exercised on the device.
 
 Shared web/CLI/FPMS attachment, start/stop, output rotation/buffer closing and
 reboot/authentication have been reported working in the release smoke test.
-The remaining physical check is that a normal stop returns the radio to its
-pre-session state. No manual interface reset is needed for this test.
+The user subsequently reported no differences in the before/after radio
+snapshots, accepting normal-stop restoration for the tested configuration.
+The procedure below is retained for future checks. No manual interface reset
+is needed for this test.
 
 1. Stop any current session normally. With capture idle, save the baseline:
 

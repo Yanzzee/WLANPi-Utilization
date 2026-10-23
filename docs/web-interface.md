@@ -159,6 +159,8 @@ the [TUI identity rules](screens.md#web-organization): these sources need not
 belong to one radio. Station maximum uses the analyzer's QBSS/observed source
 and count, rather than borrowing the QBSS reporting identity.
 
+![Utilization web capture session, channel composition and automatically selected BSSIDs](images/web-session-composition.png)
+
 Six current cards show AP QBSS utilization, retries, admission capacity,
 advertised station sum, observed active clients and beacon loss. The duplicated
 one-second BSSID card is removed; rolling composition counts and the completed
@@ -167,12 +169,16 @@ its web start option are hidden pending adapter validation. The existing engine,
 CLI option, API fields and logs retain their definitions; a future verified
 survey display can add a separate line to the CU graph.
 
+![Utilization web current metrics for utilization, retries, admission capacity, stations, observed clients and beacon loss](images/web-metrics.png)
+
 Desktop displays all six graphs. Small screens
 keep the same metric cards and offer a graph selector. The BSSID table uses
 latest snapshot beacon values and explicitly labels rolling observations.
 AP name and the existing metric columns are sortable; missing AP names sort
 last in either direction. Sorting changes table presentation only. Protected
 hosting reuses WLAN Pi's existing browser-tab and touch icons.
+
+![Utilization web desktop rolling-history graphs for utilization, stations and clients, retries, beacon loss, admission capacity and BSSIDs](images/web-graphs.png)
 
 Null fields display an em dash; real zeros remain zero. Unavailable graph
 samples break the line. Nonzero retries below 1% display as `<1%`. Capture width,

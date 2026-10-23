@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wlanpi-beacon-live"
-version = "2.1.0.dev0"
+version = "2.1.0"
 description = "Utilization live WLAN metrics and beacon replay tools."
 readme = "README.md"
 requires-python = ">=3.13"

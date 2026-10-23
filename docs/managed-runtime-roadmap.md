@@ -8,8 +8,10 @@ browser will open the same application at a local URL.
 
 **Current release scope:** offline WiFi-Beacon-analysis validation is deferred
 at the user's request and no longer blocks 2.1.0. The main implementation is
-complete; the remaining final-build device checks and version/release steps are
-in [2.1.0 release notes](release-2.1.0.md#final-release-checks). Historical
+complete. Device smoke acceptance, including no differences in the radio
+before/after snapshots, is now accepted. Local release preparation uses version
+`2.1.0`; final checks and publication steps are in
+[2.1.0 release notes](release-2.1.0.md#final-release-checks). Historical
 milestone evidence below retains earlier scope and defaults; current operation
 is documented in the README and linked guides.
 
@@ -163,7 +165,7 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   disconnect independence, overlapping starts, stop during startup, EOF,
   startup/runtime failure, and explicit restart. This bounded milestone stops
   before IPC deployment and HTTP/UI work.
-- [ ] **2. Service and consumer attachment.** Host the owner in a managed
+- [x] **2. Service and consumer attachment.** Host the owner in a managed
   process with local IPC and signal handling; add API serialization and explicit
   controls. Attach CLI/FPMS renderers through that service, with documented
   standalone compatibility. Test simultaneous consumers against one capture,
@@ -171,9 +173,10 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   Choose web framework, IPC permissions, transport, service policy, and limits.
   **Implementation and local regression coverage complete; initial Pi results
   reported October 16, including successful CLI stop and correct TUI display.
-  Broader device/release coverage remains pending.** See milestone
+  Shared web/CLI/FPMS use, start/stop and physical radio restoration have now
+  been accepted for release. Broader hardware coverage remains a follow-up.** See milestone
   2 evidence below and [service checks](managed-service.md).
-- [ ] **3. Responsive web consumer.** Deliver current metrics, desktop
+- [x] **3. Responsive web consumer.** Deliver current metrics, desktop
   graphs/table, controls, logging status, and CSV/JSONL downloads. Verify phone
   and desktop layouts, null/zero/gap semantics, `<1%`, delayed publications,
   reconnect/navigation, multiple tabs, and local-browser operation.
@@ -181,19 +184,20 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   Pi 5 display and speedtest retest accepted October 19 with different test
   conditions. October 23 tests report no significant display/graph delay during
   speedtests on Pi 4 and Pi 5, about 8% CPU on a lightly used Pi 5 channel and
-  similar Pi 4 CPU. Broader browser/device/performance coverage remains pending.** See milestone 3 evidence
+  similar Pi 4 CPU. Release smoke acceptance is complete; broader
+  browser/device/performance coverage remains a follow-up.** See milestone 3 evidence
   below and [web operation/checks](web-interface.md).
-- [ ] **4. Launcher and authentication.** Implement the verified platform
+- [x] **4. Launcher and authentication.** Implement the verified platform
   launcher and protected route without merging the Utilization backend into
   Core. Test login/logout/expiry, controls/stream/download authorization,
   installation/reinstallation, URL prefixes, and service failure recovery on Pi.
   **Implementation and local checks complete October 19; Pi 4 Apps,
   login/logout/expiry, session attachment and web startup after reboot/relogin
   confirmed October 20. FPMS Stop Session was confirmed working October 21;
-  subsequent menu refinements and broader failure/download/release checks
-  still need device acceptance.** See milestone 4
+  latest smoke feedback accepts reboot/authentication and shared-session
+  start/stop. Broader failure combinations remain follow-up coverage.** See milestone 4
   evidence below and [protected deployment](web-deployment.md).
-- [ ] **5. Beacon pcapng export.** Implement the same-source export branch,
+- [x] **5. Beacon pcapng export.** Implement the same-source export branch,
   rotation, retention, disk isolation, status, and downloads. Compare retained
   beacon bytes/timestamps/radiotap with source packets; decode every segment
   with TShark. Prove analyzer results match with export on/off for a mixed
@@ -206,15 +210,18 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   writer, rotation/retention/free-space limits, independent controls, health
   and closed pcapng downloads. Initial Pi export/download and Wireshark opening
   confirmed October 21; multiple beacon captures exported by October 23.
-  Updated FPMS controls/hourly policy and broader physical
-  Pi/busy-channel acceptance remain pending; see the 5b evidence and device checks below. See
+  Output rotation and buffered closure have now been accepted, alongside Pi 4/5
+  speedtest observations. Broader hardware/storage-failure combinations remain
+  follow-up coverage; see the evidence and device checks below. See
   [export foundation](beacon-export.md).
-- [ ] **6. Release acceptance.** Complete the bounded final-build Pi checks,
+- [x] **6. Release acceptance.** Complete the bounded final-build Pi checks,
   resolve blocking findings, reconcile versions, run final regressions and
   prepare the release/tag. User-facing 2.1.0 notes are now prepared.
   **External offline analysis is deferred at the user's request and is not a
-  release gate.** Retain its workflow below for later testing; tagging/publication
-  follows release acceptance as a separate action.
+  release gate.** Local preparation is complete: metadata at 2.1.0, final
+  regressions and fresh distribution-install checks pass, and release notes
+  are ready. Retain the offline workflow below for later testing;
+  merge/tag/publication follows as a separate action.
 
 ## WiFi Beacon analysis end to end check
 
@@ -1271,3 +1278,36 @@ on the Pi. No device SSH target/session is configured for this task, so no
 physical restoration result is claimed. After that check, version alignment,
 final regressions and the separate release/tag action remain. External offline
 analysis stays deferred and does not block 2.1.0.
+
+## Release preparation complete — October 23, 2026
+
+The user reports no differences between the radio snapshots before capture and
+after normal stop. This completes the focused physical restoration acceptance
+for the tested configuration. Combined with accepted web/CLI/FPMS attachment,
+start/stop, reboot/authentication, output rotation and buffered closure, no
+release-blocking device check remains in the agreed scope. This does not imply
+exhaustive band/adapter or failure testing. External offline analysis remains
+deferred, and direct capture remains the default with Core optional.
+
+`pyproject.toml`, legacy `setup.py` and `beacon_live.__version__` now agree at
+**2.1.0**. `MANIFEST.in` explicitly includes installer/integration files, guides,
+example inputs and regression fixtures in the source archive, while excluding
+bytecode and local artifacts. The wheel retains Python/CLI/web assets; Pi
+system integration uses the repository or extracted source installer.
+
+**Final local evidence:** **976 tests pass in 43.66 seconds**, with two existing
+direct-worker fork deprecation warnings. All four Core transport tests and
+protected Nginx tests run, with no skips. Hosted/local simulated-DOM frontend
+checks pass. Wheel/source package files match the working tree, including the
+manifest and required installer files. A fresh isolated wheel install reports
+2.1.0 via package and distribution metadata; both preferred commands, both legacy
+aliases and hardware-free replay work. Packaging tools were installed only in
+the development venv. Documentation links, shell syntax and metadata consistency
+are checked as part of preparation.
+
+Builds are under `dist/` with `SHA256SUMS`; generated distributions stay ignored
+by Git. The source distribution supports building the wheel without a checkout.
+Remote inspection found `dev` at `f0e1692` and `main`/`v2.0.0` at `5c6cb09`,
+with no v2.1.0 tag. Remaining publication work is to commit the prepared changes,
+merge the accepted release into main, and tag/publish v2.1.0 on that commit.
+No branch push, merge, tag or external release is performed by preparation.

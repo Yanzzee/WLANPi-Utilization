@@ -553,8 +553,8 @@ before copying the application into `/opt/wlanpi-beacon-live`.
 - [2.1.0 release notes](docs/release-2.1.0.md) — changes, upgrade behavior,
   limitations, deferred offline analysis and final release checks.
 - [Managed runtime roadmap](docs/managed-runtime-roadmap.md) — v2.1.0 plan for
-  shared web/CLI/FPMS sessions and beacon pcapng export; current development
-  metadata is 2.1.0.dev0.
+  shared web/CLI/FPMS sessions and beacon pcapng export, acceptance evidence and
+  deferred follow-ups.
 - [Web interface](docs/web-interface.md) — installation, shared-session controls,
   closed log downloads, and browser acceptance checks.
 - [Beacon pcapng export](docs/beacon-export.md) — live/offline controls, packet

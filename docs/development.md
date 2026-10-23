@@ -1,7 +1,7 @@
 # Development Guide
 
-The current release target is v2.1.0; package metadata stays `2.1.0.dev0`
-until release finalization. Follow the [release checks](release-2.1.0.md#final-release-checks)
+Package metadata is aligned at `2.1.0` for this release. Follow the
+[release checks](release-2.1.0.md#final-release-checks)
 and [managed runtime roadmap](managed-runtime-roadmap.md) for scope/evidence.
 External WiFi-Beacon-analysis validation is deferred and does not block 2.1.0.
 

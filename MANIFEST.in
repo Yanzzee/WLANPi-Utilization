@@ -1,0 +1,8 @@
+include AGENTS.md
+recursive-include docs *.md *.png
+recursive-include integration *.py *.service *.conf *.html
+recursive-include scripts *.py *.sh
+include samples/iw_survey_sample.txt
+include samples/tshark_qbss_sample.tsv
+recursive-include tests *.py *.mjs *.md *.json *.tsv *.pcap LICENSE
+global-exclude *.py[cod] .DS_Store
