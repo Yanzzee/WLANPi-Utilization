@@ -4,8 +4,12 @@ This is the hardware verification playbook for Utilization. Normal users
 should start with the [README](../README.md). Contributors should also read
 [development.md](development.md) and [architecture.md](architecture.md).
 
-The setup and smoke scripts do not change services. The separate FPMS installer
-patches the Apps menu and restarts `wlanpi-fpms`.
+For the final 2.1.0 pass, start with the [release checklist](release-2.1.0.md).
+The detailed checks below cover additional hardware combinations.
+
+The setup and smoke scripts do not change services. The standard installer
+updates CLI/FPMS, the managed broker and authenticated web hosting; it restarts
+services and ends an active session. Stop capture normally before reinstalling.
 
 ## Prepare the repository
 
@@ -78,7 +82,7 @@ suggestions for missing commands but does not run `apt install`.
    ```
 
    Confirm the production prefix is `/opt/wlanpi-beacon-live`, not the development
-   venv or system Python. Exercise FPMS Display and left-button exit, then rerun
+   venv or system Python. Exercise FPMS Start Session and left-button detachment, then rerun
    the installer to check repeat installation. The installer restarts FPMS.
 4. Automated checks also cover forged VIRTUAL_ENV, older interpreters,
    inherited system packages, install failures, production path boundaries,
@@ -109,19 +113,19 @@ Reinstall the application to test the updated live path:
 sudo ./scripts/install_wlanpi_fpms.sh
 ```
 
-Exercise FPMS Display and normal exit on 2.4 GHz channel 1, 5 GHz channel 36,
+Exercise FPMS Start Session and explicit Stop Session on 2.4 GHz channel 1, 5 GHz channel 36,
 and an available 6 GHz channel such as 5. Test only bands your adapter supports.
 Verify RSSI, QBSS, retry history, rotation/navigation, and radio restoration.
 Some APs omit QBSS; that must remain unavailable rather than becoming zero.
-Hex SSID names remain a separate known issue.
+SSID text normalization is implemented; verify hidden/Unicode names where available.
 
-For metric comparison, exit Utilization in FPMS, then use the single-capture
+For metric comparison, stop the managed session explicitly, then use the single-capture
 workflow below with `--iface auto`. Collect one 60-second run per supported
 band. For example, start with 2.4 GHz:
 
 ```bash
 sudo /opt/wlanpi-beacon-live/bin/wlanpi-utilization \
-  --iface auto --band 2.4 --channel 1 --channel-width 20 \
+  --standalone --iface auto --band 2.4 --channel 1 --channel-width 20 \
   --local-cu --survey-debug --log --log-dir /tmp/utilization-item7-24 \
   --raw-pcapng /tmp/utilization-item7-24/channel1.pcapng
 ```
@@ -217,7 +221,7 @@ comparison. This avoids a second capture process competing for the adapter:
 
 ```bash
 sudo .venv/bin/wlanpi-utilization \
-  --iface auto --band 5 --channel 36 \
+  --standalone --iface auto --band 5 --channel 36 \
   --log --log-dir /tmp/beacon-live-validation \
   --raw-pcapng /tmp/beacon-live-validation/channel36.pcapng
 ```
@@ -231,10 +235,10 @@ Let it run for at least 60 seconds, then stop it normally. Keep all of:
   reported drops when available; and
 - the application stats CSV and beacon JSONL.
 
-Do not add a MAC filter. Normal live analysis uses the application's 1024-byte
-snapshot limit and reports any larger beacon it encounters. The `--raw-pcapng`
-diagnostic workflow uses full-length `-s 0` capture so the saved evidence is not
-truncated.
+Do not add a MAC filter. Managed sessions use a full-length shared packet
+source for later beacon export; the legacy non-export standalone path uses a
+1024-byte snapshot limit and reports larger truncated beacons. The
+`--raw-pcapng` diagnostic workflow also uses full-length `-s 0` capture.
 
 Run the application audit, explicitly naming the selected primary frequency:
 
@@ -352,8 +356,9 @@ sudo ./scripts/install_wlanpi_fpms.sh
 The installer creates `/opt/wlanpi-beacon-live`, installs the application and
 thin FPMS adapter, patches the Apps menu/navigation callbacks, creates
 `/run/wlanpi-beacon-live` and `/var/log/wlanpi-beacon-live`, installs the two
-commands in `/usr/local/bin`, and restarts FPMS. Rerun it after an FPMS package
-upgrade.
+commands in `/usr/local/bin`, installs the managed broker and protected web
+hosting by default, and restarts services. Rerun it after FPMS/WebUI package
+upgrades.
 
 ### Trixie menu installation acceptance
 
@@ -370,9 +375,10 @@ systemctl is-active wlanpi-fpms
 sudo journalctl -u wlanpi-fpms -n 100 --no-pager
 ```
 
-Confirm Apps contains exactly one Utilization entry. Open Display on a channel
+Confirm Apps contains exactly one Utilization entry. Open Start Session on a channel
 with known beacon activity, use up/down to change screens, and verify history
-continues. Press left and confirm capture stops and the channel menu returns.
+continues. Press left and confirm the session menu returns while capture
+continues. Use Stop Session to stop capture and verify radio restoration.
 Record the OS, FPMS version, adapter, installer results, and button results in
 [the roadmap](trixie-roadmap.md) before marking item 1 complete.
 
@@ -392,7 +398,7 @@ systemctl is-active wlanpi-fpms
 Confirm the printed `Resolved FPMS Python package` path belongs to the launcher's
 Python environment. On DeadEye it normally ends in
 `/opt/wlanpi-fpms/lib/python3.13/site-packages/fpms`. Open Apps → Utilization and
-verify there is one menu entry and Display still works.
+verify there is one menu entry and Start Session/Connect Session still work.
 
 Automated tests cover stale Python directories and a simulated package update.
 After a routine FPMS package update on the device, rerun the Utilization
@@ -403,7 +409,7 @@ and launcher/package versions for diagnosis. Record the device results in
 
 ### Front-panel control acceptance
 
-For roadmap item 3, rerun the installer from the updated checkout, open Display,
+For roadmap item 3, rerun the installer from the updated checkout, open Start Session,
 and allow history to accumulate. Record the capture/TShark PIDs with
 `pgrep -af 'wlanpi-utilization|tshark'` before and after testing Key 2.
 
@@ -418,8 +424,9 @@ and allow history to accumulate. Record the capture/TShark PIDs with
    Key 3 is disabled. The control in the screen-relative left direction exits.
 4. Press Key 3. Confirm a timestamped PNG for the current screen is saved in
    `/var/log/wlanpi-beacon-live`, and its confirmation returns to the same screen.
-5. Press left. Confirm capture stops and the built-in menu returns in the saved
-   orientation. Verify Key 2 still rotates the built-in menu.
+5. Press left. Confirm capture continues and the session menu returns in the saved
+   orientation. Verify Key 2 still rotates the menu; then choose Stop Session
+   and verify radio restoration.
 6. After exiting capture, run `sudo systemctl restart wlanpi-fpms` and confirm
    the orientation remains as set. Record the results in
    [the roadmap](trixie-roadmap.md).
@@ -431,7 +438,7 @@ Apps
   Utilization
     2.4 GHz | 5 GHz | 6 GHz PSC | 6 GHz All
       <channel and center frequency>
-        Start Session | Start + Log | Start Logging | Stop Logging
+        Start Session | Start + Log | Start Logging | Start Export
 ```
 
 ### Capture interface and namespace acceptance
@@ -454,13 +461,13 @@ ip netns list
 2. Select Start + Log and confirm the stats CSV and beacon JSONL metadata
    identify the resolved interface. `network_namespace` is blank in CSV and
    null in JSON for root capture. Repeat with logging-only mode, then stop it.
-3. After stopping the front-panel capture, test an explicit root interface:
-   `sudo wlanpi-utilization --iface wlanpi0 --band 2.4 --channel 1 --local-cu`.
+3. After choosing Stop Session, test an explicit standalone root interface:
+   `sudo wlanpi-utilization --standalone --iface wlanpi0 --band 2.4 --channel 1 --local-cu`.
    Confirm capture and survey updates; stop with Ctrl+C.
 4. If an available test radio already resides in a named namespace, inspect it
    with `sudo ip netns exec NAME iw dev` and
    `sudo ip netns exec NAME iw phy`. Run
-   `sudo wlanpi-utilization --iface IFACE --netns NAME --band 2.4 --channel 1 --local-cu --log`.
+   `sudo wlanpi-utilization --standalone --iface IFACE --netns NAME --band 2.4 --channel 1 --local-cu --log`.
    Replace NAME and IFACE with its actual identifiers. Verify capture, channel
    read-back, survey updates when supported, and namespace metadata. Repeat
    with `--netns NAME` alone to check discovery restricted to that namespace.
@@ -477,6 +484,58 @@ ip netns list
 Use an available test radio for namespace checks; do not move a radio used by
 another tool to manufacture this test. Record any namespace/multiple-radio
 checks that could not be exercised on the device.
+
+### Quick final radio restoration check
+
+Shared web/CLI/FPMS attachment, start/stop, output rotation/buffer closing and
+reboot/authentication have been reported working in the release smoke test.
+The remaining physical check is that a normal stop returns the radio to its
+pre-session state. No manual interface reset is needed for this test.
+
+1. Stop any current session normally. With capture idle, save the baseline:
+
+   ```bash
+   sudo iw dev > /tmp/utilization-radio-before.txt
+   ip -br link >> /tmp/utilization-radio-before.txt
+   ```
+
+2. Start a short direct session through web, FPMS or managed CLI. Choose a
+   supported channel different from the monitor's original channel if one was
+   listed, so restoration is observable. A short session is sufficient.
+3. Stop normally and check status until the phase is `stopped`:
+
+   ```bash
+   sudo wlanpi-utilization session stop --summary
+   sudo wlanpi-utilization session status --summary
+   ```
+
+   If Stop Session was already selected in web/FPMS, run only status. Closing
+   an attached display does not stop capture. Do not reboot between snapshots.
+4. Repeat the read-only snapshot and compare:
+
+   ```bash
+   sudo iw dev > /tmp/utilization-radio-after.txt
+   ip -br link >> /tmp/utilization-radio-after.txt
+   diff -u /tmp/utilization-radio-before.txt /tmp/utilization-radio-after.txt
+   ```
+
+Pass criteria: the capture interface and siblings on its phy still exist with
+the same MAC/interface identity, original interface types and administrative
+`UP` flags. A monitor with a known original channel/width/centers should return
+to them. An existing monitor should remain a monitor; it is not expected to
+become managed. `state UNKNOWN` is normal for some monitor interfaces; compare
+the `UP` flag in angle brackets instead. An idle interface with no known original
+channel has no original tuning to restore. Ignore unrelated link changes and
+review unexpected differences rather than assuming every diff is a failure.
+
+If the capture header reports a named namespace, collect the same before/after
+snapshots there instead: prefix both `iw dev` and `ip -br link` with
+`sudo ip netns exec NAME`, replacing NAME with that namespace. Root-namespace
+snapshots cannot inspect interfaces inside it. Keep both files for review.
+
+A fresh session should also start and stop successfully afterward, confirming
+normal resource release. Automated restoration tests cover the implementation;
+only this device comparison confirms the adapter/driver's actual state.
 
 ### Radio ownership and restoration acceptance
 
@@ -514,7 +573,7 @@ or other capture still must, including one on that same managed interface.
    the phy lock was released and the shared analysis/history still behaves as
    before.
 3. With front-panel capture stopped, run
-   `sudo wlanpi-utilization --iface wlanpi0 --band 2.4 --channel 6 --local-cu`.
+   `sudo wlanpi-utilization --standalone --iface wlanpi0 --band 2.4 --channel 6 --local-cu`.
    Stop with Ctrl+C and compare the baseline. Repeat and send SIGTERM to the
    application PID from a second terminal; compare again. Normal foreground
    capture handles SIGTERM through graceful cleanup.
@@ -608,26 +667,26 @@ low-disk marker described in [logging.md](logging.md#low-disk-markers).
 Basic channel capture:
 
 ```bash
-sudo wlanpi-utilization --iface auto --channel 36
+sudo wlanpi-utilization --standalone --iface auto --channel 36
 ```
 
 Explicit 6 GHz frequency:
 
 ```bash
-sudo wlanpi-utilization --iface auto --frequency-mhz 5975
+sudo wlanpi-utilization --standalone --iface auto --frequency-mhz 5975
 ```
 
 Band-qualified 6 GHz channel:
 
 ```bash
-sudo wlanpi-utilization --iface auto --band 6 --channel 5
+sudo wlanpi-utilization --standalone --iface auto --band 6 --channel 5
 ```
 
 Optional local survey diagnostics:
 
 ```bash
 sudo wlanpi-utilization \
-  --iface auto --band 5 --channel 36 --local-cu --survey-debug
+  --standalone --iface auto --band 5 --channel 36 --local-cu --survey-debug
 ```
 
 The terminal process stays in the foreground and exits on Ctrl-C. Normal live

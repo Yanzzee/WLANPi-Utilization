@@ -227,9 +227,9 @@ checked against a loopback mock. Exported Core packet blocks equal the source
 beacon blocks exactly. These are hardware-free contracts, not Pi performance
 or physical radio acceptance.
 
-`write_beacons` performs blocking I/O. It must run in an isolated export worker
-when live integration is added, with bounded queues and visible failure/skip
-accounting. It must never run on the ordered decoder/analyzer delivery path.
+`write_beacons` performs blocking I/O and runs in the isolated live export worker,
+with bounded queues and visible failure/skip accounting. The offline helper calls
+it directly. It never writes files on the ordered decoder/analyzer delivery path.
 
 Live integration now connects the shared source, bounded worker, rotation,
 retention, status and downloads. Device acceptance remains: install on Pi 4/5,
@@ -242,8 +242,10 @@ service restart and radio restoration. Use a disposable/test filesystem for
 low-space/failure checks; automated slow/full-disk, queue-overflow and bounded
 shutdown tests cover the corresponding isolation contracts locally.
 
-The WiFi-Beacon-analysis end-to-end gate remains milestone 6. TShark readability
-does not establish that gate. Use a pinned offline project revision, supported
+WiFi-Beacon-analysis end-to-end validation is deferred to later testing and is
+not a 2.1.0 release gate. Export/download and opening files in Wireshark have been
+tested; analytical compatibility/results in that external project are not yet
+validated. For that later check, use a pinned offline project revision, supported
 AP-name information, AP-to-classroom mapping, classroom metadata, schedule rows
 covering the capture, and explicit date/timezone context as described in the
 [roadmap](managed-runtime-roadmap.md#wifi-beacon-analysis-end-to-end-check).

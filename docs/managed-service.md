@@ -1,6 +1,6 @@
 # Utilization managed service
 
-The v2.1.0 development service gives CLI and FPMS consumers one capture owner
+The v2.1.0 service gives web, CLI and FPMS consumers one capture owner
 and the same analyzer publications. Managed mode is the default for new FPMS
 installs; saved explicit standalone settings are preserved. Direct capture
 remains the default provider; Core remains an
@@ -82,8 +82,7 @@ An idle/stopped/failed session reports no active session to stop. An explicit
 Stop remains asynchronous; use status to confirm cleanup. Ctrl+C stops a foreground
 standalone capture, while leaving a managed display only detaches it.
 
-Logging/export controls require
-the actual
+Logging/export controls require the actual
 `session_id` value from status, not the literal placeholder `SESSION_ID`.
 While a session is active, read its ID before using the explicit controls below.
 Repeat the assignment after a new session starts.
@@ -229,7 +228,8 @@ start/stop behavior. `sudo wlanpi-utilization web` accesses the private broker
 as root and listens on loopback, suitable for a local browser or SSH tunnel.
 See [web installation and browser checks](web-interface.md). SSE remains
 optional if measured polling overhead justifies it. The optional platform login
-adapter and private Unix backend are described in [protected deployment](web-deployment.md).
+adapter, included by the standard installer, and private Unix backend are
+described in [protected deployment](web-deployment.md).
 Page loads embed the current cached publication before the first status poll,
 without a start/control operation. Publications now include capture tuning and
 its verification flag so consumers can show actual width/center frequencies.

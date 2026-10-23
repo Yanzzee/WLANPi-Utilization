@@ -1,8 +1,9 @@
 # Development Guide
 
-The next phase targets v2.1.0; package metadata uses `2.1.0.dev0` until release
-acceptance. Follow the [managed runtime roadmap](managed-runtime-roadmap.md)
-for milestone scope and release gates.
+The current release target is v2.1.0; package metadata stays `2.1.0.dev0`
+until release finalization. Follow the [release checks](release-2.1.0.md#final-release-checks)
+and [managed runtime roadmap](managed-runtime-roadmap.md) for scope/evidence.
+External WiFi-Beacon-analysis validation is deferred and does not block 2.1.0.
 
 This guide is for contributors and future Codex runs. Read
 [AGENTS.md](../AGENTS.md) and [architecture.md](architecture.md) before changing
@@ -25,7 +26,7 @@ Do not reconstruct retry buckets in a consumer. Close the consumer to detach.
 An explicit owner control calls `runtime.stop(publication.session_id)`; a stale
 ID returns false. Stop requests during startup wait for the live loop to poll.
 This API does not install a daemon, expose HTTP, or change CLI/FPMS launchers.
-The opt-in service and renderer attachment are separate modules described in
+The installed service and renderer attachment are separate modules described in
 [managed service operation](managed-service.md). Test its process/socket
 boundary with `python -m pytest -q tests/test_service.py`; these tests need
 permission to bind a temporary private Unix socket, but need no radio hardware.
@@ -40,7 +41,7 @@ the pinned `websockets==15.0.1` client through the `core` extra.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade 'pip>=24.3' 'setuptools>=75.3' wheel
-python -m pip install -e '.[dev]'
+python -m pip install -e '.[dev,web,core]'
 python -m pytest
 ```
 

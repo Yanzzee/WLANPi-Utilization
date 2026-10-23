@@ -1,3 +1,8 @@
+Current release scope and acceptance are in [2.1.0 release notes](release-2.1.0.md)
+and the [managed runtime roadmap](managed-runtime-roadmap.md). This file retains
+older ideas/status, not current operating instructions. External offline beacon
+analysis is deferred beyond the 2.1.0 release checks at the user's request.
+
 Features & changes
 
 1. DONE     CU screen - review the BSSID that is shown/used for data - this is currently the strongest signal/latest.

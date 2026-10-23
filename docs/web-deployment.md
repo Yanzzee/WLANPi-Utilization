@@ -10,6 +10,8 @@ Implementation and local regression checks are complete. On October 20 the
 user confirmed Pi 4 Apps access, login/logout/expiry, existing-session attachment,
 and web-page availability after reboot/relogin. Remaining release/device checks
 below include failure recovery, download authorization and capture-idle startup.
+Use the [2.1.0 final checks](release-2.1.0.md#final-release-checks) for the bounded
+release pass; the longer matrix below supports troubleshooting and wider coverage.
 
 ## Install on the Pi
 

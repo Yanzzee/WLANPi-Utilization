@@ -62,7 +62,7 @@ removing it would label a partial interval as a full one-second RET/BL sample.
 The Utilization screen graphs AP-advertised QBSS channel utilization for the
 automatically selected QBSS BSSID.
 
-![Utilization utilization screen](docs/images/channel-utilization_screen.png)
+![Utilization utilization screen](images/channel-utilization_screen.png)
 
 Summary fields:
 
@@ -82,7 +82,7 @@ currently retained BSSID advertises usable QBSS information.
 The Admission screen uses the same selected QBSS BSSID as Utilization and shows
 its latest advertised admission capacity.
 
-![Utilization admission capacity screen](docs/images/admission-capacity_screen.png)
+![Utilization admission capacity screen](images/admission-capacity_screen.png)
 
 Summary fields:
 
@@ -101,7 +101,7 @@ It also reports unique client MAC addresses observed in eligible data frames.
 These remain separate metrics: the displayed QBSS sum is AP-advertised, while
 the MAC count is locally observed.
 
-![Utilization station count screen](docs/images/total-station-count_screen.png)
+![Utilization station count screen](images/total-station-count_screen.png)
 
 Summary fields:
 
@@ -145,7 +145,7 @@ The analyzer excludes:
 
 Retries graphs one independent percentage for each completed capture second:
 
-![Utilization retry screen](docs/images/retry-percentage_screen.png)
+![Utilization retry screen](images/retry-percentage_screen.png)
 
 ```text
 frames with Retry bit set / retry-eligible frames × 100
@@ -211,7 +211,7 @@ beacon RSSI when no retry occurred. Frame timing is never a tie-breaker.
 Beacon Loss graphs the percentage of expected beacons not received during each
 completed capture second across all recently heard BSSIDs above -75 dBm.
 
-![Utilization beacon loss screen](docs/images/beacon-loss_screen.png)
+![Utilization beacon loss screen](images/beacon-loss_screen.png)
 
 Summary fields:
 
@@ -254,7 +254,7 @@ It is refreshed on the same timer as every graph screen and reflects the newest
 published analyzer state; a temporarily missing right-edge graph slot does not
 erase it.
 
-![Utilization composition screen](docs/images/composition_screen.png)
+![Utilization composition screen](images/composition_screen.png)
 
 It shows:
 

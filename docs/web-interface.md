@@ -1,6 +1,6 @@
 # Utilization web interface
 
-The v2.1.0 development web consumer uses the managed session at
+The v2.1.0 web interface uses the managed session at
 `/utilization/`. It provides current metrics, six shared-history graphs,
 sortable BSSID and Hosts tables, explicit session/logging controls, and closed
 CSV/JSONL and beacon pcapng downloads. Direct capture remains the default; Core is optional.
@@ -285,8 +285,9 @@ Record revision, image/Python/browser versions, adapter, backend, band/width,
 namespace, and diagnostic bundle. These checks complement the existing
 [managed service acceptance](managed-service.md#web-boundary-and-device-acceptance).
 
-1. Reinstall with `--with-web`, run the web command, and open the local URL
-   through SSH. An idle service must stay idle until an explicit start.
+1. Run the standard installer and open **Apps → Utilization** through normal
+   WLAN Pi HTTPS login. No manual web command or SSH tunnel is required.
+   An idle service must stay idle until an explicit start, including after reboot.
 2. Start direct capture through the page. Attach CLI and FPMS on the same
    source. Record one owner/TShark/analyzer and matching session ID, metrics,
    history, width/coverage notices, and logging status.
@@ -305,7 +306,7 @@ namespace, and diagnostic bundle. These checks complement the existing
 5. Toggle logging off without stopping capture. Download CSV/JSONL, parse them,
    and compare completed values with the session. Verify new segments after
    toggling on/rollover, and explicit unavailable status for removed files.
-6. Interrupt the web process or SSH tunnel, then reconnect. Confirm the broker
+6. Restart only `wlanpi-utilization-web`, then reconnect. Confirm the broker
    retains capture/history. Restart the web process and reload to renew its
    CSRF token. Test missing socket, service failure, and slow downloads without
    retuning or capture restart.
@@ -319,6 +320,12 @@ download races, and optional-dependency installation. Actual responsive browser
 rendering and these Pi hardware/performance checks remain acceptance gates.
 
 ## Launcher and direct hosting
+
+Protected Apps hosting is installed by default in 2.1.0. Pi 4 Apps access,
+login/logout/expiry and page availability after reboot/relogin were confirmed
+during development. The review history below explains the integration; use
+[protected deployment](web-deployment.md) for current install/repair steps and
+[release checks](release-2.1.0.md) for the final release pass.
 
 The user reports good Pi 5 display operation and an October 19 speedtest without
 the earlier count spikes, with different conditions that prevent claiming exact

@@ -3,6 +3,56 @@
 Start with the [README](../README.md) for supported hardware and installation.
 This guide covers common WLAN Pi, capture, display, metric, and logging issues.
 
+## Session keeps running after leaving a display
+
+This is expected in managed mode. FPMS Left or Q/Ctrl+C in an attached terminal
+detaches that consumer; the shared capture, logging/export and history continue.
+Use **Stop Session** in web/FPMS, or:
+
+```bash
+sudo wlanpi-utilization session stop --summary
+sudo wlanpi-utilization session status --summary
+```
+
+Stop is asynchronous; wait for cleanup before selecting a new source. No copied
+ID is required for this stop command. A stale explicit ID must be refreshed from
+status, not replaced with the literal `SESSION_ID`. Standalone foreground capture
+still stops on Ctrl+C. After reboot the managed broker starts idle and does not
+resume the old capture automatically.
+
+## Apps entry or web page missing after an update
+
+FPMS/WebUI package updates can overwrite integration files. From the updated
+repository, stop any active session normally, then rerun the full installer:
+
+```bash
+sudo ./scripts/install_wlanpi_fpms.sh
+```
+
+The standard command includes protected web hosting; no SSH tunnel or manual web
+command is needed. Sign in to WLAN Pi and open **Apps → Utilization** or
+`https://<your-pi>/utilization/`. If installation rejects the platform or the page
+is still unavailable, collect read-only evidence:
+
+```bash
+sudo python3 scripts/pi_web_preflight.py
+sudo python3 scripts/install_web_integration.py --check
+systemctl --no-pager --full status wlanpi-utilization wlanpi-utilization-web wlanpi-webui nginx
+sudo ./scripts/pi_collect_debug.sh --since "15 minutes ago"
+```
+
+Run each command on its own line. Keep the unsupported-revision error and package
+versions for review; do not bypass authentication validation. See
+[protected deployment and repair](web-deployment.md).
+
+## Exported capture is not in downloads
+
+Only successfully closed, registered files appear. Stop beacon export to flush
+and close its current segment while analysis continues, or wait for rotation.
+CSV/JSONL need Stop logging instead. A broker restart clears the in-memory
+download catalog; it does not delete saved files. Check the configured output
+directory and [export status/policy](beacon-export.md) for storage or queue errors.
+
 ## Installer cannot find FPMS
 
 The front-panel installer expects:
@@ -460,7 +510,7 @@ related BSSID MAC patterns. AP-name fields are vendor-specific and may be
 absent. The Composition screen intentionally favors conservative grouping, so
 it can overcount physical radios rather than merge uncertain BSSIDs.
 
-See [screens.md](screens.md#5-composition) and
+See [screens.md](screens.md#6-composition) and
 [architecture.md](architecture.md#radio-grouping).
 
 ## Retry data is blank or unexpected

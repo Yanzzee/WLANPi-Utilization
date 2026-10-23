@@ -6,6 +6,13 @@ pcapng downloads. Direct capture remains the default; Core remains optional.
 Grafana and touchscreen hardware integration are deferred. A future on-device
 browser will open the same application at a local URL.
 
+**Current release scope:** offline WiFi-Beacon-analysis validation is deferred
+at the user's request and no longer blocks 2.1.0. The main implementation is
+complete; the remaining final-build device checks and version/release steps are
+in [2.1.0 release notes](release-2.1.0.md#final-release-checks). Historical
+milestone evidence below retains earlier scope and defaults; current operation
+is documented in the README and linked guides.
+
 **Naming accepted October 14, 2026:** use **Utilization** for app titles, FPMS,
 terminal views, and the web application at `/utilization/`. Prefer
 `wlanpi-utilization` for the device/service command and `utilization` for the
@@ -137,9 +144,10 @@ timestamp resolution/offset, malformed blocks, unsupported link types, and
 truncated packets explicitly. Do not synthesize packets from `BeaconRecord`
 or silently claim that filtered interface statistics describe export counts.
 
-Rotate on configured time/size boundaries with a maximum retained byte/file
-budget and minimum free-space reserve. Delete only owned closed segments under
-an explicit retention policy. Use temporary active files and atomically close
+Rotate on configured time/size boundaries with a minimum free-space reserve.
+File/byte retention caps are optional; defaults retain all closed output and
+stop export near full disk. Delete only owned closed segments under an explicit
+retention policy. Use temporary active files and atomically close
 segments; report exported/skipped packets, queue pressure, disk errors, and
 incomplete output. Disk exhaustion or a stalled writer disables export or drops
 export records with visible accounting while analysis continues. Never queue
@@ -201,12 +209,17 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   Updated FPMS controls/hourly policy and broader physical
   Pi/busy-channel acceptance remain pending; see the 5b evidence and device checks below. See
   [export foundation](beacon-export.md).
-- [ ] **6. Offline analysis and release acceptance.** Run the end-to-end
-  workflow below with exported segments, record evidence, complete device and
-  performance checks, reconcile versions, and prepare v2.1.0 release notes.
-  Tagging/publication follows release acceptance.
+- [ ] **6. Release acceptance.** Complete the bounded final-build Pi checks,
+  resolve blocking findings, reconcile versions, run final regressions and
+  prepare the release/tag. User-facing 2.1.0 notes are now prepared.
+  **External offline analysis is deferred at the user's request and is not a
+  release gate.** Retain its workflow below for later testing; tagging/publication
+  follows release acceptance as a separate action.
 
 ## WiFi Beacon analysis end to end check
+
+**Deferred beyond 2.1.0 release acceptance.** This remains the plan for later
+validation; export readability does not establish external analytical results.
 
 Use a pinned revision of
 [WiFi-Beacon-analysis](https://github.com/Yanzzee/WiFi-Beacon-analysis).
@@ -1208,3 +1221,53 @@ command. Continue multi-consumer and longer busy-channel/rotation testing.
 Milestone 6 WiFi-Beacon-analysis validation with pinned AP/classroom/schedule
 context and final v2.1.0 release acceptance remain next. No new release/version
 change is made; development remains `2.1.0.dev0`.
+
+## 2.1.0 documentation and scope decision
+
+The user deferred external offline beacon analysis to later testing. The
+WiFi-Beacon-analysis workflow remains documented, but is no longer a release
+condition for 2.1.0. Export packet fidelity/readability and external analytical
+results remain separate claims; the latter is unverified.
+
+User-facing [release notes](release-2.1.0.md) now describe the delivered managed
+runtime, authenticated web interface, Hosts, export controls/policy, upgrade and
+reboot behavior, compatibility aliases and limitations. README and operational
+logging/FPMS/web/CLI/testing/troubleshooting guides have been reconciled with
+current defaults. Old Trixie release notes and milestone history are identified
+as historical rather than instructions for the managed runtime.
+
+No additional feature is required for this release scope. The remaining critical
+work is final-build Pi smoke acceptance for install/idle reboot, shared attachment,
+the latest controls/normal stop/radio restoration, authenticated access and
+closed/rotated output, followed by release-version alignment and final regression.
+Earlier acceptance and the last 976-test run remain evidence; this documentation
+change does not assert new physical tests. Broader adapter/band/load matrices,
+external offline analysis, optional Core expansion, Grafana and touchscreen
+hardware are follow-ups rather than new 2.1.0 feature requirements.
+
+Documentation validation checks local file/section links, shell-block syntax and
+CLI argument examples against the current parser. Application code and version
+metadata are unchanged; publishing/tagging remains a separate release action.
+
+## Smoke-test device feedback and remaining restoration check
+
+The user reports successful output rotation and buffered closure, all three
+consumer interfaces (interpreted as web/CLI/FPMS) using a single session, working
+start/stop, and reboot/authentication behaving as designed. These reported areas
+are accepted for the release smoke test. This is not a report of three radio
+adapters or proof of every band/width/auth failure combination.
+
+Physical radio restoration remains the one focused device smoke check: compare
+read-only `iw dev` / `ip -br link` snapshots before a session and after normal
+stop, including its capture namespace if applicable. Original interface types,
+administrative UP flags, identities and known monitor tuning should return.
+Existing monitor interfaces remain monitors. A quick procedure is now in
+[Pi testing](pi_testing.md#quick-final-radio-restoration-check), with the broader
+conflict/failure matrix retained for regression investigation.
+
+Local restoration regression passes **49 tests**. This verifies implementation
+behavior with simulated hardware; it does not replace an adapter/driver check
+on the Pi. No device SSH target/session is configured for this task, so no
+physical restoration result is claimed. After that check, version alignment,
+final regressions and the separate release/tag action remain. External offline
+analysis stays deferred and does not block 2.1.0.

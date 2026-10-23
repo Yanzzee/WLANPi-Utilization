@@ -1,5 +1,10 @@
 # Trixie migration and release checks
 
+This records the earlier 2.0.0 migration/release work. Use the
+[2.1.0 release notes and checks](release-2.1.0.md) for current managed-session,
+web and export behavior. Historical Display/left-exit instructions below
+describe the former standalone runtime.
+
 This migration targets WLAN Pi OS 26.10 DeadEye / Debian 13, Python 3.13,
 TShark 4.4, and the FPMS 1.4.24 menu layout. Utilization v1.0.0 Bookworm remains
 the earlier release; this branch does not preserve Bookworm compatibility.

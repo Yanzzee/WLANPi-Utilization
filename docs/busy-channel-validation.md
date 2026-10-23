@@ -1,5 +1,10 @@
 # Busy-channel identity and missing-data validation
 
+**Latest device feedback, October 23, 2026:** Pi 4/5 speedtests did not cause
+significant display/graph delays. CPU was about 8% on a lightly used Pi 5
+channel and similar on Pi 4. These are reported spot checks; controlled
+adapter/driver and sustained-load comparisons remain useful follow-ups.
+
 **Pi 5 retest, October 19, 2026:** the user reports that the display looks good
 and a speedtest did not produce the earlier anomalies. Conditions differed,
 so this supports proceeding with the next milestone but does not establish
@@ -99,7 +104,8 @@ sudo ./scripts/pi_collect_debug.sh --since "10 minutes ago"
 
 Keep the raw PCAPNG, its sidecar, CSV/JSONL, debug archive, adapter/driver and
 TShark versions, and the times when the display changed. This diagnostic PCAPNG
-contains all captured frame types; beacon-only export is a later milestone.
+contains all captured frame types. [Beacon-only export](beacon-export.md)
+is available separately, but excludes the data/retry evidence needed here.
 Compare headers and FCS in Wireshark and the existing `retry-debug` packet CSV;
 its new `bad_fcs_excluded_count` and `radiotap_bad_fcs` fields expose this guard.
 

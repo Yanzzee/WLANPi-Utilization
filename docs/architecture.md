@@ -132,8 +132,9 @@ disables WLAN decryption and defragmentation. The analyzer still receives every
 decoded 802.11 frame; retry eligibility then excludes control and extension
 frames without a separate capture pipeline. None of the metrics requires
 payload or higher-layer protocol dissection. A 16 MiB capture buffer provides
-headroom during short scheduler stalls. Normal live capture uses a 1024-byte
-snapshot length and warns once per BSSID when a larger beacon is truncated and
+headroom during short scheduler stalls. Managed/export-capable sessions use
+full packet lengths from the shared source. Legacy non-export standalone
+capture uses a 1024-byte snapshot and warns when a larger beacon is truncated and
 later information elements may be unavailable. Interactive terminal renderers
 show runtime capture warnings, including confirmed partial coverage, inside
 their managed footer instead of writing beneath the curses screen.
@@ -423,7 +424,7 @@ See [logging.md](logging.md) for formats and policy.
 
 ## Runtime modes
 
-The v2.1.0 development foundation in `beacon_live/runtime.py` wraps `run_live`
+The v2.1.0 runtime in `beacon_live/runtime.py` wraps `run_live`
 with explicit ownership, lifecycle state, session IDs, and immutable
 publications. `ManagedRuntime.run` blocks on the capture owner's main thread;
 read-only consumers can read or wait from other threads. Each consumer sees
@@ -438,15 +439,15 @@ cooperative: a startup stop request stays pending until the live loop can poll
 it, and no replacement session starts before cleanup returns. Final published
 state remains readable until an explicit new session.
 
-`service.py` now hosts an opt-in broker with a private local Unix socket and
+`service.py` hosts the managed broker with a private local Unix socket and
 one isolated capture owner process. `service_client.py` attaches terminal/LCD
 renderers to the owner's typed JSON publications. Start/join, explicit stop,
 and logging controls share this boundary. Renderer exit detaches and preserves
 the owner. Consumer opens atomically join an active session using its actual
 configuration; explicit conflicting starts still fail until it stops. A plain
 CLI open adopts an active managed session and otherwise retains foreground
-capture; `--standalone` explicitly selects that mode. The initial FPMS setting
-retains standalone behavior pending managed device acceptance. See
+capture; `--standalone` explicitly selects that mode. New FPMS installs use
+managed attachment; saved explicit standalone settings are preserved. See
 [managed service operation](managed-service.md) and the
 [managed runtime roadmap](managed-runtime-roadmap.md).
 
@@ -463,7 +464,7 @@ tuning and verification status for center-frequency/width display. Local survey
 reporting is hidden in the web UI pending adapter validation; analyzer/API/log
 definitions are retained.
 
-Optional WLAN Pi hosting uses the existing Nginx `/auth/check` guard on every
+WLAN Pi hosting, included by the standard installer, uses the existing Nginx `/auth/check` guard on every
 Utilization route and a separate web unit listening only on a private Unix
 socket. Nginx overwrites a private proxy-token header; the backend validates
 that token and checks CSRF/HTTPS origin for controls. Broker permissions remain
@@ -479,15 +480,19 @@ catalog across capture sessions. The web process opens registered files under
 its log root, verifies their identity, and streams downloads independently of
 capture. Active files are excluded. See [web operation](web-interface.md).
 
-`pcapng.py` provides the milestone 5a export foundation: a bounded reader and
-beacon packet-block selector/writer, currently used by the offline
-`scripts/export_beacons.py` helper. It preserves source packet/timestamp/interface
-bytes independently of decoded metrics. It is not installed on the live
-decoder path and performs blocking I/O. Future live integration must fan one
-full-packet source to the existing all-frame decoder and a bounded isolated
-export worker; an export failure must not block analysis. Rotation, retention,
-worker controls/status and web downloads remain the next step. See
-[beacon export](beacon-export.md).
+`packet_source.py` fans one original full-length pcapng source to the all-frame
+decoder and a bounded beacon export branch. `pcapng.py` selects original beacon
+packet blocks, retaining timestamp/interface/radiotap context. `beacon_export.py`
+isolates blocking writes in a spawned process with bounded queues, rotation,
+free-space checks, optional retention and closed-file registration. Export
+failure cannot block analyzer delivery. Direct capture uses one Dumpcap source;
+Core feeds the same boundary. The offline `scripts/export_beacons.py` helper
+reuses the writer without starting capture. See [beacon export](beacon-export.md).
+
+`host_tracking.py` builds bounded host detail alongside the existing client
+observations in that same analyzer pass. Immutable `HostState` rows are part of
+`MetricsSnapshot`; web sorting/navigation never recomputes frame statistics.
+See [host observation rules](web-interface.md#hosts-tab).
 
 - **FPMS display:** live capture plus LCD artifacts and screen navigation.
 - **FPMS display and log:** the same runtime with logging active.
@@ -497,8 +502,8 @@ worker controls/status and web downloads remain the next step. See
   hardware.
 - **Retry debug:** offline PCAP/PCAPNG audit with explicit exclusion counts.
 
-The FPMS adapter prevents simultaneous display and logging-only capture
-sessions so the device never starts two capture pipelines for one app session.
+Managed FPMS display/logging/export consumers attach to one owner. Legacy
+standalone exclusion still prevents competing capture pipelines on the radio.
 
 ## Module boundaries
 
@@ -516,7 +521,8 @@ sessions so the device never starts two capture pipelines for one app session.
 | Shared renderer attachment and controls | `beacon_live/service_client.py` |
 | Web API and responsive renderer | `beacon_live/web.py`, `beacon_live/templates/`, `beacon_live/web_static/` |
 | Logging | `beacon_live/log_writer.py` |
-| Beacon pcapng export foundation (offline) | `beacon_live/pcapng.py`, `scripts/export_beacons.py` |
+| Same-source beacon export | `beacon_live/packet_source.py`, `beacon_live/pcapng.py`, `beacon_live/beacon_export.py`, `scripts/export_beacons.py` |
+| Bounded shared host detail | `beacon_live/host_tracking.py` |
 | CLI/device entrypoints | `beacon_live/cli.py`, `beacon_live/device.py` |
 | FPMS integration | `integration/wlanpi_fpms/channel_utilization.py` |
 
