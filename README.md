@@ -210,7 +210,18 @@ managed FPMS opens join an active session, reporting **Session already running**
 and retaining its actual tuning even if another channel was requested. Changing
 source requires an explicit stop and new session. Closing a managed display or
 leaving FPMS detaches the renderer and retains capture, logging, and history.
-Controls require the actual `session_id` from status. The commands below read
+To stop the current managed session directly:
+
+```bash
+sudo wlanpi-utilization session stop --summary
+```
+
+The CLI reads the current session once and submits its actual ID. A replacement
+session cannot be stopped by that request; a stale-ID error is not retried.
+Stopping is asynchronous; use `session status --summary` to confirm cleanup.
+Foreground standalone capture still stops with Ctrl+C.
+
+Explicit controls use the actual `session_id` from status. The commands below read
 it automatically; rerun the assignment after starting a new session. The word
 `SESSION_ID` alone is not a valid session ID.
 
@@ -249,8 +260,9 @@ The responsive page provides metrics, shared history graphs, sortable BSSID and 
 session/logging/export controls, and closed CSV/JSONL/pcapng downloads. One session button
 switches between Start session and Stop session. The start dialog has a logging
 checkbox; Start logging/Stop logging remains a separate button during a session.
-Beacon pcapng export has its own start-dialog checkbox and live control under
-Log files. Managed FPMS also offers dynamic Start Export/Stop Export actions.
+Beacon pcapng export has its own start-dialog checkbox and synchronized live
+controls beside logging at the top and under Log files. Managed FPMS also offers
+dynamic Start Export/Stop Export actions.
 Export retains original beacon bytes/times/radiotap from the shared source,
 rotates every hour or 256 MiB, and saves files without a default count/total-size
 cap. It stops export at a 256 MiB free-space reserve and closes buffered output. See [export controls and policy](docs/beacon-export.md).

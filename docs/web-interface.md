@@ -79,8 +79,9 @@ the existing CSV/beacon JSONL logging checkbox. During a session the separate
 idle, stopping, disconnected or when the owner has no configured log formats.
 
 The start dialog also offers **Start beacon pcapng export**. Its independent
-**Start beacon export / Stop beacon export** control lives under Log files,
-with current-file/closed counts, skipped records, errors and the configured
+**Start beacon export / Stop beacon export** controls appear beside logging at
+the top and under Log files. Both follow the same shared export state. Log files
+shows current-file/closed counts, skipped records, errors and the configured
 rotation/retention policy. Web and managed CLI/FPMS starts configure the shared
 full-packet source for later export toggling. Existing legacy/raw-diagnostic
 sessions require a new export-capable session. See [beacon export operation](beacon-export.md).

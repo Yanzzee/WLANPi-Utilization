@@ -1,9 +1,58 @@
 from pathlib import Path
 from typing import Optional
+from dataclasses import replace
+import json
 
 import pytest
 
 from beacon_live.device import main
+from beacon_live.runtime import ManagedRuntime, SessionPhase
+from beacon_live.service_client import ServiceClient, ServiceError
+
+
+@pytest.mark.parametrize("phase", [SessionPhase.STARTING, SessionPhase.RUNNING, SessionPhase.STOPPING])
+def test_session_stop_defaults_to_current_id_and_preserves_explicit_id(monkeypatch, capsys, phase):
+    current = replace(ManagedRuntime().read(), session_id="a" * 32, phase=phase)
+    stopped = replace(current, phase=SessionPhase.STOPPING)
+    calls = []
+    monkeypatch.setattr(ServiceClient, "read", lambda self: calls.append("read") or current)
+    monkeypatch.setattr(ServiceClient, "stop", lambda self, identifier: calls.append(identifier) or stopped)
+    assert main(["session", "stop", "--summary"]) == 0
+    assert calls == ["read", current.session_id]
+    assert json.loads(capsys.readouterr().out)["phase"] == "stopping"
+    calls.clear()
+    assert main(["session", "stop", "--session-id", "explicit", "--summary"]) == 0
+    assert calls == ["explicit"]  # Explicit targets never follow a replacement session.
+
+
+@pytest.mark.parametrize("phase", [SessionPhase.IDLE, SessionPhase.STOPPED, SessionPhase.FAILED])
+def test_session_stop_without_id_reports_no_active_session(monkeypatch, capsys, phase):
+    current = replace(ManagedRuntime().read(), phase=phase,
+                      session_id=None if phase is SessionPhase.IDLE else "a" * 32)
+    monkeypatch.setattr(ServiceClient, "read", lambda self: current)
+    monkeypatch.setattr(ServiceClient, "stop", lambda *args: pytest.fail("No active session should be stopped"))
+    assert main(["session", "stop", "--summary"]) == 1
+    assert "No active Utilization session to stop" in capsys.readouterr().err
+
+
+def test_session_stop_does_not_retry_or_follow_a_replacement_after_stale_id(monkeypatch, capsys):
+    current = replace(ManagedRuntime().read(), session_id="a" * 32, phase=SessionPhase.RUNNING)
+    calls = []
+    monkeypatch.setattr(ServiceClient, "read", lambda self: calls.append("read") or current)
+    def stop(self, identifier):
+        calls.append(identifier)
+        raise ServiceError("Stale Utilization session ID")
+    monkeypatch.setattr(ServiceClient, "stop", stop)
+    assert main(["session", "stop", "--summary"]) == 1
+    assert calls == ["read", current.session_id]
+    assert "Stale Utilization session ID" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("operation", ["logging", "export"])
+def test_other_session_controls_still_require_an_explicit_id(operation):
+    with pytest.raises(SystemExit) as error:
+        main(["session", operation, "--enabled", "no"])
+    assert error.value.code == 2
 
 
 def test_device_launcher_enters_live_mode_and_forwards_options(

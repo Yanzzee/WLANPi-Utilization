@@ -265,7 +265,8 @@ It shows:
 - `Radio Stations` in the interactive CLI: sum of the newest advertised QBSS
   station counts for those strongest-radio BSSIDs; missing counts are zero and
   client MACs are not deduplicated across BSSIDs;
-- `AP`: supported vendor AP-name information when present;
+- AP name: supported vendor AP-name information when present; the 128×128
+  composition line omits the `AP ` prefix to leave more room for long names;
 - `Vendor`: supported vendor identification when present.
 
 The footer cycles every two seconds through BSSIDs grouped with the strongest

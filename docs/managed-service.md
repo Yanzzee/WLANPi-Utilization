@@ -66,11 +66,27 @@ Start Session and Start + Log are the idle channel actions. Start Logging and
 Start + Log report **Logging already being saved** when logging is active;
 they preserve the current files. Enabling logging on an existing session uses
 its current ID and does not need a new background renderer.
-**Stop Logging** disables logging without ending capture. CLI controls require
+**Stop Logging** disables logging without ending capture. Stop the current managed
+session without copying its ID:
+
+```bash
+sudo wlanpi-utilization session stop --summary
+sudo wlanpi-utilization session status --summary
+```
+
+The stop command reads the current session ID once, then sends the existing
+ID-scoped stop request. If another session replaces it in between, the broker
+rejects the stale ID; the command does not follow/retry against the replacement.
+An idle/stopped/failed session reports no active session to stop. An explicit
+`--session-id` continues to target exactly that ID without a preliminary read.
+Stop remains asynchronous; use status to confirm cleanup. Ctrl+C stops a foreground
+standalone capture, while leaving a managed display only detaches it.
+
+Logging/export controls require
 the actual
 `session_id` value from status, not the literal placeholder `SESSION_ID`.
-While a session is active, read its ID automatically before using the desired
-control below. Repeat the assignment after a new session starts.
+While a session is active, read its ID before using the explicit controls below.
+Repeat the assignment after a new session starts.
 
 While Utilization's menu is visible, one bounded background read checks status
 at most every two seconds. The normal FPMS menu loop consumes changes and

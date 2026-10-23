@@ -234,6 +234,7 @@ a{
 .navigation{
   display:flex;
   overflow-x:auto;
+  overflow-y:hidden;
   gap:8px;
   align-items:center;
   border-bottom:1px solid var(--line);
@@ -248,7 +249,7 @@ a{
   font-size:13px;
   font-weight:650;
   border-bottom:2px solid transparent;
-  margin-bottom:-1px
+  margin-bottom:0
 }
 .nav-item.selected{
   color:var(--teal);

@@ -202,12 +202,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="wlanpi-utilization session", description="Control the shared Utilization session.")
     parser.add_argument("operation", choices=("status", "stop", "logging", "export"))
     parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
-    parser.add_argument("--session-id", help="Required for mutating controls; obtain it from status.")
+    parser.add_argument("--session-id", help="Required for logging/export; stop defaults to the current session ID.")
     parser.add_argument("--enabled", choices=("yes", "no"))
     parser.add_argument("--summary", action="store_true", help="Print session, logging and capture-quality state.")
     args = parser.parse_args(argv)
-    if args.operation != "status" and not args.session_id:
-        parser.error("--session-id is required for stop/logging/export")
+    if args.operation in {"logging", "export"} and not args.session_id:
+        parser.error("--session-id is required for logging/export")
     if args.operation in {"logging", "export"} and args.enabled is None:
         parser.error(f"{args.operation} requires --enabled yes|no")
     try:
@@ -215,7 +215,13 @@ def main(argv=None):
         if args.operation == "status":
             publication = client.read()
         elif args.operation == "stop":
-            publication = client.stop(args.session_id)
+            identifier = args.session_id
+            if identifier is None:
+                current = client.read()
+                if current.session_id is None or current.phase not in ACTIVE_PHASES:
+                    raise ServiceError("No active Utilization session to stop")
+                identifier = current.session_id
+            publication = client.stop(identifier)
         elif args.operation == "logging":
             publication = client.set_logging(args.session_id, args.enabled == "yes")
         else:

@@ -269,6 +269,8 @@ export async function checkWebUi({html, source, status}) {
     statusCode = 503; await poll();
     assert.equal(elements.get("session-toggle").disabled, true);
     assert.equal(elements.get("logging-toggle").disabled, true);
+    assert.equal(elements.get("export-toggle").disabled, true);
+    assert.equal(elements.get("export-toggle-files").disabled, true);
     assert.equal(elements.get("ap-cu-value").textContent, metrics);
     statusCode = 401; await poll();
     assert.equal(elements.get("login-required").hidden, false);
@@ -299,13 +301,16 @@ export async function checkWebUi({html, source, status}) {
     statusCode = 200;
     assert.equal(elements.get("export-toggle").disabled, false);
     assert.equal(elements.get("export-toggle").textContent, "Start beacon export");
+    assert.equal(elements.get("export-toggle-files").textContent, "Start beacon export");
     const beforeExport = value.publication.session_id;
     await elements.get("export-toggle").events.click(); await settle();
     assert.equal(elements.get("export-toggle").textContent, "Stop beacon export");
+    assert.equal(elements.get("export-toggle-files").textContent, "Stop beacon export");
     assert.match(elements.get("export-status").textContent, /Export active/);
     assert.equal(value.publication.session_id, beforeExport);
-    await elements.get("export-toggle").events.click(); await settle();
+    await elements.get("export-toggle-files").events.click(); await settle();
     assert.equal(elements.get("export-toggle").textContent, "Start beacon export");
+    assert.equal(elements.get("export-toggle-files").textContent, "Start beacon export");
     value.logging_available = false; await poll();
     assert.equal(elements.get("logging-toggle").disabled, true);
     value.logging_available = true;
@@ -313,6 +318,8 @@ export async function checkWebUi({html, source, status}) {
     assert.equal(elements.get("session-toggle").textContent, "Stopping…");
     assert.equal(elements.get("session-toggle").disabled, true);
     assert.equal(elements.get("logging-toggle").disabled, true);
+    assert.equal(elements.get("export-toggle").disabled, true);
+    assert.equal(elements.get("export-toggle-files").disabled, true);
     value.publication.phase = "stopped"; value.publication.logging.active = false; value.publication.revision++;
     await poll();
     assert.equal(elements.get("session-toggle").textContent, "Start session");

@@ -10,7 +10,9 @@ restart capture, retune the radio, replace the analyzer or reset history.
 After syncing, install/update with `sudo ./scripts/install_wlanpi_fpms.sh`
 (the installer restarts services and ends an active session). Open the protected
 `/utilization/` page, start a new session and select **Start beacon pcapng
-export**, or use **Start beacon export** under **Log files** during the session.
+export**, or use **Start beacon export** beside the logging button at the top
+or under **Log files** during the session. Both controls stay synchronized with
+web/CLI/FPMS export changes and disable together when stopping or disconnected.
 Stop export to drain accepted packets and flush/close the current segment; analysis continues.
 CSV/JSONL logging and beacon export have independent controls.
 

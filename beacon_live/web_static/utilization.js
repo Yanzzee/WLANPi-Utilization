@@ -92,9 +92,11 @@
     $("logging-toggle").disabled = !online || busy || !active || !loggingAvailable || stopping;
     $("logging-toggle").title = loggingAvailable ? "Toggle log files while capture continues" : "This session has no logging formats configured";
     $("logging-toggle").textContent = publication?.logging.active ? "Stop logging" : "Start logging";
-    $("export-toggle").disabled = !online || busy || !active || !exportAvailable || stopping;
-    $("export-toggle").textContent = publication?.beacon_export?.requested ? "Stop beacon export" : "Start beacon export";
-    $("export-toggle").title = exportAvailable ? "Toggle beacon pcapng export while analysis continues" : "Start a new session to enable the full-packet export source";
+    ["export-toggle", "export-toggle-files"].forEach(id => {
+      $(id).disabled = !online || busy || !active || !exportAvailable || stopping;
+      $(id).textContent = publication?.beacon_export?.requested ? "Stop beacon export" : "Start beacon export";
+      $(id).title = exportAvailable ? "Toggle beacon pcapng export while analysis continues" : "Start a new session to enable the full-packet export source";
+    });
     $("start-submit").disabled = !online || busy || active;
     $("refresh-files").disabled = !online || busy;
     $("refresh-interfaces").disabled = !online || busy || Boolean(interfacesRequest);
@@ -353,11 +355,11 @@
     await control("logging", {session_id: publication.session_id, enabled: !publication.logging.active});
     filesAt = 0;
   });
-  $("export-toggle").addEventListener("click", async () => {
+  ["export-toggle", "export-toggle-files"].forEach(id => $(id).addEventListener("click", async () => {
     if (!online || busy || !publication || !activeSession(publication) || !exportAvailable || publication.phase === "stopping") return;
     await control("export", {session_id: publication.session_id, enabled: !publication.beacon_export.requested});
     filesAt = 0;
-  });
+  }));
   ["cancel-start", "cancel-bottom"].forEach(id => $(id).addEventListener("click", () => $("start-dialog").close()));
   const captureOptions = JSON.parse($("capture-options").textContent);
   const channelPlan = () => captureOptions[$("band").value];

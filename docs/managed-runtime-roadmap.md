@@ -171,7 +171,9 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   reconnect/navigation, multiple tabs, and local-browser operation.
   **Implementation and local automated coverage complete October 16;
   Pi 5 display and speedtest retest accepted October 19 with different test
-  conditions. Broader browser/device/performance coverage remains pending.** See milestone 3 evidence
+  conditions. October 23 tests report no significant display/graph delay during
+  speedtests on Pi 4 and Pi 5, about 8% CPU on a lightly used Pi 5 channel and
+  similar Pi 4 CPU. Broader browser/device/performance coverage remains pending.** See milestone 3 evidence
   below and [web operation/checks](web-interface.md).
 - [ ] **4. Launcher and authentication.** Implement the verified platform
   launcher and protected route without merging the Utilization backend into
@@ -195,7 +197,8 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   complete October 21:** same-source direct/Core fan-out, bounded spawned
   writer, rotation/retention/free-space limits, independent controls, health
   and closed pcapng downloads. Initial Pi export/download and Wireshark opening
-  confirmed October 21. Updated FPMS controls/hourly policy and broader physical
+  confirmed October 21; multiple beacon captures exported by October 23.
+  Updated FPMS controls/hourly policy and broader physical
   Pi/busy-channel acceptance remain pending; see the 5b evidence and device checks below. See
   [export foundation](beacon-export.md).
 - [ ] **6. Offline analysis and release acceptance.** Run the end-to-end
@@ -1161,3 +1164,47 @@ The prior export-policy/FPMS acceptance remains outstanding where not yet tested
 Milestone 6 remains next: WiFi-Beacon-analysis end-to-end validation with pinned
 AP/classroom/schedule/date/timezone context. Hosts is an additive web improvement;
 it does not close that export-analysis gate. Version stays `2.1.0.dev0`.
+
+## Pi feedback and control refinements — October 23, 2026
+
+**Reported device evidence:** the user exported multiple beacon captures.
+Speedtests produced no significant display delay on Pi 5 and no graph-output
+delay on Pi 4 while monitoring the traffic's channel. `top` showed about 8% CPU
+on Pi 5 on a lightly used channel, with similar CPU on Pi 4. These are reported
+spot checks, not a sustained capacity measurement. They improve initial
+direct-capture/performance acceptance; export time/size boundaries, failure
+behavior and offline analytical correctness remain separate checks. Initial
+Hosts testing was also reported good in the preceding feedback.
+
+**Completed locally:** `wlanpi-utilization session stop --summary` now stops the
+current managed session without requiring an operator to copy its ID. The CLI
+reads once and submits that ID using the existing broker stop request; a stale
+ID is rejected without retrying against a replacement. Explicit `--session-id`
+targets retain their behavior, and logging/export CLI controls still require
+explicit IDs. No active session reports a clear error. Stop remains asynchronous;
+status confirms cleanup. The primary CLI help and operation docs show the command.
+
+The web header now offers Start/Stop beacon export beside Start/Stop logging.
+The Log files action remains available, sharing the same state/handler, session
+ID and availability/busy/disconnected/stopping guards. Tab navigation retains
+horizontal overflow on small screens while suppressing vertical overflow and
+removing its negative tab margin, which could produce a few pixels of vertical
+scroll. The composition AP-name detail line drops its `AP ` prefix to preserve
+space on the 128×128 display; placeholders and automatic identity selection remain.
+
+**Evidence:** full Python 3.13.3 regression passes **976 tests in 38.93 seconds**,
+with the same two existing direct-worker fork deprecation warnings. New CLI
+checks cover current-ID stop during startup/running/stopping, explicit targeting,
+idle/stopped/failed states, replacement-session races without retries, and
+unchanged logging/export ID requirements. Existing screen/LCD/FPMS contracts
+pass with the shorter AP-name line. Hosted/local simulated-DOM checks verify
+export actions from both locations, synchronized labels, and disabled controls
+during disconnect/shutdown. Native tab scrolling and physical 128×128 layout
+remain for the next device check; no rendered-browser result is claimed.
+
+**Remaining:** confirm these refinements on-device, especially the top export
+action, absence of vertical tab scrolling, long AP names and the short CLI stop
+command. Continue multi-consumer and longer busy-channel/rotation testing.
+Milestone 6 WiFi-Beacon-analysis validation with pinned AP/classroom/schedule
+context and final v2.1.0 release acceptance remain next. No new release/version
+change is made; development remains `2.1.0.dev0`.
