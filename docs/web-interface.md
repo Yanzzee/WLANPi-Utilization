@@ -5,6 +5,14 @@ The v2.1.0 web interface uses the managed session at
 sortable BSSID and Hosts tables, explicit session/logging controls, and closed
 CSV/JSONL and beacon pcapng downloads. Direct capture remains the default; Core is optional.
 
+The application uses native dark styling by default, including graphs, tables,
+session setup, controls and status messages. It stays dark regardless of browser
+appearance preferences; no light-mode toggle or Dark Reader extension is needed.
+Surfaces and brand accents follow the
+[WLAN Pi WebUI dark palette](https://github.com/WLAN-Pi/wlanpi-webui/blob/2cd96f2069a5cadeb1614f24e67e770dd3ad7a59/wlanpi_webui/static/css/app.css), while graph
+series retain distinct colors. Disable Dark Reader for this page when checking
+the native appearance so its additional filtering does not alter the colors.
+
 ## Install and open on a Pi
 
 Install/update the application, FPMS, broker and protected web hosting together:

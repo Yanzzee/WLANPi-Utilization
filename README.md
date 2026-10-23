@@ -285,7 +285,8 @@ an SSH tunnel from your laptop and visit `http://127.0.0.1:8765/utilization/`:
 ssh -N -L 8765:127.0.0.1:8765 wlanpi@wlanpi-bd2
 ```
 
-The responsive page provides metrics, shared history graphs, sortable BSSID and Hosts tables,
+The responsive page uses native dark styling and provides metrics, shared history
+graphs, sortable BSSID and Hosts tables,
 session/logging/export controls, and closed CSV/JSONL/pcapng downloads. One session button
 switches between Start session and Stop session. The start dialog has a logging
 checkbox; Start logging/Stop logging remains a separate button during a session.

@@ -1,15 +1,33 @@
 :root{
-  --ink:#182b34;
-  --muted:#62747e;
-  --line:#dde5e8;
-  --bg:#f4f7f8;
-  --paper:#fff;
-  --teal:#007e83;
-  --mint:#e4f4f0;
-  --orange:#bb6c17;
-  --red:#b43f43;
-  --purple:#7756b9;
-  --blue:#387bbe;
+  color-scheme:dark;
+  /* WLAN Pi WebUI dark surfaces and brand; graph colors stay distinct. */
+  --ink:#e6eaee;
+  --muted:#9aa5b1;
+  --line:#2a343d;
+  --line-strong:#3a4753;
+  --control-line:#657887;
+  --bg:#101417;
+  --paper:#1a2026;
+  --surface-raised:#232b33;
+  --masthead:#0b0f13;
+  --accent:#ff8a5c;
+  --primary:#f45625;
+  --primary-hover:#ff6b3e;
+  --on-primary:#0b0f13;
+  --teal:#36d5df;
+  --mint:#183632;
+  --success:#bfe6c8;
+  --orange:#ffb45c;
+  --red:#ff9ba6;
+  --purple:#c2a3ff;
+  --blue:#79b8ff;
+  --warning-bg:#3a3320;
+  --warning-text:#f3e2b0;
+  --warning-line:#7c672f;
+  --danger-bg:#3a1f22;
+  --danger-text:#f3c2c7;
+  --danger-line:#8b4c54;
+  --gridline:#34414d;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   color:var(--ink);
   background:var(--bg);
@@ -36,7 +54,7 @@ button:disabled{
   opacity:.48
 }
 button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible{
-  outline:3px solid #68b9bd;
+  outline:3px solid var(--accent);
   outline-offset:3px
 }
 h1,h2,h3,p{
@@ -55,7 +73,7 @@ h3{
   font-size:15px
 }
 a{
-  color:var(--teal)
+  color:var(--accent)
 }
 .muted{
   color:var(--muted);
@@ -63,7 +81,7 @@ a{
   line-height:1.5
 }
 .masthead{
-  background:var(--paper);
+  background:var(--masthead);
   border-bottom:1px solid var(--line);
   padding:24px max(28px,calc((100vw - 1320px)/2));
   display:flex;
@@ -79,7 +97,7 @@ a{
 .brand-icon{
   width:34px;
   height:34px;
-  fill:var(--teal)
+  fill:var(--accent)
 }
 .brand p{
   color:var(--muted);
@@ -102,7 +120,7 @@ a{
   font-size:11px;
   letter-spacing:.1px;
   font-weight:650;
-  color:#216858;
+  color:var(--success);
   white-space:nowrap
 }
 .status:before{
@@ -113,15 +131,15 @@ a{
   background:currentColor
 }
 .status.neutral{
-  background:#edf1f3;
+  background:var(--surface-raised);
   color:var(--muted)
 }
 .status.warning{
-  background:#fff1dc;
-  color:#935f17
+  background:var(--warning-bg);
+  color:var(--warning-text)
 }
 .status.bad{
-  background:#fae9e8;
+  background:var(--danger-bg);
   color:var(--red)
 }
 .shell{
@@ -138,7 +156,7 @@ a{
   border:1px solid var(--line);
   border-radius:12px;
   padding:20px 22px;
-  box-shadow:0 2px 4px #152a3503
+  box-shadow:0 2px 4px #00000026
 }
 .session-bar > div{
   min-width:0;
@@ -182,27 +200,27 @@ a{
   transition:background .12s
 }
 .primary{
-  background:var(--teal);
-  color:white
+  background:var(--primary);
+  color:var(--on-primary)
 }
 .primary:hover:not(:disabled){
-  background:#006b70
+  background:var(--primary-hover)
 }
 .secondary{
   color:var(--ink);
   background:var(--paper);
-  border-color:var(--line)
+  border-color:var(--control-line)
 }
 .secondary:hover:not(:disabled){
-  background:#f1f6f7
+  background:var(--surface-raised)
 }
 .danger{
   color:var(--red);
-  border-color:#ebcdce;
-  background:#fff
+  border-color:var(--danger-line);
+  background:var(--paper)
 }
 .danger:hover:not(:disabled){
-  background:#fff1f0
+  background:var(--danger-bg)
 }
 .small{
   min-height:32px;
@@ -218,8 +236,9 @@ a{
 }
 .notice{
   padding:12px 16px;
-  border:1px solid #e5d3ae;
-  background:#fffaed;
+  border:1px solid var(--warning-line);
+  background:var(--warning-bg);
+  color:var(--warning-text);
   border-radius:8px;
   font-size:12px;
   line-height:1.6;
@@ -227,9 +246,9 @@ a{
   overflow-wrap:anywhere
 }
 .notice.error{
-  border-color:#eac8c9;
-  background:#fff2f1;
-  color:#923b3d
+  border-color:var(--danger-line);
+  background:var(--danger-bg);
+  color:var(--danger-text)
 }
 .navigation{
   display:flex;
@@ -252,11 +271,11 @@ a{
   margin-bottom:0
 }
 .nav-item.selected{
-  color:var(--teal);
-  border-bottom-color:var(--teal)
+  color:var(--accent);
+  border-bottom-color:var(--accent)
 }
 .count{
-  background:#e7eef0;
+  background:var(--surface-raised);
   border-radius:4px;
   font-size:10px;
   padding:2px 5px;
@@ -303,7 +322,7 @@ a{
   font-variant-numeric:tabular-nums
 }
 .metric-value.unavailable{
-  color:#92a1a9
+  color:var(--muted)
 }
 .metric-detail{
   font-size:10px;
@@ -327,8 +346,8 @@ a{
 }
 .composition{
   margin:0 0 28px;
-  background:#eaf1f2;
-  border:1px solid #dfe9eb;
+  background:var(--surface-raised);
+  border:1px solid var(--line-strong);
   border-radius:9px;
   padding:18px
 }
@@ -452,12 +471,12 @@ a{
   overflow:visible
 }
 .chart text{
-  fill:#768891;
+  fill:var(--muted);
   font-size:11px;
   font-family:inherit
 }
 .gridline{
-  stroke:#e9eef0;
+  stroke:var(--gridline);
   stroke-width:1
 }
 .series{
@@ -493,7 +512,7 @@ a{
   color:var(--muted);
   white-space:normal;
   overflow-wrap:anywhere;
-  border-top:1px solid #edf1f3;
+  border-top:1px solid var(--line);
   padding-top:10px;
   margin-top:4px;
   min-height:25px
@@ -522,7 +541,7 @@ table{
 th{
   font-size:10px;
   font-weight:600;
-  background:#f9fbfc;
+  background:var(--surface-raised);
   color:var(--muted);
   padding:15px 12px;
   border-bottom:1px solid var(--line);
@@ -538,7 +557,7 @@ th button{
 }
 td{
   padding:14px 12px;
-  border-bottom:1px solid #edf1f3;
+  border-bottom:1px solid var(--line);
   white-space:nowrap;
   font-variant-numeric:tabular-nums
 }
@@ -589,7 +608,7 @@ tbody tr:last-child td{
 }
 .log-hint{
   padding:12px 16px;
-  border-left:2px solid #bfdbd9;
+  border-left:2px solid var(--teal);
   font-size:12px;
   line-height:1.7;
   color:var(--muted);
@@ -655,7 +674,7 @@ footer span:nth-child(2){
   left:8px;
   top:-80px;
   padding:10px;
-  background:white;
+  background:var(--paper);
   z-index:5
 }
 .skip-link:focus{
@@ -682,10 +701,11 @@ dialog{
   max-height:calc(100dvh - 30px);
   overflow:auto;
   color:var(--ink);
-  box-shadow:0 20px 90px #0b293c30
+  background:var(--paper);
+  box-shadow:0 20px 90px #00000080
 }
 dialog::backdrop{
-  background:#182b345c;
+  background:#000000a6;
   backdrop-filter:blur(3px)
 }
 .dialog-header{
@@ -726,12 +746,16 @@ dialog::backdrop{
 }
 input:not([type=checkbox]),select{
   width:100%;
-  border:1px solid #cdd9dd;
+  border:1px solid var(--control-line);
   border-radius:6px;
   padding:10px;
   background:var(--paper);
   color:var(--ink);
   min-height:39px
+}
+input::placeholder{
+  color:var(--muted);
+  opacity:1
 }
 .check{
   display:flex;
