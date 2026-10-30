@@ -1,9 +1,15 @@
 # Core capture backend evaluation
 
-**Decision accepted October 14, 2026:** keep direct capture as the default for
-the standalone CLI and FPMS application. Retain Core capture as an explicit
-optional backend for remote integration and future compatible stream sharing.
-Successful Core acceptance tests do not automatically trigger a default change.
+**Direction updated October 30, 2026:** the next phase is wlanpi-core expansion
+and default support, proposed for 2.2.0. The [current roadmap](roadmap.md) defines
+the compatibility, lifecycle, subscription and migration gates before Core
+becomes the default on supported WLAN Pi installations. Direct remains the
+2.1.0 default and the current Core backend remains owner-only and opt-in.
+
+The October 14 decision to retain direct as the recommended default applied to
+the completed Trixie/2.1.0 baseline. Its requirement for another decision before
+scheduling migration is superseded by the new phase. The pinned findings and
+device evidence below remain useful; they are not claims of later Core support.
 
 Core's [architecture](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/ARCHITECTURE.md)
 centralizes device information and control for local consumers, including FPMS
@@ -22,10 +28,10 @@ restoration transaction, or survey-counter API. The app still needs local radio
 safety and restoration around Core capture. Core also adds service,
 authentication and transport dependencies; their performance cost has not been
 measured. Neither backend inherently improves adapter reception or analysis
-accuracy. Reconsider the default only for a concrete sharing/integration need or
-improved upstream radio lifecycle guarantees, with a separate decision and
-device acceptance. Core expansion is separate from the direct-backend Trixie
-release checks.
+accuracy. The new phase will expand compatible sharing and accept Core as the
+default within a declared support contract. Complete API-managed radio operation
+is a separate upstream track; retain local safeguards until equivalent services
+exist. The completed Trixie/2.1.0 acceptance is not reopened.
 
 ## Reviewed baseline
 
@@ -48,7 +54,7 @@ control tokens, and summary endpoint are not the shipped contract.
 
 ## Fit and gaps
 
-| Requirement | Current Core behavior | Utilization integration |
+| Requirement | Reviewed Core 2.4.8 behavior | Utilization integration |
 | --- | --- | --- |
 | One capture, all available frame types | Core runs Dumpcap and streams PCAPNG; an empty `pcap_filter` adds no BPF filter. | Feed one stream to one local TShark decoder and the existing shared analyzer. No beacon-only filter. |
 | One fixed channel | A one-entry channel list is applied at startup; it does not enter the repeated multi-channel hop loop. | Request exactly one frequency/width and verify actual tuning. |
@@ -170,8 +176,10 @@ In the development venv, run the transport checks with the Pi's TShark:
 
 ## Optional Core development
 
-These stages describe retained optional-backend work. They do not schedule a
-default migration or block completion of the direct-backend Trixie release.
+The original optional-backend stages now feed the
+[Core expansion and default roadmap](roadmap.md#ordered-core-milestones).
+Evaluation, the owner prototype and client packaging are implemented. Parity,
+subscription and default migration remain pending acceptance.
 
 1. **Evaluation/device inventory:** run the metadata probe and decoder transport
    checks; confirm the installed Core contract and namespace/frequency behavior.
@@ -185,22 +193,21 @@ default migration or block completion of the direct-backend Trixie release.
 4. **Compatible subscription:** add opt-in subscription with verified source,
    namespace, fixed tuning, and empty filter; reject incompatible sessions and
    preserve the owner's state on exit.
-5. **Reassess only when justified:** consider a default change for a concrete
-   sharing/integration requirement or improved upstream radio lifecycle support.
-   That requires a separate decision and device acceptance; passing the above
-   checks alone keeps direct capture as the default. Core errors must not silently
-   start direct capture.
+5. **Default transition:** after the roadmap's supported-source/channel,
+   lifecycle and subscription gates pass, make Core the default for supported
+   WLAN Pi installations. Preserve explicit direct settings and test upgrades.
+   Core errors must not silently start direct capture.
 
-FPMS defaults to direct capture; Core is now an explicit persistent opt-in. The
-user reported testing item 8 changes; final publication checks remain in the
-release checklist.
+FPMS currently defaults to direct capture; Core is an explicit persistent
+opt-in. The v2.1.0 merge/tag is complete. Operating instructions below describe
+the shipped behavior until the new default is implemented and accepted.
 
 ### Remaining optional-backend work
 
 The owner prototype already delegates tuning and packet capture to Core and
-feeds one PCAPNG stream to the existing decoder/analyzer. The remaining work
-does not require replacing the analysis engine or redesigning the menu, and is
-separate from direct-backend release acceptance.
+feeds one PCAPNG stream to the existing decoder/analyzer. The details below
+inform the new roadmap without replacing the analysis engine. Preserve the
+existing single-pipeline, metric and shared-history contracts.
 
 1. **Client packaging: implemented, device installation reported successful.** The app's
    `core` extra pins websockets 15.0.1, matching Core 2.4.8's dependency. The
@@ -220,9 +227,10 @@ separate from direct-backend release acceptance.
    service's `WLANPI_UTILIZATION_CAPTURE_BACKEND` override takes precedence.
    Exercise Display + Log, background logging, navigation, rotation,
    menu exit and service shutdown. Preserve one analyzer/history throughout.
-   Keep Core opt-in after device acceptance. Report Core errors instead of
-   silently starting direct capture. Where it simplifies platform integration,
-   extend the current authenticated layout read to actual-channel verification:
+   Keep Core opt-in until the roadmap's default-transition gate passes. Report
+   Core errors instead of silently starting direct capture. Where it simplifies
+   platform integration, extend the authenticated layout read to actual-channel
+   verification:
    `/api/v1/network/config/status` already includes each monitor's raw `channel`
    string with frequency, width and centers. Validate that data and namespace
    against the request, avoiding an extra local `iw` read where complete.
@@ -240,10 +248,10 @@ separate from direct-backend release acceptance.
    with the same saved packets and check raw/log byte/frame accounting.
    Define what recovery is possible after abrupt termination; the current
    parent cannot restore local radio state after it is forcibly killed.
-5. **Document optional support after acceptance.** Record the tested Core/API
-   version, widths, lifecycle behavior and limitations. Direct remains the
-   normal CLI/FPMS backend; a future default change requires the separate
-   reassessment described above.
+5. **Document accepted support and migration.** Record the tested Core/API
+   version, widths, lifecycle behavior and limitations. Update all entrypoint
+   defaults together only after the roadmap gates pass; preserve direct as an
+   explicit supported choice and provide upgrade instructions.
 
 **Sharing is a future feature and the strongest potential reason to expand
 Core integration.** Add opt-in subscription only to a verified single-source, fixed,
@@ -372,8 +380,9 @@ cases, and saved-packet metric comparison described below.
 In the same October 14 report, the Core/API display appeared to avoid the
 high-utilization performance problem while direct capture still lagged a little.
 This is a device observation, not a controlled benchmark or proof of different
-packet loss. It remains a separate performance follow-up and does not change
-the agreed direct default. Compare the same adapter, channel/width and
+packet loss. Later October 23 Pi 4/5 speedtests reported no significant display
+delay; see [busy-channel validation](busy-channel-validation.md). The new phase
+includes a controlled comparison. Compare the same adapter, channel/width and
 display/logging settings; measure capture-to-display delay, decoded frame rate,
 CPU use, buffering and available drop evidence before attributing the difference
 to transport, decoding, analysis or rendering. Preserve a single capture and

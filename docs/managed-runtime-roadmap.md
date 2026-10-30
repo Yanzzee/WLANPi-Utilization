@@ -1,19 +1,21 @@
 # Utilization managed runtime release roadmap
 
-This phase targets **v2.1.0**: one managed capture and analyzer session shared
-by web, CLI, and FPMS consumers, with a responsive web application and beacon
-pcapng downloads. Direct capture remains the default; Core remains optional.
-Grafana and touchscreen hardware integration are deferred. A future on-device
-browser will open the same application at a local URL.
+**Completed 2.1.0 roadmap and implementation history.** All six milestones are
+complete: one managed capture/analyzer shared by web, CLI and FPMS, authenticated
+web access, Hosts and beacon pcapng export. Device smoke acceptance includes
+normal radio restoration. External WiFi-Beacon-analysis validation remains
+deferred. Direct capture is still the 2.1.0 default.
 
-**Current release scope:** offline WiFi-Beacon-analysis validation is deferred
-at the user's request and no longer blocks 2.1.0. The main implementation is
-complete. Device smoke acceptance, including no differences in the radio
-before/after snapshots, is now accepted. Local release preparation uses version
-`2.1.0`; final checks and publication steps are in
-[2.1.0 release notes](release-2.1.0.md#final-release-checks). Historical
-milestone evidence below retains earlier scope and defaults; current operation
-is documented in the README and linked guides.
+The release is merged into `main` and tagged `v2.1.0` at `83f25de`; remote refs
+checked October 30, 2026 put `main` at `87b4f85`. Package metadata is 2.1.0.
+See the [release notes](release-2.1.0.md#final-release-checks) for completed checks.
+The [current roadmap](roadmap.md) governs the next phase: wlanpi-core expansion
+and default support, proposed for 2.2.0.
+
+The baseline descriptions and dated evidence below retain earlier scope,
+defaults, test counts and next steps as history. Later acceptance supersedes
+earlier pending checks; older publication tasks are complete through the tag.
+Use the README and operating guides for current behavior.
 
 **Naming accepted October 14, 2026:** use **Utilization** for app titles, FPMS,
 terminal views, and the web application at `/utilization/`. Prefer
@@ -25,6 +27,8 @@ New generated log filenames use the `utilization_` prefix; existing files stay
 in place and CSV/JSONL metric fields are unchanged.
 
 ## Release baseline and versioning
+
+This section records the start of 2.1.0 development, before the completed release.
 
 Reviewed October 14, 2026, from `50fc061` on `dev`. The working tree was clean.
 Local tags contain only `v1.0.0` Bookworm, but `git ls-remote --tags origin`
@@ -46,6 +50,8 @@ the `v2.1.0` tag for accepted release work. Recheck remote versions before
 tagging. This phase does not change the existing release tags or publish one.
 
 ## Release baseline implementation
+
+The following describes the pre-managed-session baseline, not today's runtime.
 
 `live.run_live` owns discovery, `RadioSession`, TShark or the optional Core
 transport, the ordered analyzer, survey polling, CSV/JSONL logging, and renderer
@@ -220,8 +226,8 @@ unbounded raw bytes or block decoder delivery on export/download I/O.
   **External offline analysis is deferred at the user's request and is not a
   release gate.** Local preparation is complete: metadata at 2.1.0, final
   regressions and fresh distribution-install checks pass, and release notes
-  are ready. Retain the offline workflow below for later testing;
-  merge/tag/publication follows as a separate action.
+  are ready. The release was subsequently merged into main and tagged v2.1.0.
+  Retain the offline workflow below for later testing.
 
 ## WiFi Beacon analysis end to end check
 
@@ -256,6 +262,12 @@ class/bin summaries need not equal Utilization's latest-beacon one-second
 display. A file opening successfully is only the first part of this check.
 
 ## Evidence and remaining decisions
+
+**Historical development log.** Entries record what was known at each stage;
+their pending tasks and provisional defaults are superseded by later acceptance
+and the [current roadmap](roadmap.md). In particular, earlier requirements for
+external offline analysis were deferred before release, and merge/tag work was
+completed after release preparation.
 
 **Milestone 1 complete October 14, 2026.** `beacon_live/runtime.py` provides
 `LiveSessionConfig`, `ManagedRuntime`, read-only consumers, and immutable
@@ -1308,6 +1320,14 @@ are checked as part of preparation.
 Builds are under `dist/` with `SHA256SUMS`; generated distributions stay ignored
 by Git. The source distribution supports building the wheel without a checkout.
 Remote inspection found `dev` at `f0e1692` and `main`/`v2.0.0` at `5c6cb09`,
-with no v2.1.0 tag. Remaining publication work is to commit the prepared changes,
-merge the accepted release into main, and tag/publish v2.1.0 on that commit.
-No branch push, merge, tag or external release is performed by preparation.
+with no v2.1.0 tag at that preparation stage. Preparation itself did not push,
+merge, tag or publish an external release.
+
+## Release refs and next phase updated October 30, 2026
+
+Remote refs now confirm v2.1.0 at `83f25de` and main at `87b4f85`; the earlier
+merge/tag tasks are complete. GitHub release assets and PyPI publication are
+separate from this ref check. The next phase is wlanpi-core expansion and
+default support, proposed for 2.2.0. Follow the [current roadmap](roadmap.md)
+for its milestones, support contract and acceptance gates. No Core default or
+package version is changed by this documentation update.

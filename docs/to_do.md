@@ -1,7 +1,30 @@
-Current release scope and acceptance are in [2.1.0 release notes](release-2.1.0.md)
-and the [managed runtime roadmap](managed-runtime-roadmap.md). This file retains
-older ideas/status, not current operating instructions. External offline beacon
-analysis is deferred beyond the 2.1.0 release checks at the user's request.
+# Utilization idea backlog
+
+The [current roadmap](roadmap.md) governs the next phase: wlanpi-core expansion
+and default support, proposed for 2.2.0. The [2.1.0 release notes](release-2.1.0.md)
+and [managed runtime history](managed-runtime-roadmap.md) record completed scope
+and acceptance. External offline beacon analysis remains deferred.
+
+## Open ideas beyond the Core phase
+
+- Clarify which metric selects each display's reporting BSSID, including colors.
+- Add noise/SNR only with suitable adapter support and device validation.
+- Expand vendor/AP/radio identification using representative captures.
+- Add a TUI screenshot to the README.
+- Expand live CLI support for other Linux distributions and macOS; replay already
+  works without WLAN Pi hardware.
+- Investigate an accurate OBSS count without channel scanning.
+- Continue startup/cadence and sustained-load measurements. October 23 Pi 4/5
+  speedtests reported no significant display delay; the older October 14
+  observation below is not the latest acceptance result. Controlled Core/direct
+  measurements are included in the new phase.
+
+## Historical numbered notes
+
+Original ideas and DONE/CANCELLED statuses follow for traceability. The wording
+includes superseded names, defaults and metric proposals; use current operating
+and metric documentation for actual behavior. Completed release checks are not
+reopened by these notes.
 
 Features & changes
 
@@ -122,7 +145,8 @@ Features & changes
         Compare the same adapter, channel/width and display/logging settings;
         measure capture-to-display delay, decoded frame rate, CPU, buffering
         and available drop evidence. Keep the single pipeline and retry timing
-        rules. This observation does not change the agreed direct default.
+        rules. At that stage the default remained direct; the current roadmap
+        now targets Core expansion and default support after acceptance.
 37. DONE    normalize TShark hex SSIDs to readable strings where possible.
         Readable SSIDs confirmed on the device; hidden/Unicode/non-text cases
         remain final release coverage. See trixie-roadmap.md.

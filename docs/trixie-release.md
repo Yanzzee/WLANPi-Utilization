@@ -2,8 +2,11 @@
 
 This records the earlier 2.0.0 migration/release work. Use the
 [2.1.0 release notes and checks](release-2.1.0.md) for current managed-session,
-web and export behavior. Historical Display/left-exit instructions below
-describe the former standalone runtime.
+web and export behavior, and the [current roadmap](roadmap.md) for the next
+Core expansion/default phase. The v2.0.0 and v2.1.0 tags now exist. Acceptance,
+publication next steps and backend decisions below are historical; they do not
+reopen completed releases or govern the next phase. Historical Display/left-exit
+instructions describe the former standalone runtime.
 
 This migration targets WLAN Pi OS 26.10 DeadEye / Debian 13, Python 3.13,
 TShark 4.4, and the FPMS 1.4.24 menu layout. Utilization v1.0.0 Bookworm remains
@@ -130,9 +133,10 @@ documented follow-ups. Tagging/publishing a release remains a separate step.
   Installed Core capture now has its own client dependency and an opt-in FPMS
   setting (`--fpms-backend core`); basic installed-path checks were reported
   successful on October 14, with broader acceptance pending. Further
-  Core expansion is a separate optional follow-up, with no default migration
-  scheduled. Its current backend is owner-only and still needs local radio
-  safety/restoration; the guard is not a system-wide broker used by all tools.
+  Core expansion was an optional follow-up in this release; the
+  [current roadmap](roadmap.md) now targets default support. The 2.1.0 backend
+  is owner-only and still needs local radio safety/restoration; the guard is not
+  a system-wide broker used by all tools.
   See [the backend decision and optional acceptance](core-capture-evaluation.md).
 - **High-utilization display performance:** the October 14 device report notes
   some direct-capture display lag while Core/API display appeared unaffected.

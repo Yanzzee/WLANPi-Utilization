@@ -2,7 +2,10 @@
 
 These notes describe the 2.1.0 release. Package metadata is aligned at `2.1.0`.
 Device smoke acceptance is complete for the agreed scope; external offline
-analysis remains deferred. Repository merge/tag/publication are separate steps.
+analysis remains deferred. The release is merged into `main` and tagged
+[`v2.1.0`](https://github.com/Yanzzee/WLANPi-Utilization/tree/v2.1.0) at `83f25de`,
+confirmed from remote refs October 30, 2026. The next phase is
+[Core expansion and default support](roadmap.md); 2.1.0 still defaults to direct.
 
 ## What changes
 
@@ -121,11 +124,10 @@ The [restoration procedure](pi_testing.md#quick-final-radio-restoration-check)
 remains available for future regressions. Final preparation verifies tests,
 distribution contents, fresh installation/replay and version consistency.
 
-For publication, merge the accepted release commit from `dev` into `main`,
-then create `v2.1.0` on that exact commit and use these notes for the release.
-Remote review found only `v1.0.0` and `v2.0.0`; `main` still points to v2.0.0.
-Recheck remote state before publishing. This preparation does not push a branch,
-create a remote tag or publish a GitHub/PyPI release.
+The release merge/tag steps are complete: remote `v2.1.0` points to `83f25de`
+and `main` has advanced to `87b4f85`. These refs do not establish publication
+of GitHub release assets or a PyPI package. Future releases should tag their
+exact accepted commit after the corresponding checks, without moving v2.1.0.
 
 ## Distribution artifacts
 

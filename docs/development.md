@@ -1,8 +1,9 @@
 # Development Guide
 
-Package metadata is aligned at `2.1.0` for this release. Follow the
-[release checks](release-2.1.0.md#final-release-checks)
-and [managed runtime roadmap](managed-runtime-roadmap.md) for scope/evidence.
+Package metadata remains `2.1.0`. The [current roadmap](roadmap.md) defines
+the next phase, Core expansion and default support, proposed for 2.2.0.
+Use the [release checks](release-2.1.0.md#final-release-checks)
+and [managed runtime history](managed-runtime-roadmap.md) for completed evidence.
 External WiFi-Beacon-analysis validation is deferred and does not block 2.1.0.
 
 This guide is for contributors and future Codex runs. Read
@@ -114,11 +115,11 @@ the application package; `--wheel-dir` supports offline runtime installation.
 Copied CLI entrypoints have a main guard so Core's spawn worker can import them
 without relaunching capture. The FPMS backend choice is independent of the
 standard CLI's direct default; see [Core installed-path testing](core-capture-evaluation.md#test-the-installed-core-path).
-Direct capture remains the recommended CLI/FPMS default. Core is an optional
-integration path, and passing its tests does not schedule a default migration.
-Use Core's device information/control APIs where they simplify integration;
-subscription and broader Core acceptance are separate follow-ups. See
-[the backend decision](core-capture-evaluation.md).
+Direct capture is the 2.1.0 default; Core remains opt-in in the current code.
+The [next-phase roadmap](roadmap.md) targets Core as the supported WLAN Pi default
+after capability, lifecycle and subscription acceptance. Keep the local radio
+guard until equivalent Core services exist. The [Core evaluation](core-capture-evaluation.md)
+records the existing backend and pinned upstream gaps.
 
 ## Repository map
 
@@ -266,6 +267,10 @@ See [logging.md](logging.md) for the public contract.
 ## Documentation ownership
 
 - `README.md`: concise user overview, installation, operation.
+- `docs/roadmap.md`: current status, next-phase decisions and acceptance gates.
+- `docs/managed-runtime-roadmap.md`: completed 2.1.0 plan and dated evidence.
+- `docs/trixie-roadmap.md`: completed Trixie migration and dated evidence.
+- `docs/core-capture-evaluation.md`: Core integration details and pinned findings.
 - `docs/architecture.md`: source-of-truth constraints and phase history.
 - `docs/screens.md`: metric and selection reference.
 - `docs/logging.md`: logging contract and safety policy.

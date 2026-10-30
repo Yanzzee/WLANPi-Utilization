@@ -2,7 +2,8 @@
 
 **2.1.0** adds one managed capture session shared by web, CLI and FPMS,
 authenticated WLAN Pi Apps access, a Hosts table, and beacon-only pcapng export.
-See the [2.1.0 release notes and final checks](docs/release-2.1.0.md).
+See the [2.1.0 release notes](docs/release-2.1.0.md). The next phase is
+[wlanpi-core expansion and default support](docs/roadmap.md), proposed for 2.2.0.
 
 Utilization is a live 802.11 beacon and channel analyzer for WLAN Pi
 hardware. It uses one fixed capture definition for the run: 20 MHz by default
@@ -80,11 +81,12 @@ It also installs the pinned Core WebSocket client (`websockets 15.0.1`) into
 the app environment. This downloads a runtime wheel on first installation;
 for an offline Pi, pass `--wheel-dir DIRECTORY` containing a compatible wheel.
 
-**Direct capture is the recommended default** for the standalone CLI and FPMS
-application. Core is an optional backend for remote integration and future
-compatible stream sharing; passing Core tests does not schedule a default
-change. The current Core backend is owner-only and still uses local radio safety
-and restoration. See [the backend decision](docs/core-capture-evaluation.md).
+**Direct capture is the 2.1.0 default.** The next phase targets Core as the
+default on supported WLAN Pi installations after compatibility, lifecycle and
+sharing acceptance. This planned change is not enabled yet. The current Core
+backend is an explicit opt-in, is owner-only and still uses local radio safety
+and restoration. See the [current roadmap](docs/roadmap.md) and
+[Core support and acceptance](docs/core-capture-evaluation.md).
 To opt FPMS into Core capture:
 
 ```bash
@@ -151,7 +153,7 @@ After installation, check TShark decoding without opening a radio:
 
 For installation or capture failures, collect a diagnostic bundle from this
 checkout with `sudo ./scripts/pi_collect_debug.sh`. See the
-[2.1.0 release checks](docs/release-2.1.0.md) for tested behavior, remaining
+[2.1.0 release notes](docs/release-2.1.0.md) for tested behavior, remaining
 hardware validation, and known follow-ups.
 
 SSID bytes from TShark are decoded once before analysis. Printable UTF-8 names
@@ -553,19 +555,20 @@ before copying the application into `/opt/wlanpi-beacon-live`.
 
 ## Documentation
 
+- [Current roadmap](docs/roadmap.md) — completed baseline, proposed 2.2.0 Core
+  expansion/default milestones, acceptance gates and later radio API work.
 - [2.1.0 release notes](docs/release-2.1.0.md) — changes, upgrade behavior,
-  limitations, deferred offline analysis and final release checks.
-- [Managed runtime roadmap](docs/managed-runtime-roadmap.md) — v2.1.0 plan for
-  shared web/CLI/FPMS sessions and beacon pcapng export, acceptance evidence and
-  deferred follow-ups.
+  limitations, deferred offline analysis and completed release checks.
+- [Managed runtime history](docs/managed-runtime-roadmap.md) — completed v2.1.0
+  milestones for shared sessions and beacon export, with acceptance evidence.
 - [Web interface](docs/web-interface.md) — installation, shared-session controls,
   closed log downloads, and browser acceptance checks.
 - [Beacon pcapng export](docs/beacon-export.md) — live/offline controls, packet
   fidelity, rotation/retention limits, storage isolation and device acceptance.
 - [Busy-channel validation](docs/busy-channel-validation.md) — corrupt-frame
   identity guards, capture-quality evidence, and Pi performance/retest steps.
-- [Trixie roadmap](docs/trixie-roadmap.md) — ordered compatibility milestones
-  and acceptance checks for WLAN Pi OS 26.10 DeadEye.
+- [Trixie history](docs/trixie-roadmap.md) — completed compatibility milestones
+  and reusable acceptance checks for WLAN Pi OS 26.10 DeadEye.
 - [Architecture](docs/architecture.md) — design rules, pipeline, data flow, and
   Phase 1–5 history.
 - [Screen reference](docs/screens.md) — screen metrics, navigation, BSSID

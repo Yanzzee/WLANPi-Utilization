@@ -90,9 +90,8 @@ The phy lock is advisory and currently shared only by Utilization. External
 tools can still start or retune after preflight; avoid starting another tool on
 that radio during capture. Core already exposes an authenticated capture
 WebSocket with one owner and read-only subscribers; the current direct backend
-does not participate in that session manager. Direct capture is the recommended
-default for the standalone CLI and FPMS application. Core integration remains
-optional; successful Core acceptance alone does not trigger a default change.
+does not participate in that session manager. Direct capture is the 2.1.0
+default; Core remains an explicit opt-in in the current implementation.
 An explicit `--capture-backend core` owner prototype now delegates one fixed,
 unfiltered capture to Core and decodes its PCAPNG through `tshark -r -` into
 this same analyzer. It verifies Core's source/namespace and actual tuning,
@@ -100,10 +99,12 @@ keeps transport/JWT state in a spawn worker, and stops Core before guarded
 local radio restoration. The initial prototype supports 20/80 MHz. FPMS defaults
 to direct capture, with a persistent opt-in Core setting; the standard CLI
 selects Core only with an explicit backend flag. Compatible read-only
-subscription is future work. See [the backend decision and optional acceptance](core-capture-evaluation.md).
+subscription is future work. See [Core support and acceptance](core-capture-evaluation.md).
 Use Core's device information/control APIs where they simplify integration.
-A future capture-default change requires a concrete sharing/integration need or
-improved upstream lifecycle support, a separate decision, and device acceptance.
+The [current roadmap](roadmap.md) targets Core expansion and default support in
+the next phase, with compatibility, lifecycle and sharing acceptance before
+changing defaults. Complete API-managed radio operation is a separate upstream
+track; the local guard remains until equivalent services are accepted.
 Core's shipped API coordinates its own capture clients, rather than every tool
 on the system, and does not restore prior tuning. SIGKILL,
 power loss, and driver/device failure cannot guarantee restoration; cleanup
@@ -541,7 +542,8 @@ See [development.md](development.md) for setup and test commands.
 
 ## Phase history
 
-The phase structure remains the project roadmap and implementation history.
+These phases record the original implementation history. The active release
+plan and next-phase acceptance gates are in the [current roadmap](roadmap.md).
 
 ### Phase 1 — shared rolling snapshot
 

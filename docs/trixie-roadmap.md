@@ -1,5 +1,11 @@
 # WLAN Pi Trixie Compatibility Roadmap
 
+**Completed migration history.** All eight main milestones are complete and
+v2.0.0 is tagged; the subsequent managed-runtime release is tagged v2.1.0.
+The [current roadmap](roadmap.md) now governs Core expansion and default support.
+The dated decisions and acceptance steps below describe the migration baseline;
+their release-publication tasks and direct-default decision are historical.
+
 Target WLAN Pi OS 26.10 DeadEye on Debian 13 Trixie, with Python 3.13,
 TShark 4.4, and FPMS 1.4.24. Utilization v1.0.0 Bookworm remains the previous
 release; future work does not need to preserve Bookworm compatibility.
@@ -8,16 +14,16 @@ Implement and test one item at a time, in the order below. Mark an item complete
 after its automated checks and applicable on-device acceptance checks pass.
 Record the tested OS, package versions, adapter, and result with each item.
 
-**Backend decision accepted October 14, 2026:** keep direct capture as the
-recommended CLI/FPMS default. Retain Core as an explicit optional backend for
-remote integration and future compatible sharing. Core acceptance does not
-trigger a default migration. Complete the direct-backend final release checks;
-optional Core expansion and the performance comparison below are separate work.
+**Historical backend decision, October 14, 2026:** direct capture remained the
+recommended CLI/FPMS default for the migration release, with Core optional.
+Core acceptance alone did not schedule a default migration in that phase.
+The October 30 [current roadmap](roadmap.md) now schedules Core expansion and
+default support after its acceptance gates pass.
 
 **Merge acceptance October 14, 2026:** the user reports sufficient device
-testing and confidence to merge the current version into `main`. The final
-local regression run passed 624 tests with one skip. Commit the remaining
-documentation updates with the merge; release tagging/publication is separate.
+testing and confidence to merge that version into `main`. The final local
+regression run passed 624 tests with one skip. The migration release was later
+merged and tagged v2.0.0; managed-runtime v2.1.0 followed.
 
 ## Milestones
 
@@ -206,7 +212,8 @@ documentation updates with the merge; release tagging/publication is separate.
   includes lifecycle/failure cases, bonded-width and saved-packet comparisons.
   Compatible read-only subscription is future work; the current backend is
   owner-only. Core errors must not silently start direct capture. These follow-ups
-  do not schedule a default migration or block the direct-backend release.
+  did not block the direct-backend release. They now feed the Core expansion
+  and default-support phase in the [current roadmap](roadmap.md).
   See [the evaluation, evidence and optional acceptance](core-capture-evaluation.md).
 
 - [ ] **High-utilization display performance.** On October 14, the user observed
