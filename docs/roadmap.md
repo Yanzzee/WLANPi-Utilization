@@ -1,9 +1,9 @@
 # Utilization roadmap
 
 Updated October 30, 2026. The next phase is **wlanpi-core expansion and default
-support**. Its proposed release target is **2.2.0**. The shipped application
-remains at 2.1.0 with direct capture as its default until the implementation and
-acceptance gates below are complete.
+support**. Its proposed release target is **2.2.0**; implementation now uses
+`2.2.0.dev0`. The released baseline is 2.1.0. Direct capture remains the default
+until the implementation and acceptance gates below are complete.
 
 ## Completed baseline
 
@@ -14,8 +14,8 @@ External WiFi-Beacon-analysis validation remains deferred.
 
 Remote refs checked October 30 confirm `v2.1.0` at `83f25de` and `main` at
 `87b4f85`, after the release merge. A Git tag does not establish GitHub release
-assets or PyPI publication. Package metadata remains 2.1.0; no version bump is
-part of this documentation update.
+assets or PyPI publication. Development package metadata is now aligned at
+2.2.0.dev0; the tagged 2.1.0 baseline is unchanged.
 
 Use the [2.1.0 release notes](release-2.1.0.md) for delivered behavior, the
 [managed runtime history](managed-runtime-roadmap.md) for implementation and
@@ -28,8 +28,8 @@ superseded by this roadmap.
 Use **2.2.0** for expanded Core support and the default transition while
 preserving explicit direct capture, existing commands/configuration and metric
 contracts. This is a minor feature release under
-[Semantic Versioning](https://semver.org/). When implementation begins, align
-`pyproject.toml`, `setup.py` and `beacon_live.__version__` at `2.2.0.dev0`; use
+[Semantic Versioning](https://semver.org/). `pyproject.toml`, `setup.py` and
+`beacon_live.__version__` now agree at `2.2.0.dev0`; use
 `2.2.0rc1` for release-candidate device acceptance and `2.2.0` for the accepted
 release. Reassess major-version requirements if the scope removes supported
 commands, configuration or direct operation.
@@ -63,8 +63,9 @@ upstream references are in the [Core evaluation](core-capture-evaluation.md).
 
 ## Ordered Core milestones
 
-All implementation milestones below are pending. Documentation of the direction
-does not enable a new backend default.
+Milestone 1 has a reviewed source contract, CI implementation and device matrix.
+Current-image inventory remains pending; milestones 2–6 remain unimplemented.
+No backend default has changed.
 
 Every milestone preserves the [architecture rules](../AGENTS.md): one capture
 and analyzer, shared immutable snapshots and 120-second history, automatic BSSID
@@ -75,18 +76,26 @@ Consumers continue rendering published metrics without independent aggregation.
 ### 1 Establish the supported Core contract
 
 - [ ] Verify the installed Core/API version and shipped capture protocol; record
-  a minimum supported version and tested revisions. The existing evaluation is
-  pinned to Core 2.4.8, not a promise about later versions.
-- [ ] Define supported interfaces, namespaces, bands, primary channels, widths,
+  a minimum supported version and tested revisions. **Source review complete:**
+  [support contract](core-support.md) records the 2.4.8-1 device-tested floor and
+  current `63c5e7e` source review. Installed-image inventory/probe is still pending.
+- [x] Define supported interfaces, namespaces, bands, primary channels, widths,
   centers, credentials/certificate handling, and local radio responsibilities.
   Use available capability data and explicit tested limits rather than assuming
   a version number guarantees support.
-- [ ] Establish repeatable CI for hardware-free parser/analyzer, owner transport,
+- [x] Establish repeatable CI for hardware-free parser/analyzer, owner transport,
   broker and web tests. Identify required tools so optional integration skips
   are visible rather than counted as acceptance.
-- [ ] Record a device matrix: Pi model, OS/Core/FPMS/WebUI/TShark versions,
+- [x] Record a device matrix: Pi model, OS/Core/FPMS/WebUI/TShark versions,
   adapter/driver, namespace, band/primary/width/centers, controls exercised,
   restoration result and retained evidence.
+
+The [support contract](core-support.md) distinguishes upstream API availability
+from app support and physical acceptance. The [device matrix](core-device-matrix.md)
+preserves prior limited evidence and supplies the current-image inventory steps
+and run record. CI is defined in `.github/workflows/ci.yml` and uses
+`scripts/run_ci.py`; local validation is recorded in the support contract. Its
+first hosted GitHub execution remains pending a push/PR.
 
 **Exit:** an explicit support matrix and repeatable baseline distinguish app
 work from upstream Core requirements. No new metric or display is prerequisite.

@@ -7,7 +7,8 @@ normal radio restoration. External WiFi-Beacon-analysis validation remains
 deferred. Direct capture is still the 2.1.0 default.
 
 The release is merged into `main` and tagged `v2.1.0` at `83f25de`; remote refs
-checked October 30, 2026 put `main` at `87b4f85`. Package metadata is 2.1.0.
+checked October 30, 2026 put `main` at `87b4f85`. Release metadata was 2.1.0;
+development now uses 2.2.0.dev0 for the next phase.
 See the [release notes](release-2.1.0.md#final-release-checks) for completed checks.
 The [current roadmap](roadmap.md) governs the next phase: wlanpi-core expansion
 and default support, proposed for 2.2.0.
@@ -1329,5 +1330,6 @@ Remote refs now confirm v2.1.0 at `83f25de` and main at `87b4f85`; the earlier
 merge/tag tasks are complete. GitHub release assets and PyPI publication are
 separate from this ref check. The next phase is wlanpi-core expansion and
 default support, proposed for 2.2.0. Follow the [current roadmap](roadmap.md)
-for its milestones, support contract and acceptance gates. No Core default or
-package version is changed by this documentation update.
+for its milestones, support contract and acceptance gates. The subsequent
+milestone 1 implementation aligns development metadata at 2.2.0.dev0; direct
+capture remains the default.

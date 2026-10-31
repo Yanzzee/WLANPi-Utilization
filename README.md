@@ -4,6 +4,8 @@
 authenticated WLAN Pi Apps access, a Hosts table, and beacon-only pcapng export.
 See the [2.1.0 release notes](docs/release-2.1.0.md). The next phase is
 [wlanpi-core expansion and default support](docs/roadmap.md), proposed for 2.2.0.
+Development builds now identify as `2.2.0.dev0`; the Core default transition is
+still pending acceptance.
 
 Utilization is a live 802.11 beacon and channel analyzer for WLAN Pi
 hardware. It uses one fixed capture definition for the run: 20 MHz by default
@@ -557,6 +559,10 @@ before copying the application into `/opt/wlanpi-beacon-live`.
 
 - [Current roadmap](docs/roadmap.md) — completed baseline, proposed 2.2.0 Core
   expansion/default milestones, acceptance gates and later radio API work.
+- [Core support contract](docs/core-support.md) — reviewed API versions, source
+  and channel boundary, authentication and local radio responsibilities.
+- [Core device matrix](docs/core-device-matrix.md) — existing physical evidence,
+  pending installed-image checks and the run-record template.
 - [2.1.0 release notes](docs/release-2.1.0.md) — changes, upgrade behavior,
   limitations, deferred offline analysis and completed release checks.
 - [Managed runtime history](docs/managed-runtime-roadmap.md) — completed v2.1.0

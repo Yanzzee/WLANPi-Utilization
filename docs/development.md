@@ -1,7 +1,7 @@
 # Development Guide
 
-Package metadata remains `2.1.0`. The [current roadmap](roadmap.md) defines
-the next phase, Core expansion and default support, proposed for 2.2.0.
+Development metadata is aligned at `2.2.0.dev0`; 2.1.0 is the released baseline.
+The [current roadmap](roadmap.md) defines Core expansion and default support.
 Use the [release checks](release-2.1.0.md#final-release-checks)
 and [managed runtime history](managed-runtime-roadmap.md) for completed evidence.
 External WiFi-Beacon-analysis validation is deferred and does not block 2.1.0.
@@ -167,6 +167,29 @@ history.
 
 ## Test strategy
 
+The GitHub workflow `.github/workflows/ci.yml` runs the complete hardware-free
+baseline in Debian Trixie with Python 3.13, TShark, Nginx, OpenSSL and Node. It
+installs `.[dev,web,core]` in a venv, checks actual TShark fixture decoding, runs
+all pytest cases and simulated-DOM frontend checks, and uploads environment
+versions, JUnit results and synthetic UI fixtures. It needs no WLAN hardware,
+Core server or credentials. Core transport tests use a loopback mock server.
+
+Run the same gate locally in an isolated environment with those tools installed:
+
+```bash
+python scripts/run_ci.py
+```
+
+The gate requires TShark 4.4+, the pinned websockets 15.0.1, Nginx with TLS and
+`http_auth_request`, OpenSSL and Node. Existing `WLANPI_TEST_TSHARK` and
+`UTILIZATION_TEST_NGINX` overrides select tools outside PATH. Any skipped pytest
+case fails this CI gate, including missing required modules or fewer than the
+four Core transport cases. Ordinary developer pytest retains optional skips.
+Results default to ignored `build/ci`; `--output DIRECTORY` selects another
+location. Frontend checks validate logic, not rendered-browser layout. See the
+[Core support contract](core-support.md) and [physical acceptance matrix](core-device-matrix.md)
+for the distinction between host and installed-device evidence.
+
 Run the full suite before handing off a behavior change:
 
 ```bash
@@ -271,6 +294,8 @@ See [logging.md](logging.md) for the public contract.
 - `docs/managed-runtime-roadmap.md`: completed 2.1.0 plan and dated evidence.
 - `docs/trixie-roadmap.md`: completed Trixie migration and dated evidence.
 - `docs/core-capture-evaluation.md`: Core integration details and pinned findings.
+- `docs/core-support.md`: declared Core contract and reviewed revisions.
+- `docs/core-device-matrix.md`: physical evidence, pending cases and run records.
 - `docs/architecture.md`: source-of-truth constraints and phase history.
 - `docs/screens.md`: metric and selection reference.
 - `docs/logging.md`: logging contract and safety policy.

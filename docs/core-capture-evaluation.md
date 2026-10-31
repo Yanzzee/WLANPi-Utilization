@@ -11,6 +11,12 @@ the completed Trixie/2.1.0 baseline. Its requirement for another decision before
 scheduling migration is superseded by the new phase. The pinned findings and
 device evidence below remain useful; they are not claims of later Core support.
 
+The [support contract](core-support.md) now records the minimum device-tested
+baseline and October 30 review of Core revision `63c5e7e` (changelog 2.4.13).
+Use it for the current declared boundary and the
+[device matrix](core-device-matrix.md) for installed-image acceptance. The
+original 2.4.8 findings below remain pinned historical evidence.
+
 Core's [architecture](https://github.com/WLAN-Pi/wlanpi-core/blob/7e858ff40e9bc522aa881c479580362a3dd679e3/ARCHITECTURE.md)
 centralizes device information and control for local consumers, including FPMS
 and CLI tools, as well as remote consumers. Use those APIs where they simplify

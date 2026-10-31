@@ -1,0 +1,45 @@
+name: Hardware-free baseline
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: baseline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trixie:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container: debian:trixie-slim
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - name: Install Trixie test tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git python3 python3-venv tshark nginx openssl nodejs
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install isolated application and test dependencies
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -e '.[dev,web,core]'
+      - name: Check decoder, full regression and frontend logic
+        run: .venv/bin/python scripts/run_ci.py
+      - name: Preserve versions and test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trixie-baseline
+          path: build/ci/
+          if-no-files-found: warn
+          retention-days: 14
